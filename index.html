@@ -163,6 +163,14 @@
   details.grp[open] > summary::before { content: "▾"; }
   details.grp > .body { padding-top: 12px; }
 
+  .xrow {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    gap: 8px 10px; padding: 10px 0; border-top: 1px solid var(--grid);
+  }
+  .xrow:first-child { border-top: none; padding-top: 2px; }
+  .xrow button.del { width: 100%; }
+  .xrow button.del:hover { border-color: var(--critical); color: var(--critical); background: rgba(208,59,59,.08); }
+
   .hint { font-size: 11.5px; color: var(--muted); margin: 8px 0 0; }
   .hint code { background: var(--surface-2); padding: 1px 4px; border-radius: 4px; font-size: 11px; }
 
@@ -216,6 +224,7 @@
   td.tot { font-weight: 600; }
   td.zero { color: var(--muted); opacity: .45; }
   td.hot { background: var(--hot); box-shadow: inset 2px 0 0 var(--warning); }
+  td.xfer { box-shadow: inset 2px 0 0 var(--accent); }
   tbody tr:hover td.hot { background: var(--hot); }
   .flag { color: var(--critical); font-weight: 700; cursor: help; }
   .yr { color: var(--text-secondary); }
@@ -349,14 +358,23 @@
       </div>
     </details>
 
-    <details class="grp">
-      <summary>ISA → 연금저축 전환 (만기 이전)</summary>
+    <details class="grp" id="xferPanel">
+      <summary>계좌 간 이전 — 납입한도와 무관</summary>
       <div class="body">
-        <div class="fgrid">
-          <label class="f"><span class="t">전환 연도 (0=안 함)</span><input type="number" id="cfg_isaMoveYear"></label>
-          <label class="f"><span class="t">전환액 (0=전액)</span><input type="number" step="100" id="cfg_isaMoveAmt"></label>
+        <div id="xferRows"></div>
+        <div class="btnrow" style="margin-top:10px">
+          <button type="button" id="btnAddXfer">+ 이전 추가</button>
+          <button type="button" id="btnPresetIsa">ISA 풍차돌리기 예시 넣기</button>
         </div>
-        <p class="hint">ISA 만기 자금을 60일 내 연금계좌로 옮기면 <strong>전환금액의 10%(최대 300만원)</strong>를 추가로 세액공제받습니다. 전환된 원금은 「연금저축·비과세용」 계좌의 비과세 원금으로, 공제받은 10%만 과세 원금으로 잡힙니다.</p>
+        <p class="hint">
+          계좌를 합치거나 옮기는 것은 <strong>납입이 아니라 이체</strong>라서 연 납입한도에 걸리지 않습니다.
+          IRP 투자용을 연금저축으로 합치거나, ISA 만기 자금을 세액공제 안 받는 연금저축으로 넘길 때 여기에 적으세요 — 표의 「납입」 칸에 적으면 한도 초과 경고가 뜹니다.
+          금액을 <strong>0으로 두면 전액</strong>이고, <strong>주기</strong>를 쓰면 그 간격으로 되풀이됩니다(ISA 3년 만기를 굴리는 풍차돌리기는 주기 3).
+        </p>
+        <p class="hint">
+          <strong>ISA → 연금계좌</strong>는 전환금액의 10%(최대 300만원)를 추가 세액공제받고, 그 10%만 과세 원금이 됩니다. 나머지는 비과세 원금으로 들어갑니다.
+          <strong>연금계좌끼리</strong>는 계좌이체로 보아 자금 성격(비과세 원금·세액공제 원금·퇴직 재원·운용수익)이 그대로 따라갑니다.
+        </p>
       </div>
     </details>
   </section>
@@ -494,7 +512,7 @@ function defaultState() {
     sevRate: 3.0, compRate: 16.5,
     taxType: "domestic", divRate: 2.0,
     npsAmount: 0, npsAge: 65, npsRate: 3.0,
-    isaMoveYear: 0, isaMoveAmt: 0,
+    transfers: [],
     allowPenalty: 0, planTarget: null,
     rates: {}, limits: {}, fillAmts: {},
   };
@@ -554,6 +572,26 @@ const num = v => { const n = parseFloat(String(v).replace(/,/g, "")); return isF
 /* ========================================================================
    시뮬레이션 엔진
    ======================================================================== */
+/**
+ * 해당 연도에 실행되는 이전 규칙을 고른다.
+ * {year, until, every} 로 주기 반복을 표현하므로 ISA 풍차돌리기(3년마다 만기 전환)처럼
+ * 같은 이동이 여러 해 되풀이되는 경우를 한 줄로 적을 수 있다.
+ */
+function activeTransfers(cfg, y) {
+  const out = [];
+  for (const t of (cfg.transfers || [])) {
+    if (!t || !t.from || !t.to) continue;
+    const start = +t.year || 0;
+    if (!start || y < start) continue;
+    const end = (+t.until || 0) >= start ? +t.until : start;
+    if (y > end) continue;
+    const every = Math.max(1, +t.every || 1);
+    if ((y - start) % every !== 0) continue;
+    out.push({ from: t.from, to: t.to, amt: clamp0(+t.amt) });
+  }
+  return out;
+}
+
 function emptyBuckets() { return { free: 0, ded: 0, sev: 0, gain: 0 }; }
 const bTotal = b => b.free + b.ded + b.sev + b.gain;
 const cloneBal = bal => Object.fromEntries(AID.map(id => [id, { ...bal[id] }]));
@@ -816,42 +854,64 @@ function simulate(opts = {}) {
     if (cfg.timing === "begin") { contribute(); grow(); }
     else { grow(); contribute(); }
 
-    // ---- ISA → 연금저축 전환
-    if (cfg.isaMoveYear === y) {
-      const isa = st.bal.isa;
-      const avail = bTotal(isa);
-      const move = cfg.isaMoveAmt > 0 ? Math.min(cfg.isaMoveAmt, avail) : avail;
-      if (move > 0) {
-        const gainShare = avail > 0 ? isa.gain * (move / avail) : 0;
-        const principalShare = move - gainShare;
+    // ---- 수령 요건 (나이·가입기간만으로 결정되므로 이전보다 먼저 판정한다)
+    const eligible = {};
+    for (const id of PENSION) {
+      const need5 = byId[id].sev ? 0 : 5;
+      eligible[id] = age >= 55 && (openYear[id] ? y - openYear[id] >= need5 : false);
+    }
+
+    // ---- 계좌 간 이전 — 납입이 아니므로 연 납입한도와 무관하다
+    let extraCredit = 0;
+    for (const t of activeTransfers(cfg, y)) {
+      const src = st.bal[t.from], dst = st.bal[t.to];
+      const from = byId[t.from], to = byId[t.to];
+      if (!src || !dst || t.from === t.to) continue;
+      const avail = bTotal(src);
+      const move = Math.min(t.amt > 0 ? t.amt : avail, avail);
+      if (move <= 0.5) continue;
+      const k = move / avail;
+      const label = `${from.name} → ${to.name}`;
+
+      if (from.kind === "isa") {
+        // ISA 만기자금 전환 — 순이익은 비과세 한도 차감 후 9.9%,
+        // 전환금액의 10%(최대 300만)를 추가 세액공제받고 그만큼만 과세 원금이 된다
+        const gainShare = src.gain * k, principalShare = move - gainShare;
         const cap = cfg.isaType === "seomin" ? 400 : 200;
         const exempt = Math.min(gainShare, Math.max(0, cap - st.isaUsed));
         st.isaUsed += exempt;
-        const isaTaxOnMove = (gainShare - exempt) * .099;
-        isa.gain -= gainShare; isa.free -= principalShare;
+        const tax = (gainShare - exempt) * .099;
+        src.gain -= gainShare; src.free -= principalShare;
         const extraDed = Math.min(move * .1, 300);
-        const dst = st.bal.psFree;
-        dst.ded += extraDed; dst.free += move - extraDed - isaTaxOnMove;
-        if (!openYear.psFree) openYear.psFree = y;
-        rec.isaMove = { move, extraDed, tax: isaTaxOnMove };
-        cumCredit += extraDed * (cfg.salaryTier === "low" ? .165 : .132);
+        dst.ded += extraDed; dst.free += move - extraDed - tax;
+        extraCredit += extraDed * (cfg.salaryTier === "low" ? .165 : .132);
+        if (!openYear[t.to]) openYear[t.to] = y;
+        if (y < cfg.startYear + 3) warnings.push(`${y}년 · ${label} — ISA 의무가입 3년 전 전환이라 비과세 혜택을 받을 수 없습니다`);
+        (rec.transfers ||= []).push(`${label} ${fmt(move)}만원 · 추가 세액공제 대상 ${fmt(extraDed)}만원`);
+      } else {
+        // 연금계좌 간 계좌이체 — 자금 성격(비과세원금·공제원금·퇴직재원·수익)이 그대로 따라간다
+        for (const key of ["free", "ded", "sev", "gain"]) {
+          const v = src[key] * k; src[key] -= v; dst[key] += v;
+        }
+        if (openYear[t.from]) openYear[t.to] = Math.min(openYear[t.to] || Infinity, openYear[t.from]);
+        if (!eligible[t.from]) {
+          warnings.push(`${y}년 · ${label} — 계좌이체 특례는 만 55세 이상 + 가입 5년 경과라야 적용됩니다`
+            + `(퇴직금 재원 IRP는 5년 요건 없음). 요건 전 이체는 해지로 보아 기타소득세 16.5%가 붙습니다.`);
+        }
+        (rec.transfers ||= []).push(`${label} ${fmt(move)}만원 · 계좌이체 (자금 성격 유지)`);
       }
     }
 
     // ---- 세액공제 환급
     const creditRate = cfg.salaryTier === "low" ? .165 : .132;
-    const credit = (dedPS + dedIRP) * creditRate;
+    const credit = (dedPS + dedIRP) * creditRate + extraCredit;
     cumCredit += credit;
     rec.credit = credit;
 
-    // ---- 인출 요건 · 연금수령한도
-    const eligible = {}, pLimit = {}, pYear = {};
+    // ---- 연금수령연차 · 연금수령한도 (이전이 끝난 잔액 기준)
+    const pLimit = {}, pYear = {};
     for (const id of PENSION) {
-      const a = byId[id];
-      const need5 = a.sev ? 0 : 5;
-      const elig = age >= 55 && (openYear[id] ? y - openYear[id] >= need5 : false);
-      eligible[id] = elig;
-      if (elig) pYearCount[id] = pYearCount[id] + 1;
+      if (eligible[id]) pYearCount[id] = pYearCount[id] + 1;
       pYear[id] = pYearCount[id];
       const n = Math.min(pYearCount[id], 10);
       pLimit[id] = pYearCount[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - n) * 1.2;
@@ -1294,7 +1354,11 @@ function paintTable(sim, syncInputs) {
     ref.tax.classList.toggle("hot", !!rec.flags.over1500);
     ref.net.textContent = rec.net >= .5 ? fmt(deflate(rec.net, rec)) : "–";
     ref.net.classList.toggle("zero", rec.net < .5);
-    if (rec.credit > 0) ref.total.title = `세액공제 환급 ${fmt(rec.credit)}만원`;
+    const nt = [];
+    if (rec.credit > 0) nt.push(`세액공제 환급 ${fmt(rec.credit)}만원`);
+    if (rec.transfers) nt.push(...rec.transfers);
+    ref.total.title = nt.join("\n");
+    ref.total.classList.toggle("xfer", !!rec.transfers);
   }
 }
 
@@ -1318,8 +1382,42 @@ function buildAccCfg() {
   fw.querySelectorAll("[data-fill]").forEach(i => i.addEventListener("input", () => { state.cfg.fillAmts[i.dataset.fill] = num(i.value); }));
 }
 
+/* ---- 계좌 간 이전 편집기 ---- */
+const XFER_FROM = ACC.filter(a => a.kind === "isa" || a.kind === "pension");
+const XFER_TO = ACC.filter(a => a.kind === "pension");
+
+function renderXfers() {
+  const box = document.getElementById("xferRows");
+  const list = state.cfg.transfers;
+  if (!list.length) {
+    box.innerHTML = `<p class="hint" style="margin:0">등록된 이전이 없습니다.</p>`;
+    return;
+  }
+  const opt = (arr, sel) => arr.map(a => `<option value="${a.id}"${a.id === sel ? " selected" : ""}>${a.name}</option>`).join("");
+  box.innerHTML = list.map((t, i) => `
+    <div class="xrow">
+      <label class="f"><span class="t">시작</span><input type="number" data-x="year" data-i="${i}" value="${t.year}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-x="until" data-i="${i}" value="${t.until || t.year}"></label>
+      <label class="f"><span class="t">주기(년)</span><input type="number" min="1" data-x="every" data-i="${i}" value="${t.every || 1}"></label>
+      <label class="f"><span class="t">출금 계좌</span><select data-x="from" data-i="${i}">${opt(XFER_FROM, t.from)}</select></label>
+      <label class="f"><span class="t">입금 계좌</span><select data-x="to" data-i="${i}">${opt(XFER_TO, t.to)}</select></label>
+      <label class="f"><span class="t">금액 (0=전액)</span><input type="number" step="100" data-x="amt" data-i="${i}" value="${t.amt || 0}"></label>
+      <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-del="${i}">삭제</button></label>
+    </div>`).join("");
+
+  box.querySelectorAll("[data-x]").forEach(n => n.addEventListener("input", () => {
+    const t = state.cfg.transfers[+n.dataset.i];
+    t[n.dataset.x] = (n.dataset.x === "from" || n.dataset.x === "to") ? n.value : num(n.value);
+    render(false);
+  }));
+  box.querySelectorAll("[data-del]").forEach(n => n.addEventListener("click", () => {
+    state.cfg.transfers.splice(+n.dataset.del, 1);
+    renderXfers(); render(false);
+  }));
+}
+
 const CFG_FIELDS = ["birthYear", "startYear", "retireYear", "endYear", "inflation", "salaryTier", "isaType",
-  "timing", "realView", "sevRate", "compRate", "npsAmount", "npsAge", "npsRate", "isaMoveYear", "isaMoveAmt",
+  "timing", "realView", "sevRate", "compRate", "npsAmount", "npsAge", "npsRate",
   "allowPenalty", "taxType", "divRate"];
 /** 값을 문자열 그대로 보관하는 필드 — 나머지는 숫자로 변환한다 */
 const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType"]);
@@ -1393,6 +1491,15 @@ function clearField(f) {
 /* ========================================================================
    저장 / 불러오기
    ======================================================================== */
+/** 예전 저장본의 단발성 ISA 전환 설정을 이전 목록으로 옮긴다 */
+function migrateTransfers(cfg) {
+  if (!Array.isArray(cfg.transfers)) cfg.transfers = [];
+  if (cfg.isaMoveYear > 0 && !cfg.transfers.length) {
+    cfg.transfers.push({ year: cfg.isaMoveYear, until: cfg.isaMoveYear, every: 1, from: "isa", to: "psFree", amt: cfg.isaMoveAmt || 0 });
+  }
+  delete cfg.isaMoveYear; delete cfg.isaMoveAmt;
+}
+
 function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
 function load() {
   try {
@@ -1404,6 +1511,7 @@ function load() {
     state.cfg.rates = { ...defaultState().cfg.rates, ...(s.cfg.rates || {}) };
     state.cfg.limits = { ...defaultState().cfg.limits, ...(s.cfg.limits || {}) };
     state.cfg.fillAmts = { ...defaultState().cfg.fillAmts, ...(s.cfg.fillAmts || {}) };
+    migrateTransfers(state.cfg);
     return true;
   } catch (e) { return false; }
 }
@@ -1461,7 +1569,24 @@ buildAccCfg();
 bindCfg();
 if (!load()) seedExample();
 syncCfgInputs();
+renderXfers();
 render(true, true);
+
+document.getElementById("btnAddXfer").onclick = () => {
+  const c = state.cfg;
+  const last = c.transfers[c.transfers.length - 1];
+  c.transfers.push(last
+    ? { ...last, year: last.year + 1, until: last.year + 1 }
+    : { year: c.retireYear, until: c.retireYear, every: 1, from: "irpInv", to: "psDed", amt: 0 });
+  renderXfers(); render(false);
+};
+document.getElementById("btnPresetIsa").onclick = () => {
+  const c = state.cfg;
+  // ISA 3년 만기를 굴리며 만기마다 전액을 세액공제 안 받는 연금저축으로 넘긴다
+  c.transfers.push({ year: c.startYear + 3, until: Math.max(c.startYear + 3, c.retireYear - 1), every: 3, from: "isa", to: "psFree", amt: 0 });
+  document.getElementById("xferPanel").open = true;
+  renderXfers(); render(false);
+};
 
 document.getElementById("btnFill").onclick = doFill;
 document.getElementById("btnPlan").onclick = doPlan;
@@ -1481,7 +1606,8 @@ document.getElementById("btnImport").onclick = () => {
         const s = JSON.parse(rd.result);
         if (!s.cfg) throw new Error("형식 오류");
         state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {} };
-        builtRange = ""; render(true, true);
+        migrateTransfers(state.cfg);
+        builtRange = ""; renderXfers(); render(true, true);
       } catch (e) { alert("불러오기 실패: " + e.message); }
     };
     rd.readAsText(f);
@@ -1492,7 +1618,7 @@ document.getElementById("btnReset").onclick = () => {
   if (!confirm("모든 입력을 초기화할까요?")) return;
   localStorage.removeItem(LS_KEY);
   state = defaultState(); seedExample();
-  builtRange = ""; render(true, true);
+  builtRange = ""; renderXfers(); render(true, true);
 };
 document.getElementById("btnTheme").onclick = () => {
   const cur = document.documentElement.getAttribute("data-theme");
