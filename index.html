@@ -152,6 +152,14 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.primary:hover { filter: brightness(1.08); background: var(--accent); }
   .btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  label.chk {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px;
+    color: var(--text-secondary); cursor: pointer; user-select: none;
+    border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 10px;
+  }
+  label.chk:hover { border-color: var(--accent); color: var(--text-primary); }
+  label.chk input { accent-color: var(--accent); margin: 0; }
+  .tablebox.tall { max-height: 88vh; }
 
   details.grp { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 12px; }
   details.grp > summary {
@@ -162,6 +170,15 @@
   details.grp > summary::before { content: "▸"; color: var(--muted); font-size: 10px; }
   details.grp[open] > summary::before { content: "▾"; }
   details.grp > .body { padding-top: 12px; }
+
+  table.opentbl { width: 100%; white-space: nowrap; }
+  table.opentbl th.rowhd, table.opentbl td:first-child { text-align: left; font-weight: 500; }
+  table.opentbl th { position: static; text-align: right; }
+  table.opentbl td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--grid); height: 34px; }
+  table.opentbl input { width: 92px; text-align: right; padding: 4px 6px; }
+  table.opentbl .na { color: var(--muted); opacity: .4; }
+  table.opentbl .osum { font-weight: 600; font-variant-numeric: tabular-nums; }
+  table.opentbl .dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
 
   .xrow {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
@@ -194,7 +211,7 @@
   .tip .tot { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; font-weight: 600; }
 
   /* ---- table ---- */
-  .tablebox { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  .tablebox { overflow: auto; max-height: 68vh; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); overscroll-behavior: contain; }
   table { border-collapse: separate; border-spacing: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   thead th {
     position: sticky; top: 0; z-index: 3;
@@ -221,6 +238,8 @@
   tr.phase-r td.yr { color: var(--accent); font-weight: 600; }
   tr.retline td { border-top: 2px solid var(--accent); }
   td.bal { color: var(--text-secondary); }
+  td.bkt { color: var(--text-secondary); background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  thead th[title] { cursor: help; }
   td.tot { font-weight: 600; }
   td.zero { color: var(--muted); opacity: .45; }
   td.hot { background: var(--hot); box-shadow: inset 2px 0 0 var(--warning); }
@@ -255,15 +274,104 @@
   <div class="kpis" id="kpis"></div>
   <div id="warnzone"></div>
 
+  <!-- ================= 표 ================= -->
+  <section class="panel">
+    <div class="hd">
+      <h2>1. 연도별 시뮬레이션</h2>
+      <div class="btnrow">
+        <label class="chk"><input type="checkbox" id="cfg_showBuckets"> 남은 재원 표시</label>
+        <label class="chk"><input type="checkbox" id="tblTall"> 표 크게</label>
+        <button type="button" id="btnJumpRetire">은퇴연도로</button>
+        <button type="button" id="btnSave">저장</button>
+        <button type="button" id="btnCsv">CSV</button>
+      </div>
+    </div>
+    <div class="tablebox" id="tablebox"></div>
+    <p class="hint">
+      각 계좌의 <strong>납입</strong>과 <strong>인출</strong>만 입력하면 잔액·세금·세후 수령액이 자동으로 다시 계산됩니다.
+      옅은 파란 칸이 입력란이고, 빨간 <span class="flag">!</span> 에 마우스를 올리면 한도 초과·요건 미달 사유가 나옵니다.
+      <strong>잔액 칸에 마우스를 올리면 그 계좌의 자금 성격별 잔액</strong>이 보입니다.
+      노란 줄은 사적연금이 분리과세 문턱을 넘은 해, 파란 줄은 계좌 이전이 일어난 해입니다.
+    </p>
+  </section>
+
+  <!-- ================= 차트 ================= -->
+  <section class="panel chart-card">
+    <div class="hd"><h2>2. 계좌별 자산 추이</h2><span class="tag" id="chartUnit">단위: 만원</span></div>
+    <div class="legend" id="legend1"></div>
+    <div class="plotbox" id="box1"><svg class="chart" id="chart1" viewBox="0 0 900 300" role="img" aria-label="연도별 계좌 잔액 누적 영역 차트"></svg><div class="tip" id="tip1"></div></div>
+  </section>
+
+  <section class="panel chart-card">
+    <div class="hd"><h2>3. 은퇴 후 연간 현금흐름</h2><span class="tag">단위: 만원</span></div>
+    <div class="legend" id="legend2"></div>
+    <div class="plotbox" id="box2"><svg class="chart" id="chart2" viewBox="0 0 900 260" role="img" aria-label="은퇴 후 연도별 세후 수령액과 세금 누적 막대 차트"></svg><div class="tip" id="tip2"></div></div>
+  </section>
+
+  <!-- ================= 자동 채우기 ================= -->
+  <section class="panel">
+    <h2>4. 자동 채우기</h2>
+    <h3>적립기 — 계좌별 연 납입액을 한 번에</h3>
+    <div class="fgrid">
+      <label class="f"><span class="t">시작연도</span><input type="number" id="fill_from"></label>
+      <label class="f"><span class="t">종료연도</span><input type="number" id="fill_to"></label>
+      <label class="f"><span class="t">매년 증액률 %</span><input type="number" step="0.5" id="fill_growth" value="0"></label>
+      <label class="f"><span class="t">&nbsp;</span><button type="button" class="primary" id="btnFill">납입 채우기</button></label>
+    </div>
+    <div class="fgrid" id="fillAmts" style="margin-top:12px"></div>
+
+    <details class="grp" open>
+      <summary>인출기 — 목표 생활비로 세금 최소 인출 계획 자동 생성</summary>
+      <div class="body">
+        <div class="fgrid">
+          <label class="f"><span class="t">목표 생활비 / 연 (세후)</span><input type="number" step="100" id="wd_target" value="2000"></label>
+          <label class="f"><span class="t">금액 기준</span>
+            <select id="wd_basis">
+              <option value="real">시작연도 실질 → 물가만큼 증액</option>
+              <option value="nominal">매년 같은 명목 금액</option>
+            </select>
+          </label>
+          <label class="f"><span class="t">인출 시작</span><input type="number" id="wd_from"></label>
+          <label class="f"><span class="t">인출 종료</span><input type="number" id="wd_to"></label>
+          <label class="f"><span class="t">인출 전략</span>
+            <select id="cfg_wdStrategy">
+              <option value="pensionFirst">연금 저율구간 우선 (권장)</option>
+              <option value="taxmin">그해 세금 최소</option>
+            </select>
+          </label>
+          <label class="f"><span class="t">사적연금 분리과세 문턱</span><input type="number" step="100" id="cfg_pensionCap"></label>
+          <label class="f"><span class="t">연금 인출 제약</span>
+            <select id="cfg_allowPenalty">
+              <option value="0">연금수령한도·55세 요건 준수 (권장)</option>
+              <option value="1">불이익 감수하고 목표 우선</option>
+            </select>
+          </label>
+          <label class="f"><span class="t">&nbsp;</span><button type="button" class="primary" id="btnPlan">인출 계획 생성</button></label>
+        </div>
+        <p class="hint">
+          <strong>연금 저율구간 우선</strong>은 사적연금 과세대상이 분리과세 문턱(기본 1,500만원)을 넘지 않는 선까지
+          <strong>연금계좌에서 먼저 뽑고</strong>, 모자란 만큼만 ISA·일반계좌에서 채웁니다.
+          저율 구간은 그해 안 쓰면 사라지므로 ISA를 먼저 헐어 아껴둘 이유가 없습니다.
+          <strong>그해 세금 최소</strong>는 눈앞의 세금만 보고 고르기 때문에 비과세인 ISA부터 몽땅 빼는 경향이 있습니다.
+          어느 쪽이든 목표 생활비(국민연금 세후 수령액을 먼저 차감)를 채우려 하며,
+          연금수령한도·55세 요건·연금소득 1,500만원 분리과세 기준선을 모두 반영하며, 목표를 채우지 못하는 해는
+          자산을 태우는 대신 <strong>부족분을 경고로 알립니다</strong>. 생성 후 표에서 직접 수정할 수 있습니다.
+        </p>
+        <div class="btnrow" style="margin-top:10px">
+          <button type="button" id="btnClearOut">인출 전부 비우기</button>
+          <button type="button" id="btnClearIn">납입 전부 비우기</button>
+        </div>
+      </div>
+    </details>
+  </section>
+
   <!-- ================= 설정 ================= -->
   <section class="panel">
-    <div class="hd"><h2>1. 기본 설정</h2>
+    <div class="hd"><h2>5. 기본 설정</h2>
       <div class="btnrow">
         <button id="btnTheme" type="button">테마</button>
-        <button id="btnSave" type="button">저장</button>
         <button id="btnExport" type="button">JSON 내보내기</button>
         <button id="btnImport" type="button">불러오기</button>
-        <button id="btnCsv" type="button">CSV</button>
         <button id="btnReset" type="button">초기화</button>
       </div>
     </div>
@@ -299,6 +407,35 @@
         </select>
       </label>
     </div>
+
+    <details class="grp" open id="openPanel">
+      <summary>지금 들고 있는 잔액 (기초 잔액) — 합계 <span id="openGrand">없음 (0부터 시작)</span></summary>
+      <div class="body">
+        <div class="tablebox" style="max-height:none">
+          <table class="opentbl">
+            <thead><tr>
+              <th class="rowhd">계좌</th>
+              <th title="인출해도 세금이 없는 원금">비과세 원금</th>
+              <th title="세액공제를 받은 납입액 — 인출 시 연금소득세">세액공제 원금</th>
+              <th title="퇴직금으로 들어온 돈 — 인출 시 퇴직소득세">퇴직 재원</th>
+              <th title="굴려서 불어난 돈">운용수익 · 평가익</th>
+              <th>합계</th>
+              <th title="연금수령 요건의 가입 5년을 세는 기준. 비우면 시작연도로 봅니다">가입연도</th>
+            </tr></thead>
+            <tbody id="openRows"></tbody>
+          </table>
+        </div>
+        <p class="hint">
+          이미 굴리고 있는 계좌가 있으면 여기에 넣고 시작하세요. 총액이 아니라 <strong>자금 성격별로 나눠 적어야</strong>
+          인출할 때 세금이 제대로 계산됩니다 — 같은 1억이라도 비과세 원금이면 세금 0원, 세액공제 원금이면 연금소득세 대상입니다.
+        </p>
+        <p class="hint">
+          <strong>어디서 확인하나</strong> — 연금저축·IRP는 금융사 앱의 「연금納입내역」이나 국세청 홈택스 <em>연금보험료 등 소득·세액공제확인서</em>에서
+          세액공제받은 누적 원금을 볼 수 있습니다. 그 금액이 「세액공제 원금」, 납입 총액에서 그걸 뺀 나머지가 「비과세 원금」,
+          평가액에서 납입 총액을 뺀 것이 「운용수익」입니다. 퇴직금이 들어온 IRP라면 그 입금액이 「퇴직 재원」입니다.
+        </p>
+      </div>
+    </details>
 
     <details class="grp" open>
       <summary>계좌별 수익률 · 연 납입한도</summary>
@@ -379,78 +516,6 @@
     </details>
   </section>
 
-  <!-- ================= 자동 채우기 ================= -->
-  <section class="panel">
-    <h2>2. 자동 채우기</h2>
-    <h3>적립기 — 계좌별 연 납입액을 한 번에</h3>
-    <div class="fgrid">
-      <label class="f"><span class="t">시작연도</span><input type="number" id="fill_from"></label>
-      <label class="f"><span class="t">종료연도</span><input type="number" id="fill_to"></label>
-      <label class="f"><span class="t">매년 증액률 %</span><input type="number" step="0.5" id="fill_growth" value="0"></label>
-      <label class="f"><span class="t">&nbsp;</span><button type="button" class="primary" id="btnFill">납입 채우기</button></label>
-    </div>
-    <div class="fgrid" id="fillAmts" style="margin-top:12px"></div>
-
-    <details class="grp" open>
-      <summary>인출기 — 목표 생활비로 세금 최소 인출 계획 자동 생성</summary>
-      <div class="body">
-        <div class="fgrid">
-          <label class="f"><span class="t">목표 생활비 / 연 (세후)</span><input type="number" step="100" id="wd_target" value="2000"></label>
-          <label class="f"><span class="t">금액 기준</span>
-            <select id="wd_basis">
-              <option value="real">시작연도 실질 → 물가만큼 증액</option>
-              <option value="nominal">매년 같은 명목 금액</option>
-            </select>
-          </label>
-          <label class="f"><span class="t">인출 시작</span><input type="number" id="wd_from"></label>
-          <label class="f"><span class="t">인출 종료</span><input type="number" id="wd_to"></label>
-          <label class="f"><span class="t">연금 인출 제약</span>
-            <select id="cfg_allowPenalty">
-              <option value="0">연금수령한도·55세 요건 준수 (권장)</option>
-              <option value="1">불이익 감수하고 목표 우선</option>
-            </select>
-          </label>
-          <label class="f"><span class="t">&nbsp;</span><button type="button" class="primary" id="btnPlan">인출 계획 생성</button></label>
-        </div>
-        <p class="hint">
-          매년 <strong>세금을 가장 적게 내는 순서</strong>로 계좌를 골라 목표 생활비(국민연금 세후 수령액을 먼저 차감)를 채웁니다.
-          연금수령한도·55세 요건·연금소득 1,500만원 분리과세 기준선을 모두 반영하며, 목표를 채우지 못하는 해는
-          자산을 태우는 대신 <strong>부족분을 경고로 알립니다</strong>. 생성 후 표에서 직접 수정할 수 있습니다.
-        </p>
-        <div class="btnrow" style="margin-top:10px">
-          <button type="button" id="btnClearOut">인출 전부 비우기</button>
-          <button type="button" id="btnClearIn">납입 전부 비우기</button>
-        </div>
-      </div>
-    </details>
-  </section>
-
-  <!-- ================= 차트 ================= -->
-  <section class="panel chart-card">
-    <div class="hd"><h2>3. 계좌별 자산 추이</h2><span class="tag" id="chartUnit">단위: 만원</span></div>
-    <div class="legend" id="legend1"></div>
-    <div class="plotbox" id="box1"><svg class="chart" id="chart1" viewBox="0 0 900 300" role="img" aria-label="연도별 계좌 잔액 누적 영역 차트"></svg><div class="tip" id="tip1"></div></div>
-  </section>
-
-  <section class="panel chart-card">
-    <div class="hd"><h2>4. 은퇴 후 연간 현금흐름</h2><span class="tag">단위: 만원</span></div>
-    <div class="legend" id="legend2"></div>
-    <div class="plotbox" id="box2"><svg class="chart" id="chart2" viewBox="0 0 900 260" role="img" aria-label="은퇴 후 연도별 세후 수령액과 세금 누적 막대 차트"></svg><div class="tip" id="tip2"></div></div>
-  </section>
-
-  <!-- ================= 표 ================= -->
-  <section class="panel">
-    <div class="hd">
-      <h2>5. 연도별 시뮬레이션</h2>
-      <span class="tag">옅은 파란 칸 = 직접 입력 · 노란 줄 = 1,500만원 초과 분리과세</span>
-    </div>
-    <div class="tablebox" id="tablebox"></div>
-    <p class="hint">
-      각 계좌의 <strong>납입</strong>과 <strong>인출</strong>만 입력하면 잔액·세금·세후 수령액이 자동으로 다시 계산됩니다.
-      빨간 <span class="flag">!</span> 표시에 마우스를 올리면 한도 초과·요건 미달 사유가 나옵니다.
-    </p>
-  </section>
-
   <footer>
     <h3>계산 규칙</h3>
     <ul>
@@ -501,6 +566,29 @@ const PENSION = ACC.filter(a => a.kind === "pension").map(a => a.id);
 
 const LS_KEY = "tax-retire-sim-v1";
 
+/** 잔액을 이루는 네 가지 자금 성격 — 인출 순서와 세율이 여기서 갈린다 */
+const BUCKETS = [
+  { key: "free", name: "비과세 원금", tip: "인출해도 세금이 없는 돈. 연금계좌에서 가장 먼저 빠져나간다." },
+  { key: "ded", name: "세액공제 원금", tip: "세액공제를 받은 납입액. 인출 시 연금소득세 대상." },
+  { key: "sev", name: "퇴직 재원", tip: "퇴직금으로 들어온 돈. 인출 시 퇴직소득세(연금수령 시 70%·11년차부터 60%)." },
+  { key: "gain", name: "운용수익", tip: "굴려서 불어난 돈. 연금계좌에서는 연금소득세 대상." },
+];
+/** 계좌별로 존재할 수 있는 버킷 */
+function accBuckets(a) {
+  if (a.kind === "isa" || a.kind === "taxable") return ["free", "gain"];
+  return a.sev ? ["sev", "free", "ded", "gain"] : ["free", "ded", "gain"];
+}
+/** 계좌 성격에 맞는 버킷 이름 (ISA·일반계좌의 free는 '원금'이라 부르는 편이 자연스럽다) */
+function bucketLabel(a, key) {
+  if (key === "free") {
+    if (a.kind === "isa") return "납입원금";
+    if (a.kind === "taxable") return "취득가";
+    return "비과세 원금";
+  }
+  if (key === "gain") return a.kind === "taxable" ? "평가익" : "운용수익";
+  return BUCKETS.find(b => b.key === key).name;
+}
+
 /* ========================================================================
    상태
    ======================================================================== */
@@ -514,9 +602,14 @@ function defaultState() {
     npsAmount: 0, npsAge: 65, npsRate: 3.0,
     transfers: [],
     allowPenalty: 0, planTarget: null,
-    rates: {}, limits: {}, fillAmts: {},
+    pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
+    rates: {}, limits: {}, fillAmts: {}, opening: {}, openYears: {},
   };
-  ACC.forEach(a => { cfg.rates[a.id] = a.rate; cfg.limits[a.id] = a.limit; cfg.fillAmts[a.id] = a.fill; });
+  ACC.forEach(a => {
+    cfg.rates[a.id] = a.rate; cfg.limits[a.id] = a.limit; cfg.fillAmts[a.id] = a.fill;
+    cfg.opening[a.id] = { free: 0, ded: 0, sev: 0, gain: 0 };
+    cfg.openYears[a.id] = 0;
+  });
   return { cfg, rows: {} };
 }
 let state = defaultState();
@@ -673,7 +766,7 @@ function applyWithdrawals(st, draws, ctx) {
   }
 
   // --- 2단계: 연간 합산 기준으로 세율 결정
-  const over1500 = taxablePension > 1500;
+  const over1500 = taxablePension > (clamp0(cfg.pensionCap) || Infinity);
   const pRate = (over1500 ? cfg.compRate : pensionRate(ctx.age)) / 100;
   const sevRate = cfg.sevRate / 100;
 
@@ -716,7 +809,7 @@ function applyWithdrawals(st, draws, ctx) {
  * 세율표에는 계단(연금소득 1,500만원 분리과세 전환)이 있어 단순 탐욕법은 그 앞에서 멈춘다.
  * 기본 스텝으로 개선되는 계좌가 하나도 없으면 청크를 2배씩 키워 계단을 넘어본다.
  */
-function greedyDraws(st, ctx, target) {
+function greedyDraws(st, ctx, target, strategy) {
   const draws = Object.fromEntries(AID.map(id => [id, 0]));
   const evalDraws = d => applyWithdrawals({ bal: cloneBal(st.bal), isaUsed: st.isaUsed }, d, ctx);
   let cur = evalDraws(draws).net;
@@ -733,36 +826,49 @@ function greedyDraws(st, ctx, target) {
   }
   if (AID.reduce((s, id) => s + capacity[id], 0) <= 0.5) return draws;
 
-  const step = Math.max(5, Math.round((target - cur) / 120));
-  const consider = (best, id, chunk) => {
-    const trial = { ...draws }; trial[id] += chunk;
-    const r = evalDraws(trial);
-    const rate = (r.net - cur) / chunk; // 인출 1만원당 실수령
-    return rate > best.rate + 1e-9 ? { id, chunk, net: r.net, rate } : best;
-  };
+  // 「연금 저율구간 우선」은 사적연금 과세대상이 분리과세 문턱을 넘지 않는 선까지
+  // 연금계좌에서 먼저 뽑고, 모자란 만큼만 나머지 계좌에서 채운다.
+  // 저율 구간은 그해 안 쓰면 사라지므로, ISA를 먼저 헐어 아껴둘 이유가 없다.
+  const cap = clamp0(ctx.cfg.pensionCap) || Infinity;
+  const phases = strategy === "taxmin"
+    ? [{ ids: AID, maxTaxable: Infinity, jump: true }]
+    : [{ ids: PENSION, maxTaxable: cap, jump: false },
+       { ids: AID, maxTaxable: Infinity, jump: true }];
 
-  let guard = 0;
-  while (cur < target - 0.5 && guard++ < 1500) {
-    let best = { rate: 1e-9 };
-    for (const id of AID) {
-      const room = capacity[id] - draws[id];
-      if (room <= 0.5) continue;
-      best = consider(best, id, Math.min(step, room));
-    }
-    if (!best.id) { // 계단에 걸렸다 — 청크를 키워 넘어본다
-      for (const id of AID) {
+  for (const ph of phases) {
+    if (cur >= target - 0.5) break;
+    const step = Math.max(5, Math.round((target - cur) / 120));
+    const consider = (best, id, chunk) => {
+      const trial = { ...draws }; trial[id] += chunk;
+      const r = evalDraws(trial);
+      if (r.taxablePension > ph.maxTaxable + 1e-6) return best; // 문턱을 넘는 청크는 후보에서 뺀다
+      const rate = (r.net - cur) / chunk; // 인출 1만원당 실수령
+      return rate > best.rate + 1e-9 ? { id, chunk, net: r.net, rate } : best;
+    };
+
+    let guard = 0;
+    while (cur < target - 0.5 && guard++ < 1500) {
+      let best = { rate: 1e-9 };
+      for (const id of ph.ids) {
         const room = capacity[id] - draws[id];
         if (room <= 0.5) continue;
-        for (let m = 2; m <= 128; m *= 2) {
-          const chunk = Math.min(step * m, room);
-          best = consider(best, id, chunk);
-          if (chunk >= room) break;
+        best = consider(best, id, Math.min(step, room));
+      }
+      if (!best.id && ph.jump) { // 계단에 걸렸다 — 청크를 키워 넘어본다
+        for (const id of ph.ids) {
+          const room = capacity[id] - draws[id];
+          if (room <= 0.5) continue;
+          for (let m = 2; m <= 128; m *= 2) {
+            const chunk = Math.min(step * m, room);
+            best = consider(best, id, chunk);
+            if (chunk >= room) break;
+          }
         }
       }
+      if (!best.id) break;
+      draws[best.id] += best.chunk;
+      cur = best.net;
     }
-    if (!best.id) break;
-    draws[best.id] += best.chunk;
-    cur = best.net;
   }
 
   // 목표를 넘겼으면 초과분을 되돌린다. 계단 탐색은 크게 건너뛰므로 과잉 인출이 남기 쉽다.
@@ -792,8 +898,18 @@ function greedyDraws(st, ctx, target) {
  */
 function simulate(opts = {}) {
   const cfg = state.cfg;
+  // ---- 기초 잔액: 이미 굴리고 있는 계좌를 자금 성격 그대로 심는다
   const st = { bal: Object.fromEntries(AID.map(id => [id, emptyBuckets()])), isaUsed: 0 };
-  const openYear = {}; // 계좌별 최초 납입연도
+  const openYear = {}; // 계좌별 가입연도 (기초 잔액이 있으면 그 계좌의 실제 가입연도)
+  let openingTotal = 0;
+  for (const a of ACC) {
+    const o = (cfg.opening && cfg.opening[a.id]) || {};
+    const b = st.bal[a.id];
+    for (const k of accBuckets(a)) b[k] = clamp0(o[k]);
+    const t = bTotal(b);
+    openingTotal += t;
+    if (t > 0) openYear[a.id] = clamp0((cfg.openYears || {})[a.id]) || cfg.startYear;
+  }
   const years = [];
   const y0 = cfg.startYear, y1 = Math.max(cfg.startYear, cfg.endYear);
   const age55 = cfg.birthYear + 55;
@@ -923,7 +1039,7 @@ function simulate(opts = {}) {
     if (opts.plan && y >= opts.plan.from && y <= opts.plan.to) {
       const nps = age >= cfg.npsAge ? clamp0(cfg.npsAmount) * (1 - cfg.npsRate / 100) : 0;
       const target = Math.max(0, opts.plan.targetOf(y) - nps);
-      draws = greedyDraws(st, ctx, target);
+      draws = greedyDraws(st, ctx, target, cfg.wdStrategy);
       planDraws[y] = draws;
     } else {
       draws = Object.fromEntries(AID.map(id => [id, clamp0(r[id].out)]));
@@ -933,10 +1049,12 @@ function simulate(opts = {}) {
 
     // ---- 기록
     let total = 0;
+    const pool = { free: 0, ded: 0, sev: 0, gain: 0 };
     for (const a of ACC) {
       const b = st.bal[a.id];
       const bal = bTotal(b);
       total += bal;
+      for (const k of ["free", "ded", "sev", "gain"]) pool[k] += b[k];
       Object.assign(rec.acc[a.id], {
         in: clamp0(r[a.id].in), out: res.det[a.id].gross, bal,
         tax: res.det[a.id].tax, flags: res.det[a.id].flags.slice(),
@@ -958,6 +1076,7 @@ function simulate(opts = {}) {
     rec.nps = res.nps; rec.npsTax = res.npsTax;
     rec.taxablePension = res.taxablePension; rec.pRate = res.pRate;
     rec.total = total;
+    rec.pool = pool; // 전 계좌 합산 재원 구성 — 앞으로 얼마를 비과세로 뺄 수 있는지
     rec.deflator = Math.pow(1 + cfg.inflation / 100, y - cfg.startYear);
 
     // 저장된 인출 계획 대비 목표 미달 여부
@@ -984,7 +1103,7 @@ function simulate(opts = {}) {
   }
   const hot = years.filter(r => r.flags.over1500);
   if (hot.length) {
-    warnings.push(`사적연금 수령액이 1,500만원을 넘는 해 ${hot.length}개 (${yearRanges(hot.map(r => r.year))}) — `
+    warnings.push(`사적연금 수령액이 ${fmt(cfg.pensionCap)}만원을 넘는 해 ${hot.length}개 (${yearRanges(hot.map(r => r.year))}) — `
       + `해당 연도는 5.5%가 아니라 ${cfg.compRate}% 분리과세입니다. 인출을 여러 해로 쪼개거나 ISA·비과세 계좌를 섞으면 세금이 줄어듭니다.`);
   }
 
@@ -992,7 +1111,7 @@ function simulate(opts = {}) {
   return {
     years, warnings, planDraws,
     sum: {
-      cumIn, cumCredit, cumNet, cumTax, depleted,
+      cumIn, cumCredit, cumNet, cumTax, depleted, openingTotal,
       atRetire: retireRec ? retireRec.total : 0,
       peak: years.reduce((m, r) => Math.max(m, r.total), 0),
       final: years.length ? years[years.length - 1].total : 0,
@@ -1250,7 +1369,7 @@ let builtRange = "";
 
 function buildTable() {
   const cfg = state.cfg;
-  const key = `${cfg.startYear}-${cfg.endYear}-${cfg.retireYear}`;
+  const key = `${cfg.startYear}-${cfg.endYear}-${cfg.retireYear}-${cfg.showBuckets}`;
   if (key === builtRange) return false;
   builtRange = key;
   cellRefs = {};
@@ -1260,12 +1379,17 @@ function buildTable() {
 
   const thead = document.createElement("thead");
   const g1 = document.createElement("tr"); g1.className = "g1";
+  const showB = !!state.cfg.showBuckets;
   g1.innerHTML = `<th class="stick" colspan="2"></th>` +
     ACC.map(a => `<th colspan="3" class="gsep"><span class="dot" style="background:${css(a.color)}"></span>${a.name}</th>`).join("") +
+    (showB ? `<th colspan="3" class="gsep">남은 재원 (전 계좌 합산)</th>` : "") +
     `<th colspan="4" class="gsep">합계</th>`;
   const g2 = document.createElement("tr");
   g2.innerHTML = `<th class="stick">연도</th><th>나이</th>` +
     ACC.map(() => `<th class="gsep">납입</th><th>인출</th><th>잔액</th>`).join("") +
+    (showB ? `<th class="gsep" title="인출해도 세금이 없는 원금">비과세원금</th>`
+           + `<th title="퇴직금 재원 — 퇴직소득세(연금수령 시 70%·11년차부터 60%)">퇴직재원</th>`
+           + `<th title="세액공제 원금 + 운용수익 — 연금소득세 대상">과세대상</th>` : "") +
     `<th class="gsep">총자산</th><th>총인출</th><th>세금</th><th>세후수령</th>`;
   thead.append(g1, g2);
 
@@ -1302,6 +1426,7 @@ function buildTable() {
       ref.acc[a.id] = { in: ci.inp, out: co.inp, bal: tdB, inTd: ci.td, outTd: co.td };
     }
     const mkOut = cls => { const td = document.createElement("td"); td.className = cls; tr.appendChild(td); return td; };
+    if (showB) { ref.bFree = mkOut("bkt gsep"); ref.bSev = mkOut("bkt"); ref.bTax = mkOut("bkt"); }
     ref.total = mkOut("tot gsep");
     ref.gross = mkOut("");
     ref.tax = mkOut("");
@@ -1332,12 +1457,27 @@ function paintTable(sim, syncInputs) {
       }
       c.bal.textContent = d.bal >= .5 ? fmt(deflate(d.bal, rec)) : "–";
       c.bal.classList.toggle("zero", d.bal < .5);
+      c.bal.title = d.bal >= .5
+        ? accBuckets(a).filter(k => d.buckets[k] >= .5)
+            .map(k => `${bucketLabel(a, k)} ${fmt(deflate(d.buckets[k], rec))}`).join("\n")
+        : "";
       const fl = d.flags || [];
       c.outTd.title = fl.join("\n");
       c.outTd.classList.toggle("flagged", fl.length > 0);
       const old = c.outTd.querySelector(".flag");
       if (fl.length && !old) { const s = document.createElement("span"); s.className = "flag"; s.textContent = " !"; c.outTd.appendChild(s); }
       else if (!fl.length && old) old.remove();
+    }
+    if (ref.bFree) {
+      const p = rec.pool, taxed = p.ded + p.gain;
+      const put = (node, v) => {
+        node.textContent = v >= .5 ? fmt(deflate(v, rec)) : "–";
+        node.classList.toggle("zero", v < .5);
+      };
+      put(ref.bFree, p.free); put(ref.bSev, p.sev); put(ref.bTax, taxed);
+      ref.bFree.title = "세금 없이 뺄 수 있는 원금 (세액공제 안 받은 연금저축 원금 + ISA 납입원금 + 일반계좌 취득가)";
+      ref.bSev.title = "퇴직금 재원 잔액 — 연금으로 받으면 퇴직소득세의 70%(11년차부터 60%)";
+      ref.bTax.title = "세액공제 원금 + 운용수익 — 연금소득세 대상";
     }
     ref.total.textContent = rec.total >= .5 ? fmt(deflate(rec.total, rec)) : "–";
     ref.total.classList.toggle("zero", rec.total < .5);
@@ -1347,7 +1487,7 @@ function paintTable(sim, syncInputs) {
     ref.tax.textContent = rec.tax >= .5 ? fmt(deflate(rec.tax, rec)) : "–";
     ref.tax.classList.toggle("zero", rec.tax < .5);
     const tt = [];
-    if (rec.taxablePension > 0) tt.push(`사적연금 과세대상 ${fmt(rec.taxablePension)}만원 · 적용세율 ${rec.pRate.toFixed(1)}%${rec.flags.over1500 ? " (1,500만원 초과 분리과세)" : ""}`);
+    if (rec.taxablePension > 0) tt.push(`사적연금 과세대상 ${fmt(rec.taxablePension)}만원 · 적용세율 ${rec.pRate.toFixed(1)}%${rec.flags.over1500 ? ` (${fmt(state.cfg.pensionCap)}만원 초과 분리과세)` : ""}`);
     if (rec.holdTax > 0) tt.push(`일반계좌 배당 원천징수 ${fmt(rec.holdTax)}만원 — 인출과 무관하게 매년 발생하며 계좌에서 바로 빠집니다`);
     if (rec.capTax > 0) tt.push(`일반계좌 양도세 ${fmt(rec.capTax)}만원 (실현이익 ${fmt(rec.realizedGain)}만원)`);
     ref.tax.title = tt.join("\n");
@@ -1380,6 +1520,53 @@ function buildAccCfg() {
   wrap.querySelectorAll("[data-rate]").forEach(i => i.addEventListener("input", () => { state.cfg.rates[i.dataset.rate] = num(i.value); render(false); }));
   wrap.querySelectorAll("[data-limit]").forEach(i => i.addEventListener("input", () => { state.cfg.limits[i.dataset.limit] = num(i.value); render(false); }));
   fw.querySelectorAll("[data-fill]").forEach(i => i.addEventListener("input", () => { state.cfg.fillAmts[i.dataset.fill] = num(i.value); }));
+}
+
+/* ---- 기초 잔액 편집기 — 이미 굴리고 있는 계좌를 자금 성격별로 심는다 ---- */
+function buildOpening() {
+  const box = document.getElementById("openRows");
+  box.innerHTML = ACC.map(a => {
+    const ks = accBuckets(a);
+    const cells = BUCKETS.map(bk => ks.includes(bk.key)
+      ? `<td><input type="number" step="100" data-o="${bk.key}" data-a="${a.id}" title="${bk.tip}"></td>`
+      : `<td class="na">–</td>`).join("");
+    const needYear = a.kind === "pension";
+    return `<tr>
+      <th class="rowhd"><span class="dot" style="background:${css(a.color)}"></span>${a.name}</th>
+      ${cells}
+      <td class="osum" data-sum="${a.id}">–</td>
+      <td>${needYear ? `<input type="number" data-oy="${a.id}" placeholder="시작연도">` : `<span class="na">–</span>`}</td>
+    </tr>`;
+  }).join("");
+
+  box.querySelectorAll("[data-o]").forEach(n => n.addEventListener("input", () => {
+    state.cfg.opening[n.dataset.a][n.dataset.o] = num(n.value);
+    render(false);
+  }));
+  box.querySelectorAll("[data-oy]").forEach(n => n.addEventListener("input", () => {
+    state.cfg.openYears[n.dataset.oy] = num(n.value);
+    render(false);
+  }));
+}
+function syncOpening() {
+  document.querySelectorAll("[data-o]").forEach(n => {
+    const v = (state.cfg.opening[n.dataset.a] || {})[n.dataset.o] || 0;
+    if (n !== document.activeElement) n.value = v || "";
+  });
+  document.querySelectorAll("[data-oy]").forEach(n => {
+    const v = state.cfg.openYears[n.dataset.oy] || 0;
+    if (n !== document.activeElement) n.value = v || "";
+  });
+  let grand = 0;
+  ACC.forEach(a => {
+    const o = state.cfg.opening[a.id] || {};
+    const t = accBuckets(a).reduce((s, k) => s + clamp0(o[k]), 0);
+    grand += t;
+    const cell = document.querySelector(`[data-sum="${a.id}"]`);
+    if (cell) { cell.textContent = t > 0 ? fmt(t) : "–"; cell.classList.toggle("zero", t <= 0); }
+  });
+  const g = document.getElementById("openGrand");
+  if (g) g.textContent = grand > 0 ? fmt(grand) + "만원" : "없음 (0부터 시작)";
 }
 
 /* ---- 계좌 간 이전 편집기 ---- */
@@ -1418,9 +1605,9 @@ function renderXfers() {
 
 const CFG_FIELDS = ["birthYear", "startYear", "retireYear", "endYear", "inflation", "salaryTier", "isaType",
   "timing", "realView", "sevRate", "compRate", "npsAmount", "npsAge", "npsRate",
-  "allowPenalty", "taxType", "divRate"];
+  "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap"];
 /** 값을 문자열 그대로 보관하는 필드 — 나머지는 숫자로 변환한다 */
-const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType"]);
+const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStrategy"]);
 
 function syncCfgInputs() {
   CFG_FIELDS.forEach(k => {
@@ -1432,6 +1619,9 @@ function syncCfgInputs() {
     const l = document.querySelector(`[data-limit="${a.id}"]`); if (l) l.value = state.cfg.limits[a.id];
     const f = document.querySelector(`[data-fill="${a.id}"]`); if (f) f.value = state.cfg.fillAmts[a.id];
   });
+  const sb = document.getElementById("cfg_showBuckets");
+  if (sb) sb.checked = !!state.cfg.showBuckets;
+  syncOpening();
   document.getElementById("fill_from").value = state.cfg.startYear;
   document.getElementById("fill_to").value = state.cfg.retireYear - 1;
   document.getElementById("wd_from").value = state.cfg.retireYear;
@@ -1491,6 +1681,14 @@ function clearField(f) {
 /* ========================================================================
    저장 / 불러오기
    ======================================================================== */
+/** 계좌·버킷이 늘어난 뒤 불러온 저장본에 빠진 칸을 채운다 */
+function migrateOpening(cfg) {
+  const d = defaultState().cfg;
+  cfg.opening = { ...d.opening, ...(cfg.opening || {}) };
+  cfg.openYears = { ...d.openYears, ...(cfg.openYears || {}) };
+  for (const a of ACC) cfg.opening[a.id] = { free: 0, ded: 0, sev: 0, gain: 0, ...(cfg.opening[a.id] || {}) };
+}
+
 /** 예전 저장본의 단발성 ISA 전환 설정을 이전 목록으로 옮긴다 */
 function migrateTransfers(cfg) {
   if (!Array.isArray(cfg.transfers)) cfg.transfers = [];
@@ -1511,6 +1709,7 @@ function load() {
     state.cfg.rates = { ...defaultState().cfg.rates, ...(s.cfg.rates || {}) };
     state.cfg.limits = { ...defaultState().cfg.limits, ...(s.cfg.limits || {}) };
     state.cfg.fillAmts = { ...defaultState().cfg.fillAmts, ...(s.cfg.fillAmts || {}) };
+    migrateOpening(state.cfg);
     migrateTransfers(state.cfg);
     return true;
   } catch (e) { return false; }
@@ -1540,6 +1739,7 @@ function exportCsv(sim) {
 let lastSim = null;
 function render(rebuild, syncInputs) {
   if (rebuild) { buildTable(); syncCfgInputs(); }
+  syncOpening(); // 기초 잔액 합계는 매 입력마다 갱신되어야 한다
   const sim = simulate();
   lastSim = sim;
   renderKpis(sim);
@@ -1566,6 +1766,7 @@ function seedExample() {
 }
 
 buildAccCfg();
+buildOpening();
 bindCfg();
 if (!load()) seedExample();
 syncCfgInputs();
@@ -1588,6 +1789,20 @@ document.getElementById("btnPresetIsa").onclick = () => {
   renderXfers(); render(false);
 };
 
+document.getElementById("cfg_showBuckets").onchange = e => {
+  state.cfg.showBuckets = e.target.checked ? 1 : 0;
+  render(true, true);
+};
+document.getElementById("tblTall").onchange = e => {
+  document.getElementById("tablebox").classList.toggle("tall", e.target.checked);
+};
+document.getElementById("btnJumpRetire").onclick = () => {
+  const box = document.getElementById("tablebox");
+  const rows = box.querySelectorAll("tbody tr");
+  const i = state.cfg.retireYear - state.cfg.startYear;
+  const tr = rows[Math.max(0, Math.min(rows.length - 1, i))];
+  if (tr) box.scrollTop = Math.max(0, tr.offsetTop - box.querySelector("thead").offsetHeight - 8);
+};
 document.getElementById("btnFill").onclick = doFill;
 document.getElementById("btnPlan").onclick = doPlan;
 document.getElementById("btnClearOut").onclick = () => clearField("out");
@@ -1606,7 +1821,7 @@ document.getElementById("btnImport").onclick = () => {
         const s = JSON.parse(rd.result);
         if (!s.cfg) throw new Error("형식 오류");
         state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {} };
-        migrateTransfers(state.cfg);
+        migrateOpening(state.cfg); migrateTransfers(state.cfg);
         builtRange = ""; renderXfers(); render(true, true);
       } catch (e) { alert("불러오기 실패: " + e.message); }
     };
@@ -1625,7 +1840,7 @@ document.getElementById("btnTheme").onclick = () => {
   const next = cur === "dark" ? "light" : cur === "light" ? "" : "dark";
   if (next) document.documentElement.setAttribute("data-theme", next);
   else document.documentElement.removeAttribute("data-theme");
-  builtRange = ""; buildAccCfg(); syncCfgInputs(); render(true, true);
+  builtRange = ""; buildAccCfg(); buildOpening(); syncCfgInputs(); render(true, true);
 };
 const sevCalc = () => {
   const pay = num(document.getElementById("sev_amount").value);
