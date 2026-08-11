@@ -23,6 +23,9 @@
     --s4: #eda100;
     --s5: #e87ba4;
     --input-bg: #ffffff;
+    --field: rgba(42, 120, 214, 0.055);
+    --field-rule: rgba(42, 120, 214, 0.22);
+    --hot: rgba(250, 178, 25, 0.16);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -48,6 +51,9 @@
       --s4: #c98500;
       --s5: #d55181;
       --input-bg: #111110;
+      --field: rgba(57, 135, 229, 0.10);
+      --field-rule: rgba(57, 135, 229, 0.30);
+      --hot: rgba(250, 178, 25, 0.14);
     }
   }
   :root[data-theme="dark"] {
@@ -73,6 +79,13 @@
     --s4: #c98500;
     --s5: #d55181;
     --input-bg: #111110;
+    --field: rgba(57, 135, 229, 0.10);
+    --field-rule: rgba(57, 135, 229, 0.30);
+    --hot: rgba(250, 178, 25, 0.14);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
   }
 
   * { box-sizing: border-box; }
@@ -187,10 +200,11 @@
   tbody tr:hover .stick { background: var(--surface-2); }
   .gsep { border-left: 1px solid var(--border); }
   td input.cell {
-    border: none; background: transparent; text-align: right; padding: 3px 2px;
+    border: none; background: var(--field); text-align: right; padding: 3px 4px;
     width: 62px; border-radius: 4px; font-size: 12.5px;
+    box-shadow: inset 0 -1px 0 var(--field-rule);
   }
-  td input.cell:hover { background: var(--surface-2); }
+  td input.cell:hover { background: var(--accent-soft); }
   td input.cell:focus { background: var(--input-bg); outline: 2px solid var(--accent); outline-offset: -1px; }
   td input.cell.on { font-weight: 600; }
   tr.phase-r td.yr { color: var(--accent); font-weight: 600; }
@@ -198,6 +212,8 @@
   td.bal { color: var(--text-secondary); }
   td.tot { font-weight: 600; }
   td.zero { color: var(--muted); opacity: .45; }
+  td.hot { background: var(--hot); box-shadow: inset 2px 0 0 var(--warning); }
+  tbody tr:hover td.hot { background: var(--hot); }
   .flag { color: var(--critical); font-weight: 700; cursor: help; }
   .yr { color: var(--text-secondary); }
   .agecol { color: var(--muted); font-size: 11.5px; }
@@ -383,7 +399,7 @@
   <section class="panel">
     <div class="hd">
       <h2>5. 연도별 시뮬레이션</h2>
-      <span class="tag">파란 칸 = 납입 · 인출 직접 입력</span>
+      <span class="tag">옅은 파란 칸 = 직접 입력 · 노란 줄 = 1,500만원 초과 분리과세</span>
     </div>
     <div class="tablebox" id="tablebox"></div>
     <p class="hint">
@@ -1190,6 +1206,7 @@ function paintTable(sim, syncInputs) {
     ref.tax.textContent = rec.tax >= .5 ? fmt(deflate(rec.tax, rec)) : "–";
     ref.tax.classList.toggle("zero", rec.tax < .5);
     ref.tax.title = rec.taxablePension > 0 ? `사적연금 과세대상 ${fmt(rec.taxablePension)}만원 · 적용세율 ${rec.pRate.toFixed(1)}%${rec.flags.over1500 ? " (1,500만원 초과 분리과세)" : ""}` : "";
+    ref.tax.classList.toggle("hot", !!rec.flags.over1500);
     ref.net.textContent = rec.net >= .5 ? fmt(deflate(rec.net, rec)) : "–";
     ref.net.classList.toggle("zero", rec.net < .5);
     if (rec.credit > 0) ref.total.title = `세액공제 환급 ${fmt(rec.credit)}만원`;
