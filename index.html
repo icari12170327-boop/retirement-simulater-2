@@ -318,6 +318,7 @@
       <button type="button" id="btnAddRule">+ 규칙 추가</button>
       <button type="button" id="btnRuleLump">+ 목돈 한 해만</button>
       <button type="button" id="btnRuleStep">+ 은퇴까지 단계별 증액 예시</button>
+      <button type="button" id="btnClearIn">납입 전부 비우기</button>
     </div>
     <p class="hint" id="fillResult" style="margin-top:8px"></p>
     <p class="hint">
@@ -334,16 +335,15 @@
     <details class="grp" open>
       <summary>인출기 — 목표 생활비로 세금 최소 인출 계획 자동 생성</summary>
       <div class="body">
-        <div class="fgrid">
-          <label class="f"><span class="t">목표 생활비 / 연 (세후)</span><input type="number" step="100" id="wd_target" value="2000"></label>
-          <label class="f"><span class="t">금액 기준</span>
-            <select id="wd_basis">
-              <option value="real">시작연도 실질 → 물가만큼 증액</option>
-              <option value="nominal">매년 같은 명목 금액</option>
-            </select>
-          </label>
-          <label class="f"><span class="t">인출 시작</span><input type="number" id="wd_from"></label>
-          <label class="f"><span class="t">인출 종료</span><input type="number" id="wd_to"></label>
+        <div id="wdRows"></div>
+        <div class="btnrow" style="margin-top:10px">
+          <button type="button" class="primary" id="btnPlan">규칙대로 인출 채우기</button>
+          <button type="button" id="btnAddWdPlan">+ 목표 생활비</button>
+          <button type="button" id="btnAddWdAcc">+ 계좌 지정 인출</button>
+          <button type="button" id="btnClearOut">인출 전부 비우기</button>
+        </div>
+        <p class="hint" id="wdResult" style="margin-top:8px"></p>
+        <div class="fgrid" style="margin-top:12px">
           <label class="f"><span class="t">인출 전략</span>
             <select id="cfg_wdStrategy">
               <option value="pensionFirst">연금 저율구간 우선 (권장)</option>
@@ -357,21 +357,24 @@
               <option value="1">불이익 감수하고 목표 우선</option>
             </select>
           </label>
-          <label class="f"><span class="t">&nbsp;</span><button type="button" class="primary" id="btnPlan">인출 계획 생성</button></label>
         </div>
         <p class="hint">
-          <strong>연금 저율구간 우선</strong>은 사적연금 과세대상이 분리과세 문턱(기본 1,500만원)을 넘지 않는 선까지
-          <strong>연금계좌에서 먼저 뽑고</strong>, 모자란 만큼만 ISA·일반계좌에서 채웁니다.
-          저율 구간은 그해 안 쓰면 사라지므로 ISA를 먼저 헐어 아껴둘 이유가 없습니다.
-          <strong>그해 세금 최소</strong>는 눈앞의 세금만 보고 고르기 때문에 비과세인 ISA부터 몽땅 빼는 경향이 있습니다.
-          어느 쪽이든 목표 생활비(국민연금 세후 수령액을 먼저 차감)를 채우려 하며,
-          연금수령한도·55세 요건·연금소득 1,500만원 분리과세 기준선을 모두 반영하며, 목표를 채우지 못하는 해는
-          자산을 태우는 대신 <strong>부족분을 경고로 알립니다</strong>. 생성 후 표에서 직접 수정할 수 있습니다.
+          <strong>+ 계좌 지정 인출</strong>은 찍은 계좌에서 정한 금액을 그대로 뺍니다. 인출 순서를 직접 통제하고 싶을 때 쓰세요 —
+          예를 들어 「2040~2060, 연 1,500만원, 연금저축 세액공제용」이면 저율 구간을 매년 꽉 채워 뺍니다.
         </p>
-        <div class="btnrow" style="margin-top:10px">
-          <button type="button" id="btnClearOut">인출 전부 비우기</button>
-          <button type="button" id="btnClearIn">납입 전부 비우기</button>
-        </div>
+        <p class="hint">
+          <strong>+ 목표 생활비</strong>는 그 금액(세후)을 채우도록 <em>부족한 만큼만</em> 자동 배분합니다.
+          <strong>둘을 섞을 수 있습니다</strong> — 계좌 지정 인출을 먼저 반영하고, 목표에 모자란 부분만 자동으로 메웁니다.
+          자동으로 채운 몫은 되돌릴 수 있지만 <strong>직접 지정한 금액은 깎지 않습니다.</strong>
+          국민연금 세후 수령액은 목표에서 먼저 차감합니다.
+        </p>
+        <p class="hint">
+          자동 배분의 <strong>연금 저율구간 우선</strong>은 사적연금 과세대상이 분리과세 문턱(기본 1,500만원)을 넘지 않는 선까지
+          연금계좌에서 먼저 뽑고, 모자란 만큼만 ISA·일반계좌에서 채웁니다. 저율 구간은 그해 안 쓰면 사라지므로 ISA를 먼저 헐어 아껴둘 이유가 없습니다.
+          <strong>그해 세금 최소</strong>는 눈앞의 세금만 보고 고르기 때문에 비과세인 ISA부터 몽땅 빼는 경향이 있습니다.
+          어느 쪽이든 연금수령한도·55세 요건을 지키며, 목표를 채우지 못하는 해는 자산을 태우는 대신 부족분을 경고로 알립니다.
+        </p>
+
       </div>
     </details>
   </section>
@@ -627,7 +630,7 @@ function defaultState() {
     transfers: [],
     allowPenalty: 0, planTarget: null,
     pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
-    pensionTotalCap: 1800, fillRules: [],
+    pensionTotalCap: 1800, fillRules: [], wdRules: [],
     rates: {}, limits: {}, fillAmts: {}, priority: {}, opening: {}, openYears: {},
   };
   ACC.forEach(a => {
@@ -709,6 +712,31 @@ function activeTransfers(cfg, y) {
     out.push({ from: t.from, to: t.to, amt: clamp0(+t.amt) });
   }
   return out;
+}
+
+/** 규칙 한 줄의 그해 금액 (월 단위면 12배, 증액률 복리) */
+function ruleAmount(r, y) {
+  if (!r || y < r.from || y > r.to) return 0;
+  const base = r.unit === "month" ? clamp0(r.amt) * 12 : clamp0(r.amt);
+  return base * Math.pow(1 + clamp0(r.growth) / 100, y - r.from);
+}
+/** 그해 목표 생활비 (「목표 생활비 자동 배분」 규칙의 합) */
+function wdTargetOf(cfg, y) {
+  return (cfg.wdRules || []).reduce((s, r) => s + (r.target === "plan" ? ruleAmount(r, y) : 0), 0);
+}
+/** 그해 계좌 지정 인출액 */
+function wdFixedOf(cfg, y) {
+  const out = {};
+  for (const r of (cfg.wdRules || [])) {
+    if (r.target === "plan" || !byId[r.target]) continue;
+    const v = ruleAmount(r, y);
+    if (v > 0) out[r.target] = (out[r.target] || 0) + v;
+  }
+  return out;
+}
+/** 그해에 인출 규칙이 하나라도 걸려 있는가 */
+function wdActive(cfg, y) {
+  return (cfg.wdRules || []).some(r => r && y >= r.from && y <= r.to);
 }
 
 function emptyBuckets() { return { free: 0, ded: 0, sev: 0, gain: 0 }; }
@@ -835,8 +863,11 @@ function applyWithdrawals(st, draws, ctx) {
  * 세율표에는 계단(연금소득 1,500만원 분리과세 전환)이 있어 단순 탐욕법은 그 앞에서 멈춘다.
  * 기본 스텝으로 개선되는 계좌가 하나도 없으면 청크를 2배씩 키워 계단을 넘어본다.
  */
-function greedyDraws(st, ctx, target, strategy) {
-  const draws = Object.fromEntries(AID.map(id => [id, 0]));
+function greedyDraws(st, ctx, target, strategy, seed) {
+  // seed = 사용자가 계좌를 찍어 넣은 고정 인출액. 여기서 출발해 모자란 만큼만 더 채우고,
+  // 되돌리기 단계에서도 이 아래로는 깎지 않는다 (명시적 지시라서).
+  const floor = Object.fromEntries(AID.map(id => [id, Math.max(0, Math.round(clamp0(seed && seed[id])))]));
+  const draws = { ...floor };
   const evalDraws = d => applyWithdrawals({ bal: cloneBal(st.bal), isaUsed: st.isaUsed }, d, ctx);
   let cur = evalDraws(draws).net;
   if (cur >= target) return draws;
@@ -902,9 +933,9 @@ function greedyDraws(st, ctx, target, strategy) {
   if (cur > target + 0.5) {
     const det = evalDraws(draws).det;
     const rateOf = id => (det[id].gross > 0 ? det[id].tax / det[id].gross : 0);
-    const order = AID.filter(id => draws[id] > 0.5).sort((a, b) => rateOf(b) - rateOf(a));
+    const order = AID.filter(id => draws[id] > floor[id] + 0.5).sort((a, b) => rateOf(b) - rateOf(a));
     for (const id of order) {
-      let lo = 0, hi = draws[id];
+      let lo = floor[id], hi = draws[id];
       for (let i = 0; i < 24; i++) {
         const mid = (lo + hi) / 2;
         const trial = { ...draws }; trial[id] = mid;
@@ -1062,10 +1093,16 @@ function simulate(opts = {}) {
 
     // ---- 인출
     let draws;
-    if (opts.plan && y >= opts.plan.from && y <= opts.plan.to) {
-      const nps = age >= cfg.npsAge ? clamp0(cfg.npsAmount) * (1 - cfg.npsRate / 100) : 0;
-      const target = Math.max(0, opts.plan.targetOf(y) - nps);
-      draws = greedyDraws(st, ctx, target, cfg.wdStrategy);
+    if (opts.plan && wdActive(cfg, y)) {
+      const fixed = wdFixedOf(cfg, y);
+      const seed = Object.fromEntries(AID.map(id => [id, Math.round(clamp0(fixed[id]))]));
+      const want = wdTargetOf(cfg, y);
+      if (want > 0) {
+        const nps = age >= cfg.npsAge ? clamp0(cfg.npsAmount) * (1 - cfg.npsRate / 100) : 0;
+        draws = greedyDraws(st, ctx, Math.max(0, want - nps), cfg.wdStrategy, seed);
+      } else {
+        draws = seed;
+      }
       planDraws[y] = draws;
     } else {
       draws = Object.fromEntries(AID.map(id => [id, clamp0(r[id].out)]));
@@ -1105,10 +1142,9 @@ function simulate(opts = {}) {
     rec.pool = pool; // 전 계좌 합산 재원 구성 — 앞으로 얼마를 비과세로 뺄 수 있는지
     rec.deflator = Math.pow(1 + cfg.inflation / 100, y - cfg.startYear);
 
-    // 저장된 인출 계획 대비 목표 미달 여부
-    const pt = cfg.planTarget;
-    if (pt && y >= pt.from && y <= pt.to) {
-      const want = pt.basis === "real" ? pt.target * Math.pow(1 + cfg.inflation / 100, y - cfg.startYear) : pt.target;
+    // 목표 생활비 규칙 대비 미달 여부
+    const want = wdTargetOf(cfg, y);
+    if (want > 0) {
       rec.target = want;
       if (res.net < want - Math.max(1, want * .01)) shortYears.push({ y, want, got: res.net });
     }
@@ -1628,6 +1664,43 @@ function renderFillRules() {
   }));
 }
 
+/* ---- 인출 규칙 편집기 ---- */
+function renderWdRules() {
+  const box = document.getElementById("wdRows");
+  const list = state.cfg.wdRules;
+  if (!list.length) {
+    box.innerHTML = `<p class="hint" style="margin:0">규칙이 없습니다. 아래 버튼으로 추가하세요.</p>`;
+    return;
+  }
+  const tgt = sel => `<option value="plan"${sel === "plan" ? " selected" : ""}>⭐ 목표 생활비 — 부족분 자동 배분</option>`
+    + ACC.map(a => `<option value="${a.id}"${a.id === sel ? " selected" : ""}>${a.name}에서만</option>`).join("");
+  box.innerHTML = list.map((r, i) => `
+    <div class="xrow">
+      <label class="f"><span class="t">시작</span><input type="number" data-w="from" data-i="${i}" value="${r.from}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-w="to" data-i="${i}" value="${r.to}"></label>
+      <label class="f"><span class="t">단위</span>
+        <select data-w="unit" data-i="${i}">
+          <option value="month"${r.unit === "month" ? " selected" : ""}>월</option>
+          <option value="year"${r.unit === "year" ? " selected" : ""}>연</option>
+        </select></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="10" data-w="amt" data-i="${i}" value="${r.amt}"></label>
+      <label class="f"><span class="t">매년 증액 %</span><input type="number" step="0.5" data-w="growth" data-i="${i}" value="${r.growth || 0}"></label>
+      <label class="f" style="grid-column:span 2"><span class="t">뺄 곳</span>
+        <select data-w="target" data-i="${i}">${tgt(r.target)}</select></label>
+      <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-wdel="${i}">삭제</button></label>
+    </div>`).join("");
+
+  box.querySelectorAll("[data-w]").forEach(n => n.addEventListener("input", () => {
+    const r = state.cfg.wdRules[+n.dataset.i];
+    r[n.dataset.w] = (n.dataset.w === "unit" || n.dataset.w === "target") ? n.value : num(n.value);
+    save();
+  }));
+  box.querySelectorAll("[data-wdel]").forEach(n => n.addEventListener("click", () => {
+    state.cfg.wdRules.splice(+n.dataset.wdel, 1);
+    renderWdRules(); save();
+  }));
+}
+
 /* ---- 계좌 간 이전 편집기 ---- */
 const XFER_FROM = ACC.filter(a => a.kind === "isa" || a.kind === "pension");
 const XFER_TO = ACC.filter(a => a.kind === "pension");
@@ -1681,8 +1754,6 @@ function syncCfgInputs() {
   const sb = document.getElementById("cfg_showBuckets");
   if (sb) sb.checked = !!state.cfg.showBuckets;
   syncOpening();
-  document.getElementById("wd_from").value = state.cfg.retireYear;
-  document.getElementById("wd_to").value = state.cfg.endYear;
 }
 
 function bindCfg() {
@@ -1765,24 +1836,36 @@ function doFill() {
   render(true, true);
 }
 function doPlan() {
-  const from = num(document.getElementById("wd_from").value);
-  const to = num(document.getElementById("wd_to").value);
-  const target = num(document.getElementById("wd_target").value);
-  const basis = document.getElementById("wd_basis").value;
-  const infl = state.cfg.inflation / 100;
+  const rules = (state.cfg.wdRules || []).filter(r => r && r.to >= r.from);
+  const out = document.getElementById("wdResult");
+  if (!rules.length) { if (out) out.textContent = "규칙이 없습니다. 「+ 목표 생활비」나 「+ 계좌 지정 인출」로 만들어 보세요."; return; }
+
   const btn = document.getElementById("btnPlan");
   btn.textContent = "계산 중…"; btn.disabled = true;
   setTimeout(() => {
-    const sim = simulate({ plan: { from, to, targetOf: y => basis === "real" ? target * Math.pow(1 + infl, y - state.cfg.startYear) : target } });
+    // 규칙이 걸린 연도의 인출액은 비우고 다시 채운다 (직접 고친 값과 섞이지 않게)
+    const touched = new Set();
+    for (const r of rules) for (let y = r.from; y <= r.to; y++) touched.add(y);
+    for (const y of touched) AID.forEach(id => { row(y)[id].out = 0; });
+
+    const sim = simulate({ plan: true });
     for (const y in sim.planDraws) AID.forEach(id => { row(+y)[id].out = sim.planDraws[y][id]; });
-    state.cfg.planTarget = { from, to, target, basis };
-    btn.textContent = "인출 계획 생성"; btn.disabled = false;
+
+    btn.textContent = "규칙대로 인출 채우기"; btn.disabled = false;
+    if (out) {
+      const first = Math.min(...rules.map(r => r.from));
+      const rw = row(first);
+      const parts = ACC.filter(a => clamp0(rw[a.id].out) > 0).map(a => `${a.abbr} ${fmt(rw[a.id].out)}`);
+      const want = wdTargetOf(state.cfg, first);
+      out.textContent = `${touched.size}개 연도를 채웠습니다. ${first}년 인출 — ${parts.join(" · ") || "없음"}`
+        + (want > 0 ? ` (목표 세후 ${fmt(want)}만원)` : "");
+    }
     render(true, true);
   }, 20);
 }
+
 function clearField(f) {
   Object.keys(state.rows).forEach(y => AID.forEach(id => { state.rows[y][id][f] = 0; }));
-  if (f === "out") state.cfg.planTarget = null;
   render(true, true);
 }
 
@@ -1798,6 +1881,18 @@ function migrateOpening(cfg, raw) {
   cfg.priority = { ...d.priority, ...(cfg.priority || {}) };
   for (const a of ACC) cfg.opening[a.id] = { free: 0, ded: 0, sev: 0, gain: 0, ...(cfg.opening[a.id] || {}) };
   // 예전 저장본의 계좌별 고정 금액을 계좌별 규칙으로 옮긴다
+  if (!Array.isArray(cfg.wdRules)) cfg.wdRules = [];
+  // 예전 저장본의 단발성 목표 생활비 설정을 인출 규칙으로 옮긴다
+  if (!Array.isArray(raw.wdRules) && raw.planTarget && raw.planTarget.target > 0) {
+    const pt = raw.planTarget;
+    const infl = clamp0(cfg.inflation);
+    cfg.wdRules = [{
+      from: pt.from, to: pt.to, unit: "year",
+      amt: Math.round(pt.basis === "real" ? pt.target * Math.pow(1 + infl / 100, pt.from - cfg.startYear) : pt.target),
+      growth: pt.basis === "real" ? infl : 0, target: "plan",
+    }];
+  }
+  delete cfg.planTarget;
   if (!Array.isArray(raw.fillRules)) {
     cfg.fillRules = ACC
       .filter(a => clamp0((cfg.fillAmts || {})[a.id]) > 0)
@@ -1874,6 +1969,7 @@ function seedExample() {
   const c = state.cfg;
   // 연 1,900만원을 우선순위대로 담으면 연금저축 600 + IRP 300 + ISA 1,000이 된다
   c.fillRules = [{ from: c.startYear, to: c.retireYear - 1, unit: "year", amt: 1900, growth: 0, target: "priority" }];
+  c.wdRules = [{ from: c.retireYear, to: c.endYear, unit: "year", amt: 2639, growth: c.inflation, target: "plan" }];
   applyFillRules();
   // 은퇴 시점에 퇴직금이 IRP로 들어온다고 가정
   row(c.retireYear).irpSev.in = 15000;
@@ -1885,6 +1981,7 @@ bindCfg();
 if (!load()) seedExample();
 syncCfgInputs();
 renderFillRules();
+renderWdRules();
 renderXfers();
 render(true, true);
 
@@ -1939,6 +2036,18 @@ document.getElementById("btnRuleStep").onclick = () => {
   renderFillRules(); save();
 };
 document.getElementById("btnPlan").onclick = doPlan;
+document.getElementById("btnAddWdPlan").onclick = () => {
+  const c = state.cfg;
+  c.wdRules.push({ from: c.retireYear, to: c.endYear, unit: "month", amt: 200,
+                   growth: clamp0(c.inflation), target: "plan" }); // 기본은 물가연동
+  renderWdRules(); save();
+};
+document.getElementById("btnAddWdAcc").onclick = () => {
+  const c = state.cfg;
+  c.wdRules.push({ from: c.retireYear, to: c.endYear, unit: "year",
+                   amt: clamp0(c.pensionCap) || 1500, growth: 0, target: "psDed" });
+  renderWdRules(); save();
+};
 document.getElementById("btnClearOut").onclick = () => clearField("out");
 document.getElementById("btnClearIn").onclick = () => clearField("in");
 document.getElementById("btnSave").onclick = () => { save(); const b = document.getElementById("btnSave"); b.textContent = "저장됨 ✓"; setTimeout(() => b.textContent = "저장", 1200); };
@@ -1956,7 +2065,7 @@ document.getElementById("btnImport").onclick = () => {
         if (!s.cfg) throw new Error("형식 오류");
         state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {} };
         migrateOpening(state.cfg, s.cfg); migrateTransfers(state.cfg);
-        builtRange = ""; renderFillRules(); renderXfers(); render(true, true);
+        builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); render(true, true);
       } catch (e) { alert("불러오기 실패: " + e.message); }
     };
     rd.readAsText(f);
@@ -1967,7 +2076,7 @@ document.getElementById("btnReset").onclick = () => {
   if (!confirm("모든 입력을 초기화할까요?")) return;
   localStorage.removeItem(LS_KEY);
   state = defaultState(); seedExample();
-  builtRange = ""; renderFillRules(); renderXfers(); render(true, true);
+  builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); render(true, true);
 };
 document.getElementById("btnTheme").onclick = () => {
   const cur = document.documentElement.getAttribute("data-theme");
