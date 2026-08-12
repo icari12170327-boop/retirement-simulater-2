@@ -178,6 +178,11 @@
   table.opentbl input { width: 92px; text-align: right; padding: 4px 6px; }
   table.opentbl .na { color: var(--muted); opacity: .4; }
   table.opentbl .osum { font-weight: 600; font-variant-numeric: tabular-nums; }
+  table.opentbl td.dim { color: var(--muted); opacity: .45; }
+  table.opentbl td.note { text-align: left; font-size: 11.5px; color: var(--text-secondary); white-space: normal; min-width: 190px; }
+  table.opentbl tr.sum th, table.opentbl tr.sum td { border-top: 1px solid var(--border-strong); font-weight: 600; }
+  tbody tr.picked td { background: var(--accent-soft); }
+  tbody tr.picked td.stick { background: var(--accent-soft); }
   table.opentbl .dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
 
   .xrow {
@@ -302,6 +307,21 @@
       </div>
     </div>
     <div class="tablebox" id="tablebox"></div>
+    <div class="hd" style="margin-top:16px">
+      <h3 style="margin:0">계좌별 재원 구성 — <span id="mxYearLabel">–</span></h3>
+      <label class="chk" style="border:none;padding:0"><span style="color:var(--muted)">표에서 연도를 클릭하면 그 해로 바뀝니다</span></label>
+    </div>
+    <div class="tablebox" style="max-height:none;margin-top:8px">
+      <table class="opentbl" id="mxTable"><thead><tr>
+        <th class="rowhd">계좌</th>
+        <th title="계좌마다 성격이 다릅니다 — 연금계좌는 비과세 원금(인출해도 세금 없음), ISA는 납입원금, 일반계좌는 취득가(단독으로 뺄 수 없음)">원금 <span style="color:var(--muted);font-weight:400">(성격별)</span></th>
+        <th title="세액공제를 받은 납입액 — 인출 시 연금소득세">세액공제 원금</th>
+        <th title="퇴직금 재원 — 퇴직소득세(연금수령 시 70%·11년차부터 60%)">퇴직 재원</th>
+        <th title="굴려서 불어난 돈">운용수익 · 평가익</th>
+        <th>잔액</th>
+        <th>인출 시 세금</th>
+      </tr></thead><tbody id="mxRows"></tbody></table>
+    </div>
     <p class="hint">
       각 계좌의 <strong>납입</strong>과 <strong>인출</strong>만 입력하면 잔액·세금·세후 수령액이 자동으로 다시 계산됩니다.
       옅은 파란 칸이 입력란이고, 빨간 <span class="flag">!</span> 에 마우스를 올리면 한도 초과·요건 미달 사유가 나옵니다.
@@ -1187,7 +1207,7 @@ function simulate(opts = {}) {
       const b = st.bal[a.id];
       const bal = bTotal(b);
       total += bal;
-      for (const k of ["free", "ded", "sev", "gain"]) pool[k] += b[k];
+      if (a.kind === "pension") for (const k of ["free", "ded", "sev", "gain"]) pool[k] += b[k];
       Object.assign(rec.acc[a.id], {
         in: clamp0(r[a.id].in), out: res.det[a.id].gross, bal,
         tax: res.det[a.id].tax, flags: res.det[a.id].flags.slice(),
@@ -1212,7 +1232,7 @@ function simulate(opts = {}) {
     rec.nps = res.nps; rec.npsTax = res.npsTax;
     rec.taxablePension = res.taxablePension; rec.pRate = res.pRate;
     rec.total = total;
-    rec.pool = pool; // 전 계좌 합산 재원 구성 — 앞으로 얼마를 비과세로 뺄 수 있는지
+    rec.pool = pool; // 연금계좌 합산 재원 — 인출 순서와 세율이 갈리는 곳
     rec.deflator = Math.pow(1 + cfg.inflation / 100, y - cfg.startYear);
 
     // 목표 생활비 규칙 대비 미달 여부
@@ -1519,12 +1539,12 @@ function buildTable() {
   const showB = !!state.cfg.showBuckets;
   g1.innerHTML = `<th class="stick" colspan="2"></th>` +
     ACC.map(a => `<th colspan="3" class="gsep"><span class="dot" style="background:${css(a.color)}"></span>${a.name}</th>`).join("") +
-    (showB ? `<th colspan="3" class="gsep">남은 재원 (전 계좌 합산)</th>` : "") +
+    (showB ? `<th colspan="3" class="gsep">연금계좌 남은 재원 <span style="color:var(--muted);font-weight:400">(IRP+연금저축)</span></th>` : "") +
     `<th colspan="4" class="gsep">합계</th>`;
   const g2 = document.createElement("tr");
   g2.innerHTML = `<th class="stick">연도</th><th>나이</th>` +
     ACC.map(() => `<th class="gsep">납입</th><th>인출</th><th>잔액</th>`).join("") +
-    (showB ? `<th class="gsep" title="인출해도 세금이 없는 원금">비과세원금</th>`
+    (showB ? `<th class="gsep" title="세액공제를 받지 않은 연금계좌 원금 — 인출해도 세금이 없고 가장 먼저 빠져나갑니다">비과세원금</th>`
            + `<th title="퇴직금 재원 — 퇴직소득세(연금수령 시 70%·11년차부터 60%)">퇴직재원</th>`
            + `<th title="세액공제 원금 + 운용수익 — 연금소득세 대상">과세대상</th>` : "") +
     `<th class="gsep">총자산</th><th>총인출</th><th>세금</th><th>세후수령</th>`;
@@ -1539,6 +1559,7 @@ function buildTable() {
 
     const tdY = document.createElement("td");
     tdY.className = "stick yr"; tdY.textContent = y;
+    tr.addEventListener("click", e => { if (e.target.tagName === "INPUT") return; pickedYear = y; renderMatrix(lastSim); });
     const tdA = document.createElement("td");
     tdA.className = "agecol"; tdA.textContent = y - cfg.birthYear;
     ref.age = tdA;
@@ -1612,7 +1633,7 @@ function paintTable(sim, syncInputs) {
         node.classList.toggle("zero", v < .5);
       };
       put(ref.bFree, p.free); put(ref.bSev, p.sev); put(ref.bTax, taxed);
-      ref.bFree.title = "세금 없이 뺄 수 있는 원금 (세액공제 안 받은 연금저축 원금 + ISA 납입원금 + 일반계좌 취득가)";
+      ref.bFree.title = "세액공제를 받지 않은 연금계좌 원금 — 인출해도 세금이 없습니다.\nISA 납입원금과 일반계좌 취득가는 규칙이 달라 여기에 넣지 않습니다(각 계좌 잔액 칸 참고).";
       ref.bSev.title = "퇴직금 재원 잔액 — 연금으로 받으면 퇴직소득세의 70%(11년차부터 60%)";
       ref.bTax.title = "세액공제 원금 + 운용수익 — 연금소득세 대상";
     }
@@ -1637,6 +1658,52 @@ function paintTable(sim, syncInputs) {
     ref.total.title = nt.join("\n");
     ref.total.classList.toggle("xfer", !!rec.transfers);
   }
+}
+
+/** 선택한 해의 계좌 × 재원 매트릭스. 합산 열만으로는 어느 계좌 몫인지 알 수 없어서 따로 둔다. */
+let pickedYear = null;
+function renderMatrix(sim) {
+  const box = document.getElementById("mxRows");
+  if (!box) return;
+  const cfg = state.cfg;
+  if (pickedYear == null || pickedYear < cfg.startYear || pickedYear > cfg.endYear) pickedYear = cfg.retireYear;
+  const rec = sim.years.find(r => r.year === pickedYear) || sim.years[sim.years.length - 1];
+  const lab = document.getElementById("mxYearLabel");
+  if (!rec) { box.innerHTML = ""; if (lab) lab.textContent = "–"; return; }
+  if (lab) lab.textContent = `${rec.year}년 · 만 ${rec.age}세${cfg.realView ? " · 실질" : ""}`;
+
+  // 계좌 성격에 따라 인출 시 무엇이 붙는지 한 줄로 적어준다
+  const note = a => {
+    if (a.kind === "isa") return "원금까지 비과세 · 초과분은 한도 차감 후 9.9%";
+    if (a.kind === "taxable") return "매도 시 취득가·평가익이 비중대로 함께 실현, 평가익만 과세";
+    if (a.sev) return "퇴직소득세(연금수령 시 70%·11년차부터 60%)";
+    return "비과세 원금 → 퇴직 재원 → 공제원금+수익 순, 마지막 몫만 연금소득세";
+  };
+  const cell = (a, k, v) => accBuckets(a).includes(k)
+    ? `<td${v < .5 ? ' class="dim"' : ""} title="${bucketLabel(a, k)}">${v >= .5 ? fmt(deflate(v, rec)) : "–"}</td>`
+    : `<td class="na">–</td>`;
+
+  const tot = { free: 0, ded: 0, sev: 0, gain: 0, bal: 0 };
+  box.innerHTML = ACC.map(a => {
+    const d = rec.acc[a.id], b = d.buckets;
+    ["free", "ded", "sev", "gain"].forEach(k => { tot[k] += b[k]; });
+    tot.bal += d.bal;
+    return `<tr>
+      <th class="rowhd"><span class="dot" style="background:${css(a.color)}"></span>${a.name}</th>
+      ${cell(a, "free", b.free)}${cell(a, "ded", b.ded)}${cell(a, "sev", b.sev)}${cell(a, "gain", b.gain)}
+      <td class="osum${d.bal < .5 ? " dim" : ""}">${d.bal >= .5 ? fmt(deflate(d.bal, rec)) : "–"}</td>
+      <td class="note">${note(a)}</td>
+    </tr>`;
+  }).join("")
+  + `<tr class="sum"><th class="rowhd">합계</th>`
+  + ["free", "ded", "sev", "gain"].map(k => `<td>${tot[k] >= .5 ? fmt(deflate(tot[k], rec)) : "–"}</td>`).join("")
+  + `<td class="osum">${fmt(deflate(tot.bal, rec))}</td>`
+  + `<td class="note">원금 열은 계좌마다 성격이 달라 단순 합산입니다. `
+  + `<strong>세금 없이 뺄 수 있는 연금계좌 비과세 원금은 ${fmt(deflate(rec.pool.free, rec))}만원</strong>입니다.</td></tr>`;
+
+  document.querySelectorAll("#tablebox tbody tr").forEach(tr => {
+    tr.classList.toggle("picked", +tr.children[0].textContent === pickedYear);
+  });
 }
 
 /* ========================================================================
@@ -2035,6 +2102,7 @@ function render(rebuild, syncInputs) {
   renderKpis(sim);
   renderWarnings(sim);
   paintTable(sim, !!syncInputs);
+  renderMatrix(sim);
   renderChart1(sim);
   renderChart2(sim);
   save();
