@@ -311,14 +311,25 @@
   <!-- ================= 자동 채우기 ================= -->
   <section class="panel">
     <h2>4. 자동 채우기</h2>
-    <h3>적립기 — 계좌별 연 납입액을 한 번에</h3>
-    <div class="fgrid">
-      <label class="f"><span class="t">시작연도</span><input type="number" id="fill_from"></label>
-      <label class="f"><span class="t">종료연도</span><input type="number" id="fill_to"></label>
-      <label class="f"><span class="t">매년 증액률 %</span><input type="number" step="0.5" id="fill_growth" value="0"></label>
-      <label class="f"><span class="t">&nbsp;</span><button type="button" class="primary" id="btnFill">납입 채우기</button></label>
+    <h3>적립기 — 조건을 정해두면 그대로 쫙 채웁니다</h3>
+    <div id="fillRows"></div>
+    <div class="btnrow" style="margin-top:10px">
+      <button type="button" class="primary" id="btnFill">규칙대로 납입 채우기</button>
+      <button type="button" id="btnAddRule">+ 규칙 추가</button>
+      <button type="button" id="btnRuleLump">+ 목돈 한 해만</button>
+      <button type="button" id="btnRuleStep">+ 은퇴까지 단계별 증액 예시</button>
     </div>
-    <div class="fgrid" id="fillAmts" style="margin-top:12px"></div>
+    <p class="hint" id="fillResult" style="margin-top:8px"></p>
+    <p class="hint">
+      규칙마다 <strong>기간 · 월/연 금액 · 매년 증액률 · 넣을 곳</strong>을 정합니다. 여러 줄을 쌓으면 합쳐서 적용되고,
+      규칙이 걸린 연도의 납입액은 <strong>매번 비우고 다시 채웁니다</strong>(직접 고친 값이 남아 섞이지 않게).
+    </p>
+    <p class="hint">
+      <strong>⭐ 우선순위대로 자동 배분</strong>을 고르면 그해 총 투자금액을 <strong>절세에 유리한 순서로</strong> 알아서 나눠 담습니다 —
+      기본 순서는 연금저축(세액공제) → IRP 투자용 → ISA → 연금저축(비과세) → 일반계좌이고,
+      각 계좌의 연 납입한도와 <strong>연금계좌 합산 한도(1,800만원)</strong>를 넘지 않게 채운 뒤 남는 돈은 다음 계좌로 넘깁니다.
+      순서와 한도는 아래 <em>계좌별 수익률 · 한도 · 적립 우선순위</em>에서 바꾸세요(우선순위 0 = 자동 배분에서 제외).
+    </p>
 
     <details class="grp" open>
       <summary>인출기 — 목표 생활비로 세금 최소 인출 계획 자동 생성</summary>
@@ -438,11 +449,24 @@
     </details>
 
     <details class="grp" open>
-      <summary>계좌별 수익률 · 연 납입한도</summary>
+      <summary>계좌별 수익률 · 연 납입한도 · 적립 우선순위</summary>
       <div class="body">
-        <div class="fgrid" id="accCfg"></div>
+        <div class="tablebox" style="max-height:none">
+          <table class="opentbl">
+            <thead><tr>
+              <th class="rowhd">계좌</th>
+              <th>수익률 %</th>
+              <th title="표에 경고를 띄우는 기준이자 자동 배분의 상한. 0 = 무제한">연 납입한도</th>
+              <th title="자동 배분에서 채워지는 순서. 낮을수록 먼저. 0이면 자동 배분에서 제외">적립 우선순위</th>
+            </tr></thead>
+            <tbody id="accCfg"></tbody>
+          </table>
+        </div>
+        <div class="fgrid" style="margin-top:12px">
+          <label class="f"><span class="t">연금계좌 합산 납입한도</span><input type="number" step="100" id="cfg_pensionTotalCap"></label>
+        </div>
         <p class="hint">
-          한도는 <em>표에 경고를 띄우는 기준</em>일 뿐, 입력 자체를 막지는 않습니다.
+          한도는 <em>표에 경고를 띄우는 기준</em>이자 <em>자동 배분의 상한</em>입니다. 직접 입력을 막지는 않습니다.
           법정 한도 — 연금저축+IRP 납입 합계 연 1,800만 / 세액공제 대상 연 900만(연금저축은 그중 600만까지) / ISA 연 2,000만·총 1억.
         </p>
       </div>
@@ -553,12 +577,12 @@
    계좌 정의
    ======================================================================== */
 const ACC = [
-  { id:"isa",    name:"ISA",                 abbr:"ISA",        kind:"isa",     color:"--s1", rate:5.0, limit:2000, fill:1000 },
-  { id:"irpInv", name:"IRP · 투자용",         abbr:"IRP 투자",   kind:"pension", color:"--s2", rate:5.5, limit:300,  fill:300, ded:true },
-  { id:"irpSev", name:"IRP · 퇴직금 수령",     abbr:"IRP 퇴직",   kind:"pension", color:"--s3", rate:4.0, limit:0,    fill:0,   sev:true },
-  { id:"psDed",  name:"연금저축 · 세액공제용",  abbr:"연저 공제",  kind:"pension", color:"--s4", rate:5.5, limit:600,  fill:600, ded:true },
-  { id:"psFree", name:"연금저축 · 비과세용",    abbr:"연저 비과세", kind:"pension", color:"--s5", rate:6.0, limit:900,  fill:0 },
-  { id:"taxable", name:"일반계좌 · 직접투자",   abbr:"일반계좌",   kind:"taxable", color:"--s6", rate:6.0, limit:0,    fill:0 },
+  { id:"isa",    name:"ISA",                 abbr:"ISA",        kind:"isa",     color:"--s1", rate:5.0, limit:2000, fill:1000, prio:3 },
+  { id:"irpInv", name:"IRP · 투자용",         abbr:"IRP 투자",   kind:"pension", color:"--s2", rate:5.5, limit:300,  fill:300, ded:true, prio:2 },
+  { id:"irpSev", name:"IRP · 퇴직금 수령",     abbr:"IRP 퇴직",   kind:"pension", color:"--s3", rate:4.0, limit:0,    fill:0,   sev:true, prio:0 },
+  { id:"psDed",  name:"연금저축 · 세액공제용",  abbr:"연저 공제",  kind:"pension", color:"--s4", rate:5.5, limit:600,  fill:600, ded:true, prio:1 },
+  { id:"psFree", name:"연금저축 · 비과세용",    abbr:"연저 비과세", kind:"pension", color:"--s5", rate:6.0, limit:900,  fill:0,   prio:4 },
+  { id:"taxable", name:"일반계좌 · 직접투자",   abbr:"일반계좌",   kind:"taxable", color:"--s6", rate:6.0, limit:0,    fill:0,   prio:5 },
 ];
 const AID = ACC.map(a => a.id);
 const byId = Object.fromEntries(ACC.map(a => [a.id, a]));
@@ -603,10 +627,12 @@ function defaultState() {
     transfers: [],
     allowPenalty: 0, planTarget: null,
     pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
-    rates: {}, limits: {}, fillAmts: {}, opening: {}, openYears: {},
+    pensionTotalCap: 1800, fillRules: [],
+    rates: {}, limits: {}, fillAmts: {}, priority: {}, opening: {}, openYears: {},
   };
   ACC.forEach(a => {
     cfg.rates[a.id] = a.rate; cfg.limits[a.id] = a.limit; cfg.fillAmts[a.id] = a.fill;
+    cfg.priority[a.id] = a.prio;
     cfg.opening[a.id] = { free: 0, ded: 0, sev: 0, gain: 0 };
     cfg.openYears[a.id] = 0;
   });
@@ -1507,19 +1533,15 @@ function paintTable(sim, syncInputs) {
    ======================================================================== */
 function buildAccCfg() {
   const wrap = document.getElementById("accCfg");
-  wrap.innerHTML = ACC.map(a => `
-    <label class="f"><span class="t"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${css(a.color)}"></span>${a.abbr} 수익률 %</span>
-      <input type="number" step="0.1" data-rate="${a.id}"></label>
-    <label class="f"><span class="t">${a.abbr} 연 납입한도</span>
-      <input type="number" step="50" data-limit="${a.id}"></label>`).join("");
-  const fw = document.getElementById("fillAmts");
-  fw.innerHTML = ACC.map(a => `
-    <label class="f"><span class="t"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${css(a.color)}"></span>${a.name}</span>
-      <input type="number" step="50" data-fill="${a.id}"></label>`).join("");
-
+  wrap.innerHTML = ACC.map(a => `<tr>
+      <th class="rowhd"><span class="dot" style="background:${css(a.color)}"></span>${a.name}</th>
+      <td><input type="number" step="0.1" data-rate="${a.id}"></td>
+      <td><input type="number" step="50" data-limit="${a.id}"></td>
+      <td><input type="number" step="1" min="0" data-prio="${a.id}"></td>
+    </tr>`).join("");
   wrap.querySelectorAll("[data-rate]").forEach(i => i.addEventListener("input", () => { state.cfg.rates[i.dataset.rate] = num(i.value); render(false); }));
   wrap.querySelectorAll("[data-limit]").forEach(i => i.addEventListener("input", () => { state.cfg.limits[i.dataset.limit] = num(i.value); render(false); }));
-  fw.querySelectorAll("[data-fill]").forEach(i => i.addEventListener("input", () => { state.cfg.fillAmts[i.dataset.fill] = num(i.value); }));
+  wrap.querySelectorAll("[data-prio]").forEach(i => i.addEventListener("input", () => { state.cfg.priority[i.dataset.prio] = num(i.value); save(); }));
 }
 
 /* ---- 기초 잔액 편집기 — 이미 굴리고 있는 계좌를 자금 성격별로 심는다 ---- */
@@ -1569,6 +1591,43 @@ function syncOpening() {
   if (g) g.textContent = grand > 0 ? fmt(grand) + "만원" : "없음 (0부터 시작)";
 }
 
+/* ---- 적립 규칙 편집기 ---- */
+function renderFillRules() {
+  const box = document.getElementById("fillRows");
+  const list = state.cfg.fillRules;
+  if (!list.length) {
+    box.innerHTML = `<p class="hint" style="margin:0">규칙이 없습니다. 아래 버튼으로 추가하세요.</p>`;
+    return;
+  }
+  const tgt = (sel) => `<option value="priority"${sel === "priority" ? " selected" : ""}>⭐ 우선순위대로 자동 배분</option>`
+    + ACC.map(a => `<option value="${a.id}"${a.id === sel ? " selected" : ""}>${a.name}만</option>`).join("");
+  box.innerHTML = list.map((r, i) => `
+    <div class="xrow">
+      <label class="f"><span class="t">시작</span><input type="number" data-r="from" data-i="${i}" value="${r.from}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-r="to" data-i="${i}" value="${r.to}"></label>
+      <label class="f"><span class="t">단위</span>
+        <select data-r="unit" data-i="${i}">
+          <option value="month"${r.unit === "month" ? " selected" : ""}>월</option>
+          <option value="year"${r.unit === "year" ? " selected" : ""}>연</option>
+        </select></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="10" data-r="amt" data-i="${i}" value="${r.amt}"></label>
+      <label class="f"><span class="t">매년 증액 %</span><input type="number" step="0.5" data-r="growth" data-i="${i}" value="${r.growth || 0}"></label>
+      <label class="f" style="grid-column:span 2"><span class="t">넣을 곳</span>
+        <select data-r="target" data-i="${i}">${tgt(r.target)}</select></label>
+      <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-rdel="${i}">삭제</button></label>
+    </div>`).join("");
+
+  box.querySelectorAll("[data-r]").forEach(n => n.addEventListener("input", () => {
+    const r = state.cfg.fillRules[+n.dataset.i];
+    r[n.dataset.r] = (n.dataset.r === "unit" || n.dataset.r === "target") ? n.value : num(n.value);
+    save();
+  }));
+  box.querySelectorAll("[data-rdel]").forEach(n => n.addEventListener("click", () => {
+    state.cfg.fillRules.splice(+n.dataset.rdel, 1);
+    renderFillRules(); save();
+  }));
+}
+
 /* ---- 계좌 간 이전 편집기 ---- */
 const XFER_FROM = ACC.filter(a => a.kind === "isa" || a.kind === "pension");
 const XFER_TO = ACC.filter(a => a.kind === "pension");
@@ -1605,7 +1664,7 @@ function renderXfers() {
 
 const CFG_FIELDS = ["birthYear", "startYear", "retireYear", "endYear", "inflation", "salaryTier", "isaType",
   "timing", "realView", "sevRate", "compRate", "npsAmount", "npsAge", "npsRate",
-  "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap"];
+  "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap", "pensionTotalCap"];
 /** 값을 문자열 그대로 보관하는 필드 — 나머지는 숫자로 변환한다 */
 const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStrategy"]);
 
@@ -1617,13 +1676,11 @@ function syncCfgInputs() {
   ACC.forEach(a => {
     const r = document.querySelector(`[data-rate="${a.id}"]`); if (r) r.value = state.cfg.rates[a.id];
     const l = document.querySelector(`[data-limit="${a.id}"]`); if (l) l.value = state.cfg.limits[a.id];
-    const f = document.querySelector(`[data-fill="${a.id}"]`); if (f) f.value = state.cfg.fillAmts[a.id];
+    const pr = document.querySelector(`[data-prio="${a.id}"]`); if (pr) pr.value = clamp0(state.cfg.priority[a.id]);
   });
   const sb = document.getElementById("cfg_showBuckets");
   if (sb) sb.checked = !!state.cfg.showBuckets;
   syncOpening();
-  document.getElementById("fill_from").value = state.cfg.startYear;
-  document.getElementById("fill_to").value = state.cfg.retireYear - 1;
   document.getElementById("wd_from").value = state.cfg.retireYear;
   document.getElementById("wd_to").value = state.cfg.endYear;
 }
@@ -1646,13 +1703,64 @@ function bindCfg() {
 /* ========================================================================
    액션
    ======================================================================== */
+/**
+ * 한 해의 총 납입액을 계좌 우선순위대로 배분한다.
+ * 각 계좌의 연 납입한도(0=무제한)를 차례로 채우고, 연금계좌는 합산 한도도 함께 지킨다.
+ * 반환값은 어디에도 담지 못하고 남은 금액.
+ */
+function allocByPriority(y, annual) {
+  const cfg = state.cfg, rw = row(y);
+  let left = annual;
+  let pensionRoom = Math.max(0, clamp0(cfg.pensionTotalCap) - PENSION.reduce((s, id) => s + clamp0(rw[id].in), 0));
+  const order = ACC.filter(a => clamp0(cfg.priority[a.id]) > 0)
+    .sort((a, b) => cfg.priority[a.id] - cfg.priority[b.id]);
+
+  for (const a of order) {
+    if (left <= 0.5) break;
+    const lim = clamp0(cfg.limits[a.id]);
+    let room = lim > 0 ? Math.max(0, lim - clamp0(rw[a.id].in)) : Infinity;
+    if (a.kind === "pension") room = Math.min(room, pensionRoom);
+    const give = Math.min(left, room);
+    if (give <= 0.5) continue;
+    rw[a.id].in = clamp0(rw[a.id].in) + Math.round(give);
+    left -= give;
+    if (a.kind === "pension") pensionRoom -= give;
+  }
+  return left;
+}
+
+/** 적립 규칙을 연도별 납입액으로 펼친다 (렌더는 하지 않는다) */
+function applyFillRules() {
+  const rules = (state.cfg.fillRules || []).filter(r => r && r.to >= r.from);
+  const touched = new Set();
+  for (const r of rules) for (let y = r.from; y <= r.to; y++) touched.add(y);
+  for (const y of touched) AID.forEach(id => { row(y)[id].in = 0; }); // 규칙이 미치는 해만 비우고 다시 채운다
+
+  let spill = 0;
+  for (const r of rules) {
+    for (let y = r.from; y <= r.to; y++) {
+      const k = Math.pow(1 + clamp0(r.growth) / 100, y - r.from);
+      const annual = (r.unit === "month" ? clamp0(r.amt) * 12 : clamp0(r.amt)) * k;
+      if (annual <= 0.5) continue;
+      if (r.target === "priority") spill += allocByPriority(y, annual);
+      else if (byId[r.target]) row(y)[r.target].in = clamp0(row(y)[r.target].in) + Math.round(annual);
+    }
+  }
+  return { years: touched.size, spill };
+}
+
 function doFill() {
-  const from = num(document.getElementById("fill_from").value);
-  const to = num(document.getElementById("fill_to").value);
-  const g = num(document.getElementById("fill_growth").value) / 100;
-  for (let y = from; y <= to; y++) {
-    const k = Math.pow(1 + g, y - from);
-    ACC.forEach(a => { row(y)[a.id].in = Math.round((state.cfg.fillAmts[a.id] || 0) * k); });
+  const res = applyFillRules();
+  const out = document.getElementById("fillResult");
+  if (out) {
+    if (!res.years) out.textContent = "규칙이 없습니다. 「+ 규칙 추가」로 만들어 보세요.";
+    else {
+      const first = Math.min(...(state.cfg.fillRules || []).filter(r => r.to >= r.from).map(r => r.from));
+      const rw = row(first);
+      const parts = ACC.filter(a => clamp0(rw[a.id].in) > 0).map(a => `${a.abbr} ${fmt(rw[a.id].in)}`);
+      out.textContent = `${res.years}개 연도를 채웠습니다. ${first}년 배분 — ${parts.join(" · ") || "없음"}`
+        + (res.spill > 0.5 ? ` · 한도를 다 채우고도 ${fmt(res.spill)}만원이 남아 버려졌습니다(무제한 계좌의 우선순위를 켜 주세요)` : "");
+    }
   }
   render(true, true);
 }
@@ -1682,11 +1790,20 @@ function clearField(f) {
    저장 / 불러오기
    ======================================================================== */
 /** 계좌·버킷이 늘어난 뒤 불러온 저장본에 빠진 칸을 채운다 */
-function migrateOpening(cfg) {
+function migrateOpening(cfg, raw) {
   const d = defaultState().cfg;
+  raw = raw || {};
   cfg.opening = { ...d.opening, ...(cfg.opening || {}) };
   cfg.openYears = { ...d.openYears, ...(cfg.openYears || {}) };
+  cfg.priority = { ...d.priority, ...(cfg.priority || {}) };
   for (const a of ACC) cfg.opening[a.id] = { free: 0, ded: 0, sev: 0, gain: 0, ...(cfg.opening[a.id] || {}) };
+  // 예전 저장본의 계좌별 고정 금액을 계좌별 규칙으로 옮긴다
+  if (!Array.isArray(raw.fillRules)) {
+    cfg.fillRules = ACC
+      .filter(a => clamp0((cfg.fillAmts || {})[a.id]) > 0)
+      .map(a => ({ from: cfg.startYear, to: Math.max(cfg.startYear, cfg.retireYear - 1),
+                   unit: "year", amt: clamp0(cfg.fillAmts[a.id]), growth: 0, target: a.id }));
+  }
 }
 
 /** 예전 저장본의 단발성 ISA 전환 설정을 이전 목록으로 옮긴다 */
@@ -1709,7 +1826,7 @@ function load() {
     state.cfg.rates = { ...defaultState().cfg.rates, ...(s.cfg.rates || {}) };
     state.cfg.limits = { ...defaultState().cfg.limits, ...(s.cfg.limits || {}) };
     state.cfg.fillAmts = { ...defaultState().cfg.fillAmts, ...(s.cfg.fillAmts || {}) };
-    migrateOpening(state.cfg);
+    migrateOpening(state.cfg, s.cfg);
     migrateTransfers(state.cfg);
     return true;
   } catch (e) { return false; }
@@ -1755,12 +1872,9 @@ function render(rebuild, syncInputs) {
    ======================================================================== */
 function seedExample() {
   const c = state.cfg;
-  for (let y = c.startYear; y < c.retireYear; y++) {
-    row(y).isa.in = 1000;
-    row(y).irpInv.in = 300;
-    row(y).psDed.in = 600;
-    row(y).psFree.in = 0;
-  }
+  // 연 1,900만원을 우선순위대로 담으면 연금저축 600 + IRP 300 + ISA 1,000이 된다
+  c.fillRules = [{ from: c.startYear, to: c.retireYear - 1, unit: "year", amt: 1900, growth: 0, target: "priority" }];
+  applyFillRules();
   // 은퇴 시점에 퇴직금이 IRP로 들어온다고 가정
   row(c.retireYear).irpSev.in = 15000;
 }
@@ -1770,6 +1884,7 @@ buildOpening();
 bindCfg();
 if (!load()) seedExample();
 syncCfgInputs();
+renderFillRules();
 renderXfers();
 render(true, true);
 
@@ -1804,6 +1919,25 @@ document.getElementById("btnJumpRetire").onclick = () => {
   if (tr) box.scrollTop = Math.max(0, tr.offsetTop - box.querySelector("thead").offsetHeight - 8);
 };
 document.getElementById("btnFill").onclick = doFill;
+document.getElementById("btnAddRule").onclick = () => {
+  const c = state.cfg;
+  c.fillRules.push({ from: c.startYear, to: Math.max(c.startYear, c.retireYear - 1),
+                     unit: "month", amt: 100, growth: 0, target: "priority" });
+  renderFillRules(); save();
+};
+document.getElementById("btnRuleLump").onclick = () => {
+  const c = state.cfg;
+  const y = Math.min(c.retireYear, c.startYear + 4);
+  c.fillRules.push({ from: y, to: y, unit: "year", amt: 10000, growth: 0, target: "taxable" });
+  renderFillRules(); save();
+};
+document.getElementById("btnRuleStep").onclick = () => {
+  const c = state.cfg, mid = Math.floor((c.startYear + c.retireYear) / 2);
+  c.fillRules.push(
+    { from: c.startYear, to: mid - 1, unit: "month", amt: 150, growth: 0, target: "priority" },
+    { from: mid, to: Math.max(mid, c.retireYear - 1), unit: "month", amt: 250, growth: 0, target: "priority" });
+  renderFillRules(); save();
+};
 document.getElementById("btnPlan").onclick = doPlan;
 document.getElementById("btnClearOut").onclick = () => clearField("out");
 document.getElementById("btnClearIn").onclick = () => clearField("in");
@@ -1821,8 +1955,8 @@ document.getElementById("btnImport").onclick = () => {
         const s = JSON.parse(rd.result);
         if (!s.cfg) throw new Error("형식 오류");
         state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {} };
-        migrateOpening(state.cfg); migrateTransfers(state.cfg);
-        builtRange = ""; renderXfers(); render(true, true);
+        migrateOpening(state.cfg, s.cfg); migrateTransfers(state.cfg);
+        builtRange = ""; renderFillRules(); renderXfers(); render(true, true);
       } catch (e) { alert("불러오기 실패: " + e.message); }
     };
     rd.readAsText(f);
@@ -1833,7 +1967,7 @@ document.getElementById("btnReset").onclick = () => {
   if (!confirm("모든 입력을 초기화할까요?")) return;
   localStorage.removeItem(LS_KEY);
   state = defaultState(); seedExample();
-  builtRange = ""; renderXfers(); render(true, true);
+  builtRange = ""; renderFillRules(); renderXfers(); render(true, true);
 };
 document.getElementById("btnTheme").onclick = () => {
   const cur = document.documentElement.getAttribute("data-theme");
