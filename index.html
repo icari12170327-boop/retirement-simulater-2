@@ -581,8 +581,8 @@
    ======================================================================== */
 const ACC = [
   { id:"isa",    name:"ISA",                 abbr:"ISA",        kind:"isa",     color:"--s1", rate:5.0, limit:2000, fill:1000, prio:3 },
-  { id:"irpInv", name:"IRP · 투자용",         abbr:"IRP 투자",   kind:"pension", color:"--s2", rate:5.5, limit:300,  fill:300, ded:true, prio:2 },
-  { id:"irpSev", name:"IRP · 퇴직금 수령",     abbr:"IRP 퇴직",   kind:"pension", color:"--s3", rate:4.0, limit:0,    fill:0,   sev:true, prio:0 },
+  { id:"irpInv", name:"IRP · 투자용",         abbr:"IRP 투자",   kind:"pension", color:"--s2", rate:5.5, limit:300,  fill:300, ded:true, prio:2, irp:true },
+  { id:"irpSev", name:"IRP · 퇴직금 수령",     abbr:"IRP 퇴직",   kind:"pension", color:"--s3", rate:4.0, limit:0,    fill:0,   sev:true, prio:0, irp:true },
   { id:"psDed",  name:"연금저축 · 세액공제용",  abbr:"연저 공제",  kind:"pension", color:"--s4", rate:5.5, limit:600,  fill:600, ded:true, prio:1 },
   { id:"psFree", name:"연금저축 · 비과세용",    abbr:"연저 비과세", kind:"pension", color:"--s5", rate:6.0, limit:900,  fill:0,   prio:4 },
   { id:"taxable", name:"일반계좌 · 직접투자",   abbr:"일반계좌",   kind:"taxable", color:"--s6", rate:6.0, limit:0,    fill:0,   prio:5 },
@@ -1063,6 +1063,7 @@ function simulate(opts = {}) {
         (rec.transfers ||= []).push(`${label} ${fmt(move)}만원 · 추가 세액공제 대상 ${fmt(extraDed)}만원`);
       } else {
         // 연금계좌 간 계좌이체 — 자금 성격(비과세원금·공제원금·퇴직재원·수익)이 그대로 따라간다
+        const src0sev = src.sev;
         for (const key of ["free", "ded", "sev", "gain"]) {
           const v = src[key] * k; src[key] -= v; dst[key] += v;
         }
@@ -1070,6 +1071,15 @@ function simulate(opts = {}) {
         if (!eligible[t.from]) {
           warnings.push(`${y}년 · ${label} — 계좌이체 특례는 만 55세 이상 + 가입 5년 경과라야 적용됩니다`
             + `(퇴직금 재원 IRP는 5년 요건 없음). 요건 전 이체는 해지로 보아 기타소득세 16.5%가 붙습니다.`);
+        }
+        if (src0sev * k > 0.5 && !to.irp) {
+          warnings.push(`${y}년 · ${label} — 퇴직급여 재원 ${fmt(src0sev * k)}만원이 섞여 있습니다. `
+            + `퇴직급여는 IRP에 보관하는 것이 원칙이라 연금저축으로의 이체는 금융사에서 거절될 수 있습니다. `
+            + `계산은 퇴직소득세를 그대로 유지한 채 진행합니다.`);
+        }
+        if (t.amt > 0 && t.amt < avail - 0.5) {
+          warnings.push(`${y}년 · ${label} — 부분이체입니다. 연금계좌 이체는 전액이체가 원칙이라 `
+            + `상품·금융사에 따라 일부만 옮기는 것이 안 될 수 있습니다.`);
         }
         (rec.transfers ||= []).push(`${label} ${fmt(move)}만원 · 계좌이체 (자금 성격 유지)`);
       }
@@ -1520,8 +1530,8 @@ function paintTable(sim, syncInputs) {
       c.bal.textContent = d.bal >= .5 ? fmt(deflate(d.bal, rec)) : "–";
       c.bal.classList.toggle("zero", d.bal < .5);
       c.bal.title = d.bal >= .5
-        ? accBuckets(a).filter(k => d.buckets[k] >= .5)
-            .map(k => `${bucketLabel(a, k)} ${fmt(deflate(d.buckets[k], rec))}`).join("\n")
+        ? BUCKETS.filter(bk => d.buckets[bk.key] >= .5)   // 이체로 들어온 재원도 빠짐없이
+            .map(bk => `${bucketLabel(a, bk.key)} ${fmt(deflate(d.buckets[bk.key], rec))}`).join("\n")
         : "";
       const fl = d.flags || [];
       c.outTd.title = fl.join("\n");
