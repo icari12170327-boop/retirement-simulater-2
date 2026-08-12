@@ -257,6 +257,21 @@
   .warnbox li { margin: 2px 0; }
   .warnbox .hdw { font-weight: 600; display: flex; align-items: center; gap: 6px; }
 
+  /* 좁은 화면: 지표 타일이 세로로 쌓여 표를 화면 밖으로 밀어내지 않게 2열로 */
+  @media (max-width: 620px) {
+    .wrap { padding: 18px 12px 60px; }
+    .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .kpi { padding: 10px 11px; }
+    .kpi .val { font-size: 19px; }
+    .kpi .lab, .kpi .note { font-size: 10.5px; }
+    .panel { padding: 14px 12px; }
+    h1 { font-size: 19px; }
+    .sub { font-size: 12.5px; margin-bottom: 16px; }
+    .tablebox { max-height: 60vh; }
+    .btnrow { gap: 6px; }
+    button { padding: 6px 10px; }
+  }
+
   footer { color: var(--muted); font-size: 11.5px; line-height: 1.7; margin-top: 26px; }
   footer h3 { color: var(--text-secondary); margin-top: 14px; }
   footer ul { padding-left: 18px; margin: 4px 0; }
@@ -350,7 +365,7 @@
               <option value="taxmin">그해 세금 최소</option>
             </select>
           </label>
-          <label class="f"><span class="t">사적연금 분리과세 문턱</span><input type="number" step="100" id="cfg_pensionCap"></label>
+          <label class="f"><span class="t" title="0으로 두면 문턱 없이 항상 연령별 저율(5.5~3.3%)로 계산합니다">사적연금 분리과세 문턱 <span style="color:var(--muted)">(0=없음)</span></span><input type="number" step="100" id="cfg_pensionCap"></label>
           <label class="f"><span class="t">연금 인출 제약</span>
             <select id="cfg_allowPenalty">
               <option value="0">연금수령한도·55세 요건 준수 (권장)</option>
@@ -986,6 +1001,7 @@ function simulate(opts = {}) {
   const warnings = [];
   const shortYears = [];
   let cumIn = 0, cumCredit = 0, cumNet = 0, cumTax = 0, depleted = null;
+  let cumWdTax = 0, cumOtherTax = 0;
 
   for (let y = y0; y <= y1; y++) {
     const age = y - cfg.birthYear;
@@ -1051,7 +1067,8 @@ function simulate(opts = {}) {
     for (const t of activeTransfers(cfg, y)) {
       const src = st.bal[t.from], dst = st.bal[t.to];
       const from = byId[t.from], to = byId[t.to];
-      if (!src || !dst || t.from === t.to) continue;
+      if (!src || !dst) continue;
+      if (t.from === t.to) { warnings.push(`${y}년 · ${byId[t.from].name} — 출금과 입금 계좌가 같아 아무 일도 일어나지 않습니다`); continue; }
       const avail = bTotal(src);
       const move = Math.min(t.amt > 0 ? t.amt : avail, avail);
       if (move <= 0.5) continue;
@@ -1186,7 +1203,9 @@ function simulate(opts = {}) {
     if (res.over1500) rec.flags.over1500 = true;
 
     // 배당세는 계좌에서 이미 빠져나갔으므로 세금 합계에는 더하되 실수령액에서 또 빼지 않는다
-    rec.gross = res.gross; rec.tax = res.tax + holdTax + xferTax; rec.net = res.net;
+    rec.wdTax = res.tax;                       // 인출로 발생한 세금 (국민연금분 포함)
+    rec.otherTax = holdTax + xferTax;          // 보유 중 배당 원천징수 + 이전 시 양도세
+    rec.gross = res.gross; rec.tax = rec.wdTax + rec.otherTax; rec.net = res.net;
     rec.holdTax = holdTax; rec.capTax = res.capTax; rec.realizedGain = res.realizedGain;
     const finIncome = divIncome + (cfg.taxType === "etf" ? res.realizedGain : 0);
     if (finIncome > 2000) rec.flags.finTax = Math.round(finIncome);
@@ -1203,7 +1222,7 @@ function simulate(opts = {}) {
       if (res.net < want - Math.max(1, want * .01)) shortYears.push({ y, want, got: res.net });
     }
 
-    cumNet += res.net; cumTax += res.tax;
+    cumNet += res.net; cumTax += rec.tax; cumWdTax += rec.wdTax; cumOtherTax += rec.otherTax;
     if (depleted === null && y >= cfg.retireYear && total < 1 && rec.gross > 0) depleted = y;
     years.push(rec);
   }
@@ -1227,7 +1246,7 @@ function simulate(opts = {}) {
   return {
     years, warnings, planDraws,
     sum: {
-      cumIn, cumCredit, cumNet, cumTax, depleted, openingTotal,
+      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal,
       atRetire: retireRec ? retireRec.total : 0,
       peak: years.reduce((m, r) => Math.max(m, r.total), 0),
       final: years.length ? years[years.length - 1].total : 0,
@@ -1265,7 +1284,9 @@ function renderKpis(sim) {
     { lab: "세액공제 환급 누계", val: fmtBig(s.cumCredit), note: "연말정산 환급분" },
     { lab: "은퇴 후 세후 수령 총액", val: fmtBig(s.cumNet), note: `국민연금 포함${real ? " · 실질 아님" : ""}` },
     { lab: "연평균 세후 수령액", val: fmtBig(avgNet), note: real ? "실질 기준" : "명목 기준" },
-    { lab: "총 납부 세금", val: fmtBig(s.cumTax), note: `수령액 대비 ${taxPct.toFixed(1)}%` },
+    { lab: "총 납부 세금", val: fmtBig(s.cumTax),
+      note: s.cumOtherTax > 0.5 ? `인출 ${fmtBig(s.cumWdTax)} · 보유·이전 ${fmtBig(s.cumOtherTax)}`
+                                : `수령액 대비 ${taxPct.toFixed(1)}%` },
     s.depleted
       ? { lab: "자산 소진", val: s.depleted + "년", note: `만 ${s.depleted - cfg.birthYear}세`, warn: true }
       : { lab: `${cfg.endYear}년 잔여자산`, val: fmtBig(real ? s.final / Math.pow(1 + cfg.inflation / 100, cfg.endYear - cfg.startYear) : s.final), note: "소진 없음" },
@@ -1418,8 +1439,8 @@ function renderChart2(sim) {
 
   const seg = r => {
     const d = state.cfg.realView ? r.deflator : 1;
-    const acctNet = Math.max(0, r.gross - (r.tax - r.npsTax));
-    return [acctNet / d, Math.max(0, (r.nps - r.npsTax)) / d, r.tax / d];
+    const acctNet = Math.max(0, r.gross - (r.wdTax - r.npsTax)); // 인출세만 뺀다
+    return [acctNet / d, Math.max(0, (r.nps - r.npsTax)) / d, r.wdTax / d];
   };
   const maxV = niceMax(Math.max(1, ...rows.map(r => seg(r).reduce((a, b) => a + b, 0))));
   const bw = Math.max(2, Math.min(16, pw / rows.length * .62));
@@ -1530,9 +1551,9 @@ function buildTable() {
         const inp = document.createElement("input");
         inp.type = "text"; inp.className = "cell"; inp.inputMode = "decimal";
         inp.value = ""; inp.setAttribute("aria-label", `${y}년 ${a.name} ${field === "in" ? "납입" : "인출"}`);
-        inp.addEventListener("input", () => { row(y)[a.id][field] = num(inp.value); inp.classList.toggle("on", num(inp.value) > 0); render(false); });
-        inp.addEventListener("blur", () => { const v = num(inp.value); inp.value = v ? fmt(v) : ""; });
-        inp.addEventListener("focus", () => { const v = num(inp.value); inp.value = v ? String(Math.round(v)) : ""; inp.select(); });
+        inp.addEventListener("input", () => { const v = clamp0(num(inp.value)); row(y)[a.id][field] = v; inp.classList.toggle("on", v > 0); render(false); });
+        inp.addEventListener("blur", () => { const v = clamp0(num(inp.value)); inp.value = v ? fmt(v) : ""; });
+        inp.addEventListener("focus", () => { const v = clamp0(num(inp.value)); inp.value = v ? String(Math.round(v)) : ""; inp.select(); });
         td.appendChild(inp);
         return { td, inp };
       };
@@ -1652,7 +1673,7 @@ function buildOpening() {
   }).join("");
 
   box.querySelectorAll("[data-o]").forEach(n => n.addEventListener("input", () => {
-    state.cfg.opening[n.dataset.a][n.dataset.o] = num(n.value);
+    state.cfg.opening[n.dataset.a][n.dataset.o] = clamp0(num(n.value));
     render(false);
   }));
   box.querySelectorAll("[data-oy]").forEach(n => n.addEventListener("input", () => {
@@ -1709,7 +1730,8 @@ function renderFillRules() {
 
   box.querySelectorAll("[data-r]").forEach(n => n.addEventListener("input", () => {
     const r = state.cfg.fillRules[+n.dataset.i];
-    r[n.dataset.r] = (n.dataset.r === "unit" || n.dataset.r === "target") ? n.value : num(n.value);
+    r[n.dataset.r] = (n.dataset.r === "unit" || n.dataset.r === "target") ? n.value
+      : (n.dataset.r === "amt" || n.dataset.r === "growth" ? clamp0(num(n.value)) : num(n.value));
     save();
   }));
   box.querySelectorAll("[data-rdel]").forEach(n => n.addEventListener("click", () => {
@@ -1746,7 +1768,8 @@ function renderWdRules() {
 
   box.querySelectorAll("[data-w]").forEach(n => n.addEventListener("input", () => {
     const r = state.cfg.wdRules[+n.dataset.i];
-    r[n.dataset.w] = (n.dataset.w === "unit" || n.dataset.w === "target") ? n.value : num(n.value);
+    r[n.dataset.w] = (n.dataset.w === "unit" || n.dataset.w === "target") ? n.value
+      : (n.dataset.w === "amt" || n.dataset.w === "growth" ? clamp0(num(n.value)) : num(n.value));
     save();
   }));
   box.querySelectorAll("[data-wdel]").forEach(n => n.addEventListener("click", () => {
@@ -1781,7 +1804,7 @@ function renderXfers() {
 
   box.querySelectorAll("[data-x]").forEach(n => n.addEventListener("input", () => {
     const t = state.cfg.transfers[+n.dataset.i];
-    t[n.dataset.x] = (n.dataset.x === "from" || n.dataset.x === "to") ? n.value : num(n.value);
+    t[n.dataset.x] = (n.dataset.x === "from" || n.dataset.x === "to") ? n.value : clamp0(num(n.value));
     render(false);
   }));
   box.querySelectorAll("[data-del]").forEach(n => n.addEventListener("click", () => {
