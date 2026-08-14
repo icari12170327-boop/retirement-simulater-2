@@ -432,7 +432,7 @@
         <div id="evtRows"></div>
         <div class="btnrow" style="margin-top:10px">
           <button type="button" id="btnAddEvt">+ 일정 추가</button>
-          <button type="button" id="btnEvtSample">예시 넣기 (소득·대학·결혼·퇴직금)</button>
+          <button type="button" id="btnEvtSample">기본 계획 불러오기</button>
         </div>
         <p class="hint">
           <strong>소득</strong>은 그해 쓸 수 있는 세후 소득, <strong>지출</strong>은 등록금·결혼 지원처럼 그해 나가야 하는 목돈,
@@ -747,7 +747,7 @@ function bucketLabel(a, key) {
    ======================================================================== */
 function defaultState() {
   const cfg = {
-    birthYear: 1985, startYear: 2026, retireYear: 2040, endYear: 2070,
+    birthYear: 1980, startYear: 2026, retireYear: 2041, endYear: 2075,
     inflation: 2.0, salaryTier: "low", isaType: "general",
     timing: "end", realView: 0,
     sevRate: 3.0, compRate: 16.5,
@@ -757,7 +757,7 @@ function defaultState() {
     allowPenalty: 0, planTarget: null,
     pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [],
-    gameMean: 6.0, gameVol: 18.0, gameSeed: 20260812, gameSpend: 4200, gameDeathAge: 90,
+    gameMean: 6.0, gameVol: 18.0, gameSeed: 20260812, gameSpend: 4200, gameDeathAge: 95,
     rates: {}, limits: {}, fillAmts: {}, priority: {}, opening: {}, openYears: {},
   };
   ACC.forEach(a => {
@@ -888,20 +888,38 @@ function marketReturn(cfg, y) {
   return Math.max(-60, Math.min(90, v));
 }
 
+const EVENT_KINDS = {
+  salary:    { name: "소득",     sign: +1, tip: "그해 쓸 수 있는 세후 소득 (근로소득·연금 수령)" },
+  income:    { name: "목돈 유입", sign: +1, tip: "상속·보너스처럼 한 번에 들어오는 현금. 어디에 넣을지 직접 정합니다" },
+  severance: { name: "퇴직금",   sign: +1, tip: "IRP(퇴직금 수령)에 퇴직 재원으로 자동 유입. 퇴직소득세 대상" },
+  expense:   { name: "지출",     sign: -1, tip: "등록금·결혼 지원처럼 그해 나가야 하는 목돈" },
+};
+
+/** ±공차가 걸린 이벤트의 연도 이동폭. 시드에 묶여 있어 되돌려도 흔들리지 않는다. */
+function eventShift(cfg, e, idx) {
+  const j = Math.abs(+e.jitter || 0);
+  if (!j) return 0;
+  return Math.round((mulberry32((clamp0(cfg.gameSeed) | 0) + idx * 7919 + 104729)() * 2 - 1) * j);
+}
+/** real 이면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불려 준다 */
+function eventAmount(cfg, e, y) {
+  const base = clamp0(e.amt);
+  return e.real ? base * Math.pow(1 + clamp0(cfg.inflation) / 100, y - cfg.startYear) : base;
+}
 /** 그해에 걸린 인생 이벤트 */
 function eventsOf(cfg, y) {
-  return (cfg.events || []).filter(e => {
-    if (!e || !e.year) return false;
-    const end = (+e.until || 0) >= e.year ? +e.until : e.year;
-    if (y < e.year || y > end) return false;
-    return (y - e.year) % Math.max(1, +e.every || 1) === 0;
+  const out = [];
+  (cfg.events || []).forEach((e, i) => {
+    if (!e || !e.year) return;
+    const sh = eventShift(cfg, e, i);
+    const start = e.year + sh;
+    const end = ((+e.until || 0) >= e.year ? +e.until : e.year) + sh;
+    if (y < start || y > end) return;
+    if ((y - start) % Math.max(1, +e.every || 1) !== 0) return;
+    out.push({ ...e, amt: eventAmount(cfg, e, y), shift: sh });
   });
+  return out;
 }
-const EVENT_KINDS = {
-  salary:  { name: "소득",     sign: +1, tip: "그해 쓸 수 있는 세후 소득" },
-  income:  { name: "목돈 유입", sign: +1, tip: "상속·보너스 같은 일시 유입" },
-  expense: { name: "지출",     sign: -1, tip: "등록금·결혼 지원처럼 그해 나가야 하는 목돈" },
-};
 
 function emptyBuckets() { return { free: 0, ded: 0, sev: 0, gain: 0 }; }
 const bTotal = b => b.free + b.ded + b.sev + b.gain;
@@ -1851,15 +1869,16 @@ function gameSim() { return simulate({ returns: game.returns }); }
 
 /** 그해 현금 사정 — 이벤트에서 소득·지출을 모은다 */
 function cashOf(cfg, y) {
-  let salary = 0, lump = 0, spend = 0;
+  let salary = 0, lump = 0, spend = 0, sev = 0;
   const list = eventsOf(cfg, y);
   for (const e of list) {
     const v = clamp0(e.amt);
     if (e.kind === "salary") salary += v;
     else if (e.kind === "income") lump += v;
+    else if (e.kind === "severance") sev += v;   // 현금이 아니라 IRP로 직행
     else spend += v;
   }
-  return { list, salary, lump, spend, living: clamp0(cfg.gameSpend) };
+  return { list, salary, lump, spend, sev, living: clamp0(cfg.gameSpend) };
 }
 
 function renderGame() {
@@ -1874,6 +1893,8 @@ function renderGame() {
   const bal = prev ? prev.acc : null;
   const startAssets = prev ? prev.total : ACC.reduce((s, a) => s + accBuckets(a).reduce((t, k) => t + clamp0((cfg.opening[a.id] || {})[k]), 0), 0);
   const c = cashOf(cfg, y);
+  // 퇴직금은 IRP(퇴직금 수령)로 직행한다. 현금으로 받아 배분하는 돈이 아니다.
+  row(y).irpSev.in = Math.round(c.sev);
   const spare = c.salary + c.lump - c.living - c.spend;
   const total = cfg.endYear - cfg.startYear + 1;
   const turn = y - cfg.startYear + 1;
@@ -1881,7 +1902,9 @@ function renderGame() {
   const evtRows = c.list.length
     ? c.list.map(e => {
         const k = EVENT_KINDS[e.kind] || EVENT_KINDS.expense;
-        return `<div class="evt"><span class="nm">${k.sign < 0 ? "🔻" : "🔺"} ${e.name || k.name}</span>
+        const tags = [e.real ? "물가연동" : "", e.shift ? `예정보다 ${e.shift > 0 ? e.shift + "년 늦게" : -e.shift + "년 일찍"}` : ""].filter(Boolean);
+        return `<div class="evt"><span class="nm">${k.sign < 0 ? "🔻" : "🔺"} ${e.name || k.name}` +
+          `${tags.length ? ` <span style="font-size:10.5px;color:var(--muted)">${tags.join(" · ")}</span>` : ""}</span>
           <span class="${k.sign < 0 ? "neg" : "pos"}">${k.sign < 0 ? "−" : "+"}${fmt(clamp0(e.amt))}</span></div>`;
       }).join("")
     : `<p class="hint" style="margin:0">올해는 예정된 일정이 없습니다.</p>`;
@@ -1901,6 +1924,7 @@ function renderGame() {
         ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
         <div class="gline"><span>생활비</span><span class="neg">−${fmt(c.living)}</span></div>
         ${c.spend > 0 ? `<div class="gline"><span>예정 지출</span><span class="neg">−${fmt(c.spend)}</span></div>` : ""}
+        ${c.sev > 0 ? `<div class="gline"><span style="color:var(--muted)">퇴직금 → IRP (자동)</span><span style="color:var(--muted)">${fmt(c.sev)}</span></div>` : ""}
         <div class="gline tot"><span>${spare >= 0 ? "투자 여력" : "부족"}</span>
           <span class="${spare >= 0 ? "pos" : "neg"}">${spare >= 0 ? "" : "−"}${fmt(Math.abs(spare))}</span></div>
       </div>
@@ -2187,6 +2211,9 @@ function renderEvents() {
       <label class="f"><span class="t">시작</span><input type="number" data-e="year" data-i="${i}" value="${e.year}"></label>
       <label class="f"><span class="t">종료</span><input type="number" data-e="until" data-i="${i}" value="${e.until || e.year}"></label>
       <label class="f"><span class="t">주기</span><input type="number" min="1" data-e="every" data-i="${i}" value="${e.every || 1}"></label>
+      <label class="f"><span class="t" title="켜면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불립니다">금액 기준</span>
+        <select data-e="real" data-i="${i}"><option value="0"${e.real ? "" : " selected"}>명목 고정</option><option value="1"${e.real ? " selected" : ""}>물가 연동</option></select></label>
+      <label class="f"><span class="t" title="시드에 따라 실제 연도가 ±이 범위에서 앞뒤로 움직입니다">±공차(년)</span><input type="number" min="0" data-e="jitter" data-i="${i}" value="${e.jitter || 0}"></label>
       <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-edel="${i}">삭제</button></label>
     </div>`).join("");
   box.querySelectorAll("[data-e]").forEach(n => n.addEventListener("input", () => {
@@ -2554,12 +2581,28 @@ document.getElementById("btnAddEvt").onclick = () => {
   renderEvents(); save(); if (game) renderGame();
 };
 document.getElementById("btnEvtSample").onclick = () => {
-  const c = state.cfg, b = c.birthYear;
-  c.events.push(
-    { name: "근로소득 (세후)", kind: "salary", amt: 7200, year: c.startYear, until: c.retireYear - 1, every: 1 },
-    { name: "자녀 대학 등록금", kind: "expense", amt: 1000, year: b + 50, until: b + 53, every: 1 },
-    { name: "자녀 결혼 지원", kind: "expense", amt: 5000, year: b + 60, until: b + 60, every: 1 },
-    { name: "퇴직금", kind: "income", amt: 15000, year: c.retireYear, until: c.retireYear, every: 1 });
+  const c = state.cfg;
+  if (c.events.length && !confirm("기존 일정을 지우고 기본 계획을 넣을까요?")) return;
+  c.events = [
+    // ── 확정 일정 ────────────────────────────────────────────
+    { name: "근로소득 (세후)",          kind: "salary",    amt: 7200,  year: 2026, until: 2040, every: 1,  real: 1, jitter: 0 },
+    { name: "첫째 학자금",              kind: "expense",   amt: 827,   year: 2034, until: 2037, every: 1,  real: 0, jitter: 0 },
+    { name: "🏛️ 상속재산",              kind: "income",    amt: 60000, year: 2035, until: 2035, every: 1,  real: 0, jitter: 0 },
+    { name: "💎 비과세연금 (명목 고정)",  kind: "salary",    amt: 1000,  year: 2035, until: 2075, every: 1,  real: 0, jitter: 0 },
+    { name: "둘째 학자금",              kind: "expense",   amt: 827,   year: 2036, until: 2039, every: 1,  real: 0, jitter: 0 },
+    { name: "💼 퇴직금 → IRP",          kind: "severance", amt: 35000, year: 2040, until: 2040, every: 1,  real: 0, jitter: 0 },
+    { name: "KB 종신보험 수령",          kind: "salary",    amt: 240,   year: 2041, until: 2053, every: 1,  real: 0, jitter: 0 },
+    { name: "본인 국민연금 (월 163만)",   kind: "salary",    amt: 1956,  year: 2045, until: 2075, every: 1,  real: 1, jitter: 0 },
+    { name: "배우자 국민연금 (월 31만)",  kind: "salary",    amt: 372,   year: 2050, until: 2075, every: 1,  real: 1, jitter: 0 },
+    // ── 시점이 유동적인 일정 (±공차) ──────────────────────────
+    { name: "첫째 결혼자금",            kind: "expense",   amt: 20000, year: 2042, until: 2042, every: 1,  real: 1, jitter: 2 },
+    { name: "둘째 결혼자금",            kind: "expense",   amt: 20000, year: 2044, until: 2044, every: 1,  real: 1, jitter: 2 },
+    // ── 추천: 흔히 빠뜨리는 항목 (필요 없으면 삭제) ────────────
+    { name: "💡 건강보험료 (지역가입 전환)", kind: "expense", amt: 420,  year: 2041, until: 2075, every: 1,  real: 1, jitter: 0 },
+    { name: "💡 의료·간병비 (75세~)",     kind: "expense",   amt: 600,   year: 2055, until: 2075, every: 1,  real: 1, jitter: 0 },
+    { name: "💡 자동차 교체",            kind: "expense",   amt: 3000,  year: 2030, until: 2060, every: 10, real: 1, jitter: 1 },
+    { name: "💡 주택 수선",              kind: "expense",   amt: 2000,  year: 2038, until: 2068, every: 15, real: 1, jitter: 2 },
+  ];
   document.getElementById("evtPanel").open = true;
   renderEvents(); save(); if (game) renderGame();
 };
