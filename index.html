@@ -350,6 +350,43 @@
         <button type="button" id="btnGameUndo">한 턴 되돌리기</button>
       </div>
     </div>
+    <details class="grp" id="gameCfg" style="border-top:none;margin-top:0;padding-top:0">
+      <summary>⚙️ 게임 설정 — 포트폴리오 · 위기 · 생활비</summary>
+      <div class="body">
+        <div class="fgrid">
+          <label class="f" style="grid-column:span 2"><span class="t">📐 프리셋 수익률을 무엇으로 볼지</span>
+            <select id="cfg_retMode">
+              <option value="geo">장기 목표 CAGR — 오래 굴리면 그 값에 수렴 (권장)</option>
+              <option value="exact">장기 수익률 고정 — 반드시 그 CAGR로 끝남</option>
+              <option value="arith">산술평균 그대로 — 실현 CAGR은 더 낮게 나옴</option>
+            </select></label>
+          <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
+            <span class="hint" id="retModeInfo" style="margin:0"></span></label>
+          <label class="f" style="grid-column:span 2"><span class="t">📦 포트폴리오 프리셋</span>
+            <select id="cfg_preset"></select></label>
+          <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
+            <span class="hint" id="presetInfo" style="margin:0"></span></label>
+          <label class="f"><span class="t" title="은퇴 몇 년 전부터 위험구간으로 볼지">위험구간 시작 (은퇴 기준)</span><input type="number" id="cfg_riskFrom"></label>
+          <label class="f"><span class="t" title="은퇴 몇 년 후부터 후기로 볼지">후기 시작 (은퇴 기준)</span><input type="number" id="cfg_lateFrom"></label>
+          <label class="f"><span class="t">💥 위기 횟수 (0~3)</span><input type="number" min="0" max="3" id="cfg_crashCount"></label>
+          <label class="f" style="grid-column:span 2"><span class="t">위기 종류</span>
+            <select id="cfg_crashPick"></select></label>
+          <label class="f"><span class="t">게임 · 목표 생활비/연</span><input type="number" step="100" id="cfg_gameSpend"></label>
+          <label class="f"><span class="t">프리셋 off · 평균 %</span><input type="number" step="0.5" id="cfg_gameMean"></label>
+          <label class="f"><span class="t">프리셋 off · 변동성 %</span><input type="number" step="1" id="cfg_gameVol"></label>
+          <label class="f"><span class="t">게임 · 시드</span><input type="number" id="cfg_gameSeed"></label>
+          <span id="customPhase" hidden style="display:contents">
+            <label class="f"><span class="t">커스텀 적립 %/σ</span><input type="number" step="0.1" id="cfg_cAccum"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cAccumSd"></label>
+            <label class="f"><span class="t">커스텀 위험 %/σ</span><input type="number" step="0.1" id="cfg_cRisk"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cRiskSd"></label>
+            <label class="f"><span class="t">커스텀 후기 %/σ</span><input type="number" step="0.1" id="cfg_cLate"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cLateSd"></label>
+          </span>
+          <label class="f"><span class="t">게임 · 종료 나이</span><input type="number" id="cfg_gameDeathAge"></label>
+        </div>
+      </div>
+    </details>
     <div id="gameBody"></div>
   </section>
 
@@ -462,28 +499,6 @@
             </select>
           </label>
           <label class="f"><span class="t" title="0으로 두면 문턱 없이 항상 연령별 저율(5.5~3.3%)로 계산합니다">사적연금 분리과세 문턱 <span style="color:var(--muted)">(0=없음)</span></span><input type="number" step="100" id="cfg_pensionCap"></label>
-          <label class="f" style="grid-column:span 2"><span class="t">📦 포트폴리오 프리셋</span>
-            <select id="cfg_preset"></select></label>
-          <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
-            <span class="hint" id="presetInfo" style="margin:0"></span></label>
-          <label class="f"><span class="t" title="은퇴 몇 년 전부터 위험구간으로 볼지">위험구간 시작 (은퇴 기준)</span><input type="number" id="cfg_riskFrom"></label>
-          <label class="f"><span class="t" title="은퇴 몇 년 후부터 후기로 볼지">후기 시작 (은퇴 기준)</span><input type="number" id="cfg_lateFrom"></label>
-          <label class="f"><span class="t">💥 위기 횟수 (0~3)</span><input type="number" min="0" max="3" id="cfg_crashCount"></label>
-          <label class="f" style="grid-column:span 2"><span class="t">위기 종류</span>
-            <select id="cfg_crashPick"></select></label>
-          <label class="f"><span class="t">게임 · 목표 생활비/연</span><input type="number" step="100" id="cfg_gameSpend"></label>
-          <label class="f"><span class="t">프리셋 off · 평균 %</span><input type="number" step="0.5" id="cfg_gameMean"></label>
-          <label class="f"><span class="t">프리셋 off · 변동성 %</span><input type="number" step="1" id="cfg_gameVol"></label>
-          <label class="f"><span class="t">게임 · 시드</span><input type="number" id="cfg_gameSeed"></label>
-          <span id="customPhase" hidden style="display:contents">
-            <label class="f"><span class="t">커스텀 적립 %/σ</span><input type="number" step="0.1" id="cfg_cAccum"></label>
-            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cAccumSd"></label>
-            <label class="f"><span class="t">커스텀 위험 %/σ</span><input type="number" step="0.1" id="cfg_cRisk"></label>
-            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cRiskSd"></label>
-            <label class="f"><span class="t">커스텀 후기 %/σ</span><input type="number" step="0.1" id="cfg_cLate"></label>
-            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cLateSd"></label>
-          </span>
-          <label class="f"><span class="t">게임 · 종료 나이</span><input type="number" id="cfg_gameDeathAge"></label>
           <label class="f"><span class="t">연금 인출 제약</span>
             <select id="cfg_allowPenalty">
               <option value="0">연금수령한도·55세 요건 준수 (권장)</option>
@@ -827,7 +842,7 @@ function defaultState() {
     pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260812, gameSpend: 4200, gameDeathAge: 95,
-    preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "",
+    preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "geo",
     cAccum: 9.0, cAccumSd: 13.5, cRisk: 8.0, cRiskSd: 9.9, cLate: 7.5, cLateSd: 9.0,
     rates: {}, limits: {}, fillAmts: {}, priority: {}, opening: {}, openYears: {},
   };
@@ -995,13 +1010,49 @@ function crashPlan(cfg) {
   return map;
 }
 
-/** 그해 시장 수익률(%). 위기가 걸린 해는 추첨 대신 시나리오 값을 그대로 쓴다. */
-function marketReturn(cfg, y, crash) {
-  const c = crash && crash[y];
-  if (c) return c.ret;
+/**
+ * 그해 수익률 한 번 추첨.
+ *  arith — 프리셋 숫자를 산술평균으로 본다. 복리로 굴리면 실현 CAGR은 이보다 σ²/2쯤 낮다.
+ *  geo   — 프리셋 숫자를 장기 목표 CAGR로 본다. 로그수익을 정규로 두면 기간이 길수록 그 값에 수렴한다.
+ */
+function drawReturn(cfg, y) {
   const { mean, sd } = phaseParams(cfg, y);
-  const r = mulberry32((clamp0(cfg.gameSeed) | 0) + y * 2654435761);
-  return Math.max(-70, Math.min(120, mean + gauss(r) * sd));
+  const z = gauss(mulberry32((clamp0(cfg.gameSeed) | 0) + y * 2654435761));
+  if (cfg.retMode === "arith") return Math.max(-70, Math.min(150, mean + z * sd));
+  const m = Math.log(1 + mean / 100);
+  const sg = (sd / 100) / (1 + mean / 100);
+  return Math.max(-85, Math.min(300, (Math.exp(m + z * sg) - 1) * 100));
+}
+
+/**
+ * 전체 기간의 수익률을 한 번에 만든다.
+ * exact 모드는 여기서 로그수익 합을 목표에 맞춰 평행이동하므로 전 구간을 알아야 한다.
+ * 위기 연도는 시나리오 값 자체가 의미라 건드리지 않고 나머지 해로만 조정한다 —
+ * 그래서 exact 에서 위기는 총수익이 아니라 '언제 맞느냐'만 바꾼다(순서위험만 분리해서 보는 모드).
+ */
+function returnPath(cfg) {
+  const crash = crashPlan(cfg);
+  const path = {}, free = [];
+  let targetLog = 0;
+  for (let y = cfg.startYear; y <= cfg.endYear; y++) {
+    targetLog += Math.log(1 + phaseParams(cfg, y).mean / 100);
+    if (crash[y]) path[y] = crash[y].ret;
+    else { path[y] = drawReturn(cfg, y); free.push(y); }
+  }
+  if (cfg.retMode === "exact" && free.length) {
+    let cur = 0;
+    for (let y = cfg.startYear; y <= cfg.endYear; y++) cur += Math.log(1 + path[y] / 100);
+    const adj = (targetLog - cur) / free.length;
+    for (const y of free) path[y] = (Math.exp(Math.log(1 + path[y] / 100) + adj) - 1) * 100;
+  }
+  return { path, crash };
+}
+
+/** 프리셋이 내건 장기 목표 CAGR (구간 평균의 기하 가중) */
+function targetCagr(cfg, upto) {
+  let lg = 0, n = 0;
+  for (let y = cfg.startYear; y <= (upto || cfg.endYear); y++) { lg += Math.log(1 + phaseParams(cfg, y).mean / 100); n++; }
+  return n ? (Math.exp(lg / n) - 1) * 100 : 0;
 }
 
 const EVENT_KINDS = {
@@ -1976,7 +2027,7 @@ function gameStart() {
   const cfg = state.cfg;
   // 게임이 진행한 해의 납입·인출은 게임이 직접 채우므로 먼저 비운다
   for (let y = cfg.startYear; y <= cfg.endYear; y++) AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
-  game = { year: cfg.startYear, returns: {}, log: [], over: null, pending: null, crash: crashPlan(cfg) };
+  game = { year: cfg.startYear, returns: {}, log: [], over: null, pending: null, crash: returnPath(cfg).crash };
   saveGame(); renderGame();
 }
 function saveGame() { try { localStorage.setItem(LS_KEY + ":game", JSON.stringify(game)); } catch (e) {} }
@@ -2044,6 +2095,7 @@ function renderStart(box) {
         <div class="gline"><span>포트폴리오</span><span>${P.info.split(" —")[0].split(":")[0]}</span></div>
         <div class="gline"><span>위기</span><span>${clamp0(cfg.crashCount) ? `${clamp0(cfg.crashCount)}회 · ${cfg.crashPick && CRASHES[cfg.crashPick] ? CRASHES[cfg.crashPick].name : "랜덤"}` : "없음"}</span></div>
         <div class="gline"><span>시드</span><span>${cfg.gameSeed}</span></div>
+        <div class="gline tot"><span>목표 장기 CAGR</span><span>${cfg.retMode === "arith" ? "—" : targetCagr(cfg).toFixed(1) + "%"}</span></div>
         <p class="hint" style="margin:8px 0 0">${P.info}</p>
         <p class="hint" style="margin:6px 0 0">${returnSourceNote(cfg)}</p>
       </div>
@@ -2051,7 +2103,7 @@ function renderStart(box) {
     <p class="hint" style="margin-top:12px">
       「새로 시작」을 누르면 ${cfg.startYear}년부터 한 해씩 진행합니다.
       매년 결정을 내린 <strong>다음에</strong> 그해 시장 수익률이 공개됩니다.
-      포트폴리오·위기·시드는 아래 <strong>「5. 기본 설정 → 퇴직소득세·국민연금·기타 세율」</strong>에서 바꿉니다.
+      포트폴리오·위기·시드·생활비는 바로 위 <strong>「⚙️ 게임 설정」</strong>에서 바꿉니다.
     </p>`;
 
   const jump = document.getElementById("btnGoOpening");
@@ -2228,9 +2280,10 @@ const PHASE_NAME = { accum: "적립기", risk: "위험구간", late: "후기" };
 /** 지금 수익률이 어디서 나오는지 — 세 군데가 겹쳐 보여 헷갈리기 쉬운 지점 */
 function returnSourceNote(cfg) {
   const P = PRESETS[cfg.preset] || PRESETS.off;
+  const mode = { geo: "장기 목표 CAGR", exact: "장기 수익률 고정", arith: "산술평균" }[cfg.retMode] || "";
   if (cfg.preset && cfg.preset !== "off") {
-    return `<strong>${P.info.split(" —")[0].split(":")[0]}</strong> 하나가 <strong>모든 계좌</strong>에 적용됩니다. `
-      + `설정의 「계좌별 수익률」은 게임에서 쓰이지 않습니다(플래너 전용).`;
+    return `<strong>${P.info.split(" —")[0].split(":")[0]}</strong> 하나가 <strong>모든 계좌</strong>에 적용됩니다`
+      + ` (수익률 해석: <strong>${mode}</strong>). 설정의 「계좌별 수익률」은 게임에서 쓰이지 않습니다(플래너 전용).`;
   }
   return `프리셋을 쓰지 않는 모드입니다. 「프리셋 off · 평균/변동성」으로 그해 시장을 뽑고, `
     + `각 계좌는 <strong>계좌별 수익률과 평균의 차이만큼</strong> 더하거나 뺀 값을 받습니다.`;
@@ -2254,8 +2307,9 @@ function rollCard(p) {
 
 function turnAdvance() {
   const cfg = state.cfg, y = game.year;
-  if (!game.crash) game.crash = crashPlan(cfg);
-  game.returns[y] = marketReturn(cfg, y, game.crash);
+  const rp = returnPath(cfg);
+  game.crash = rp.crash;
+  game.returns[y] = rp.path[y];
   const after = gameSim();
   const rec = after.years.find(r => r.year === y);
   const pnl = rec ? ACC.reduce((t, a) => t + (rec.acc[a.id].growth || 0), 0) : 0;
@@ -2308,7 +2362,9 @@ function renderEnding(box) {
         ${(() => {
           const st = returnStats(cfg, game.returns);
           if (!st) return "";
-          return `<div class="gline"><span>산술평균</span><span>${st.arith.toFixed(1)}%</span></div>
+          const tg = cfg.retMode === "arith" ? null : targetCagr(cfg);
+          return `${tg != null ? `<div class="gline"><span>목표 CAGR</span><span>${tg.toFixed(1)}%</span></div>` : ""}
+            <div class="gline"><span>산술평균</span><span>${st.arith.toFixed(1)}%</span></div>
             <div class="gline"><span><strong>실현 CAGR</strong></span><span><strong>${st.cagr.toFixed(1)}%</strong></span></div>
             <div class="gline"><span style="color:var(--muted)">변동성 침식</span><span style="color:var(--muted)">−${st.drag.toFixed(1)}%p</span></div>
             <div class="gline tot"><span>최악의 해</span><span class="neg">${st.worst.toFixed(1)}%</span></div>
@@ -2345,6 +2401,15 @@ function buildPresetUI() {
     cp.innerHTML = `<option value="">🎲 매번 랜덤</option>`
       + Object.entries(CRASHES).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("");
   }
+}
+const RET_MODE_INFO = {
+  geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다 — 가장 현실에 가깝습니다.",
+  exact: "매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 총수익이 고정되므로 <strong>순서위험만 따로</strong> 볼 수 있습니다. 위기도 총수익이 아니라 '언제 맞느냐'만 바꿉니다. 포트폴리오 비교용.",
+  arith: "프리셋 숫자를 <strong>산술평균</strong>으로 씁니다. 복리로 굴리면 실현 CAGR은 그보다 낮아지며, 변동성이 클수록 차이가 큽니다(나스닥 2x는 5%p 이상).",
+};
+function syncRetMode() {
+  const n = document.getElementById("retModeInfo");
+  if (n) n.innerHTML = RET_MODE_INFO[state.cfg.retMode] || "";
 }
 function syncPresetInfo() {
   const P = PRESETS[state.cfg.preset] || PRESETS.off;
@@ -2560,10 +2625,10 @@ const CFG_FIELDS = ["birthYear", "startYear", "retireYear", "endYear", "inflatio
   "timing", "realView", "sevRate", "compRate", "npsAmount", "npsAge", "npsRate",
   "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap", "pensionTotalCap",
   "gameSpend", "gameMean", "gameVol", "gameSeed", "gameDeathAge",
-  "preset", "riskFrom", "lateFrom", "crashCount", "crashPick",
+  "preset", "riskFrom", "lateFrom", "crashCount", "crashPick", "retMode",
   "cAccum", "cAccumSd", "cRisk", "cRiskSd", "cLate", "cLateSd"];
 /** 값을 문자열 그대로 보관하는 필드 — 나머지는 숫자로 변환한다 */
-const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStrategy", "preset", "crashPick"]);
+const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStrategy", "preset", "crashPick", "retMode"]);
 
 function syncCfgInputs() {
   CFG_FIELDS.forEach(k => {
@@ -2578,6 +2643,7 @@ function syncCfgInputs() {
   const sb = document.getElementById("cfg_showBuckets");
   if (sb) sb.checked = !!state.cfg.showBuckets;
   syncPresetInfo();
+  syncRetMode();
   syncOpening();
 }
 
@@ -2588,6 +2654,7 @@ function bindCfg() {
     n.addEventListener("input", () => {
       state.cfg[k] = STR_FIELDS.has(k) ? n.value : num(n.value);
       if (k === "preset") syncPresetInfo();
+      if (k === "retMode") syncRetMode();
       if (["startYear", "endYear", "retireYear"].includes(k)) {
         const c = state.cfg;
         if (c.endYear < c.startYear || c.endYear - c.startYear > 90) return; // 입력 중간값 무시
