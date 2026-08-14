@@ -462,10 +462,27 @@
             </select>
           </label>
           <label class="f"><span class="t" title="0으로 두면 문턱 없이 항상 연령별 저율(5.5~3.3%)로 계산합니다">사적연금 분리과세 문턱 <span style="color:var(--muted)">(0=없음)</span></span><input type="number" step="100" id="cfg_pensionCap"></label>
+          <label class="f" style="grid-column:span 2"><span class="t">📦 포트폴리오 프리셋</span>
+            <select id="cfg_preset"></select></label>
+          <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
+            <span class="hint" id="presetInfo" style="margin:0"></span></label>
+          <label class="f"><span class="t" title="은퇴 몇 년 전부터 위험구간으로 볼지">위험구간 시작 (은퇴 기준)</span><input type="number" id="cfg_riskFrom"></label>
+          <label class="f"><span class="t" title="은퇴 몇 년 후부터 후기로 볼지">후기 시작 (은퇴 기준)</span><input type="number" id="cfg_lateFrom"></label>
+          <label class="f"><span class="t">💥 위기 횟수 (0~3)</span><input type="number" min="0" max="3" id="cfg_crashCount"></label>
+          <label class="f" style="grid-column:span 2"><span class="t">위기 종류</span>
+            <select id="cfg_crashPick"></select></label>
           <label class="f"><span class="t">게임 · 목표 생활비/연</span><input type="number" step="100" id="cfg_gameSpend"></label>
-          <label class="f"><span class="t">게임 · 시장 평균 %</span><input type="number" step="0.5" id="cfg_gameMean"></label>
-          <label class="f"><span class="t">게임 · 변동성 %</span><input type="number" step="1" id="cfg_gameVol"></label>
+          <label class="f"><span class="t">프리셋 off · 평균 %</span><input type="number" step="0.5" id="cfg_gameMean"></label>
+          <label class="f"><span class="t">프리셋 off · 변동성 %</span><input type="number" step="1" id="cfg_gameVol"></label>
           <label class="f"><span class="t">게임 · 시드</span><input type="number" id="cfg_gameSeed"></label>
+          <span id="customPhase" hidden style="display:contents">
+            <label class="f"><span class="t">커스텀 적립 %/σ</span><input type="number" step="0.1" id="cfg_cAccum"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cAccumSd"></label>
+            <label class="f"><span class="t">커스텀 위험 %/σ</span><input type="number" step="0.1" id="cfg_cRisk"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cRiskSd"></label>
+            <label class="f"><span class="t">커스텀 후기 %/σ</span><input type="number" step="0.1" id="cfg_cLate"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cLateSd"></label>
+          </span>
           <label class="f"><span class="t">게임 · 종료 나이</span><input type="number" id="cfg_gameDeathAge"></label>
           <label class="f"><span class="t">연금 인출 제약</span>
             <select id="cfg_allowPenalty">
@@ -719,6 +736,56 @@ const PENSION = ACC.filter(a => a.kind === "pension").map(a => a.id);
 
 const LS_KEY = "tax-retire-sim-v1";
 
+/* ── 포트폴리오 프리셋 ────────────────────────────────────────────────
+   적립기 → 위험구간(은퇴 전후) → 후기 순으로 평균/표준편차가 바뀐다.
+   숫자는 원화 환노출 기준 장기 가정치다. */
+const PRESETS = {
+  off:                 { info: "계좌별 수익률 설정을 그대로 씁니다 (변동 없음)" },
+  aggressive:          { info: "🟢 공격형: 9.7 → 9.0 → 8.5", accum:9.7, accumSd:14.4, risk:9.0, riskSd:11.7, late:8.5, lateSd:10.8 },
+  standard:            { info: "🟡 표준형: 9.0 → 8.0 → 7.5", accum:9.0, accumSd:13.5, risk:8.0, riskSd:9.9, late:7.5, lateSd:9.0 },
+  conservative:        { info: "🟠 보수형: 8.5 → 7.0 → 6.5", accum:8.5, accumSd:11.7, risk:7.0, riskSd:8.1, late:6.5, lateSd:7.2 },
+  "very-conservative": { info: "🔴 매우 보수형: 8.0 → 6.0 → 5.5", accum:8.0, accumSd:10.8, risk:6.0, riskSd:6.3, late:5.5, lateSd:5.4 },
+  sp500:               { info: "📈 S&P 500 100% — 10.5% / σ13.5. 샤프 0.52", accum:10.5, accumSd:13.5, risk:10.5, riskSd:13.5, late:10.5, lateSd:13.5 },
+  nasdaq:              { info: "🚀 나스닥 100% — 13.5% / σ19.8. 최대낙폭 −83% 경험", accum:13.5, accumSd:19.8, risk:13.5, riskSd:19.8, late:13.5, lateSd:19.8 },
+  "sp-nasdaq":         { info: "⚖️ S&P70+나스닥30 — 11.4% / σ15.3", accum:11.4, accumSd:15.3, risk:11.4, riskSd:15.3, late:11.4, lateSd:15.3 },
+  "sp-nasdaq-5050":    { info: "⚖️ S&P50+나스닥50 — 12.0% / σ16.6", accum:12.0, accumSd:16.6, risk:12.0, riskSd:16.6, late:12.0, lateSd:16.6 },
+  "option-f":          { info: "⭐ 옵션 F — 미국주력70+버크셔10+인도5+금6+단기채9. 10.6% / σ14.3", accum:10.6, accumSd:14.3, risk:10.6, riskSd:14.3, late:10.6, lateSd:14.3 },
+  buffett:             { info: "💼 버핏 90/10 — 9.8% / σ12.6", accum:9.8, accumSd:12.6, risk:9.8, riskSd:12.6, late:9.8, lateSd:12.6 },
+  twofund:             { info: "⚡ Two-Fund 80/20 — 9.5% / σ12.6", accum:9.5, accumSd:12.6, risk:9.5, riskSd:12.6, late:9.5, lateSd:12.6 },
+  dividend:            { info: "💰 배당성장 SCHD형 — 8.5% / σ11.7", accum:8.5, accumSd:11.7, risk:8.5, riskSd:11.7, late:8.5, lateSd:11.7 },
+  balanced60:          { info: "📊 60-40 클래식 — 7.5% / σ11.0", accum:7.5, accumSd:11.0, risk:7.5, riskSd:11.0, late:7.5, lateSd:11.0 },
+  "3fund":             { info: "📚 3-Fund Bogleheads — 8.5% / σ11.0", accum:8.5, accumSd:11.0, risk:8.5, riskSd:11.0, late:8.5, lateSd:11.0 },
+  lazy:                { info: "😴 레이지 — 7.8% / σ10.2", accum:7.8, accumSd:10.2, risk:7.8, riskSd:10.2, late:7.8, lateSd:10.2 },
+  tdf2040:             { info: "🎯 타겟데이트 2040 — 7.5% / σ10.1", accum:7.5, accumSd:10.1, risk:7.5, riskSd:10.1, late:7.5, lateSd:10.1 },
+  allweather:          { info: "🌦️ All Weather — 6.5% / σ7.6", accum:6.5, accumSd:7.6, risk:6.5, riskSd:7.6, late:6.5, lateSd:7.6 },
+  permanent:           { info: "🛡️ 영구 포트폴리오 — 5.8% / σ6.5. 4국면 전천후 방어", accum:5.8, accumSd:6.5, risk:5.8, riskSd:6.5, late:5.8, lateSd:6.5 },
+  butterfly:           { info: "🦋 골든 버터플라이 — 6.8% / σ8.0", accum:6.8, accumSd:8.0, risk:6.8, riskSd:8.0, late:6.8, lateSd:8.0 },
+  vt:                  { info: "🌍 전세계 주식 VT형 — 8.8% / σ12.6", accum:8.8, accumSd:12.6, risk:8.8, riskSd:12.6, late:8.8, lateSd:12.6 },
+  "korea-tax":         { info: "🇰🇷 한국 절세형 — 실효 8.5% / σ11.0", accum:8.5, accumSd:11.0, risk:8.5, riskSd:11.0, late:8.5, lateSd:11.0 },
+  deposit:             { info: "🏦 정기예금 100% — 3.0% / σ0.3. 실질 ~0.8%, 인출을 못 버팁니다 (시연용)", accum:3.0, accumSd:0.3, risk:3.0, riskSd:0.3, late:3.0, lateSd:0.3 },
+  kospi:               { info: "🇰🇷 코스피 100% — 5.5% / σ18.0. 샤프 0.11, 홈 바이어스 시연용", accum:5.5, accumSd:18.0, risk:5.5, riskSd:18.0, late:5.5, lateSd:18.0 },
+  gold100:             { info: "🥇 금 100% — 5.0% / σ15.3. 샤프 0.10, 단독 보유 비효율 시연용", accum:5.0, accumSd:15.3, risk:5.0, riskSd:15.3, late:5.0, lateSd:15.3 },
+  nasdaq2x:            { info: "⚡ 나스닥 2x — 21.0% / σ39.6. ⚠️ 산술평균이지 실현 수익이 아닙니다. 아래 CAGR을 보세요", accum:21.0, accumSd:39.6, risk:21.0, riskSd:39.6, late:21.0, lateSd:39.6 },
+  custom:              { info: "⚙️ 커스텀 — 아래 구간별 값을 직접 입력하세요", custom: true },
+};
+
+/* ── 위기 시나리오 ────────────────────────────────────────────────────
+   pattern 은 해당 연도들의 수익률을 통째로 덮어쓴다(분포 추첨을 무시).
+   투자 시작 후 시드로 뽑은 해에 터진다. */
+const CRASHES = {
+  imf1997:     { name: "🇰🇷 1997 IMF형",      pattern: [-.40, .30, .20],  info: "외환위기. 원화 급락으로 해외자산은 방어, 국내자산 직격. V자 회복" },
+  dotcom2000:  { name: "💻 2000 닷컴형",       pattern: [-.15, -.12, -.22], info: "3년 연속 하락, 회복까지 7년. 가장 무서운 장기 침체" },
+  gfc2008:     { name: "🏦 2008 금융위기형",    pattern: [-.28, .25, .15],  info: "글로벌 금융위기. 빠른 V자, 환율 +71%로 원화 손실 완화" },
+  covid2020:   { name: "🦠 2020 코로나형",      pattern: [-.15, .25, .18],  info: "단기 충격 후 V자 반등. 가장 가벼운 시나리오" },
+  hike2022:    { name: "📈 2022 긴축형",        pattern: [-.12, -.05, .18], info: "금리 인상, 주식·채권 동반 하락. All Weather·60-40에 특히 불리" },
+  lost10:      { name: "💀 잃어버린 10년형",     pattern: [-.10, -.05, -.03, 0, 0, 0, 0, 0, 0, 0], info: "일본식 장기 침체. 3년 하락 후 7년 횡보" },
+  depression:  { name: "🕳️ 1929 대공황형",      pattern: [-.25, -.34, -.09, .20, .15, .10], info: "3년간 −55%. 회복에 10년 이상. 극단적 꼬리 위험" },
+  stagflation: { name: "🛢️ 1973 스태그플레이션형", pattern: [-.18, -.28, .32, .20, -.05], info: "오일쇼크. 물가가 함께 뛰어 실질 손실은 표시보다 큽니다" },
+  fxshock:     { name: "💱 원화 급등형",         pattern: [-.18, .05, .10], info: "원화 강세로 해외자산 원화환산 손실. 한국 투자자 특유의 역풍" },
+  blackmonday: { name: "⚫ 1987 블랙먼데이형",   pattern: [-.20, .12, .25], info: "단일 폭락 후 빠른 회복. 짧고 굵은 충격" },
+  euro2011:    { name: "🇪🇺 2011 유럽 재정위기형", pattern: [-.08, .13, .16], info: "가벼운 조정. 위기 축에도 못 드는 수준" },
+};
+
 /** 잔액을 이루는 네 가지 자금 성격 — 인출 순서와 세율이 여기서 갈린다 */
 const BUCKETS = [
   { key: "free", name: "비과세 원금", tip: "인출해도 세금이 없는 돈. 연금계좌에서 가장 먼저 빠져나간다." },
@@ -758,6 +825,8 @@ function defaultState() {
     pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260812, gameSpend: 4200, gameDeathAge: 95,
+    preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "",
+    cAccum: 9.0, cAccumSd: 13.5, cRisk: 8.0, cRiskSd: 9.9, cLate: 7.5, cLateSd: 9.0,
     rates: {}, limits: {}, fillAmts: {}, priority: {}, opening: {}, openYears: {},
   };
   ACC.forEach(a => {
@@ -881,11 +950,56 @@ function gauss(rnd) {
   while (v === 0) v = rnd();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
-/** 그해 시장 수익률(%). 계좌별 수익률은 이 값에 각 계좌가 가진 초과분을 더해 쓴다. */
-function marketReturn(cfg, y) {
+/** 연도가 속한 구간 — 위험구간은 은퇴 전후로, 순서위험이 가장 큰 시기다 */
+function phaseOf(cfg, y) {
+  const rs = cfg.retireYear + (+cfg.riskFrom || -5);
+  const ls = cfg.retireYear + (+cfg.lateFrom || 10);
+  return y < rs ? "accum" : y < ls ? "risk" : "late";
+}
+/** 선택한 프리셋의 구간별 평균/표준편차 */
+function phaseParams(cfg, y) {
+  const ph = phaseOf(cfg, y);
+  const P = PRESETS[cfg.preset];
+  if (!P || cfg.preset === "off") return { mean: clamp0(cfg.gameMean), sd: clamp0(cfg.gameVol), phase: ph };
+  if (P.custom) {
+    const m = { accum: cfg.cAccum, risk: cfg.cRisk, late: cfg.cLate }[ph];
+    const d = { accum: cfg.cAccumSd, risk: cfg.cRiskSd, late: cfg.cLateSd }[ph];
+    return { mean: clamp0(m), sd: clamp0(d), phase: ph };
+  }
+  const m = { accum: P.accum, risk: P.risk, late: P.late }[ph];
+  const d = { accum: P.accumSd, risk: P.riskSd, late: P.lateSd }[ph];
+  return { mean: m, sd: d, phase: ph };
+}
+
+/** 이번 판에 터질 위기 — 종류와 시작 연도를 시드로 정한다. 투자 시작 후에만 온다. */
+function crashPlan(cfg) {
+  const n = Math.max(0, Math.min(3, +cfg.crashCount || 0));
+  if (!n) return {};
+  const keys = Object.keys(CRASHES);
+  const r = mulberry32((clamp0(cfg.gameSeed) | 0) ^ 0xC0FFEE);
+  const first = cfg.startYear + 3, last = cfg.endYear;
+  const map = {}, used = [];
+  for (let i = 0; i < n; i++) {
+    const key = cfg.crashPick && CRASHES[cfg.crashPick] ? cfg.crashPick : keys[Math.floor(r() * keys.length)];
+    const pat = CRASHES[key].pattern;
+    let start = 0;
+    for (let tries = 0; tries < 40; tries++) {          // 이미 터진 위기와 겹치지 않게
+      start = first + Math.floor(r() * Math.max(1, last - first - pat.length));
+      if (!used.some(u => start < u.end && start + pat.length > u.start)) break;
+    }
+    used.push({ start, end: start + pat.length });
+    pat.forEach((v, k) => { map[start + k] = { key, ret: v * 100, step: k, len: pat.length }; });
+  }
+  return map;
+}
+
+/** 그해 시장 수익률(%). 위기가 걸린 해는 추첨 대신 시나리오 값을 그대로 쓴다. */
+function marketReturn(cfg, y, crash) {
+  const c = crash && crash[y];
+  if (c) return c.ret;
+  const { mean, sd } = phaseParams(cfg, y);
   const r = mulberry32((clamp0(cfg.gameSeed) | 0) + y * 2654435761);
-  const v = clamp0(cfg.gameMean) + gauss(r) * clamp0(cfg.gameVol);
-  return Math.max(-60, Math.min(90, v));
+  return Math.max(-70, Math.min(120, mean + gauss(r) * sd));
 }
 
 const EVENT_KINDS = {
@@ -1189,8 +1303,12 @@ function simulate(opts = {}) {
       for (const a of ACC) {
         const b = st.bal[a.id];
         const base = bTotal(b);
+        // 프리셋을 고르면 포트폴리오 하나를 모든 계좌에 적용한다.
+        // off 일 때만 계좌별 수익률 차이를 유지한다.
         const rate = (opts.returns && opts.returns[y] != null)
-          ? (cfg.rates[a.id] || 0) - clamp0(cfg.gameMean) + opts.returns[y] // 계좌별 초과분은 유지
+          ? (cfg.preset && cfg.preset !== "off"
+              ? opts.returns[y]
+              : (cfg.rates[a.id] || 0) - clamp0(cfg.gameMean) + opts.returns[y])
           : (cfg.rates[a.id] || 0);
         if (a.kind === "taxable") {
           // 절세계좌와 달리 배당은 인출 여부와 무관하게 매년 원천징수(15.4%)된다.
@@ -1856,7 +1974,7 @@ function gameStart() {
   const cfg = state.cfg;
   // 게임이 진행한 해의 납입·인출은 게임이 직접 채우므로 먼저 비운다
   for (let y = cfg.startYear; y <= cfg.endYear; y++) AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
-  game = { year: cfg.startYear, returns: {}, log: [], over: null, pending: null };
+  game = { year: cfg.startYear, returns: {}, log: [], over: null, pending: null, crash: crashPlan(cfg) };
   saveGame(); renderGame();
 }
 function saveGame() { try { localStorage.setItem(LS_KEY + ":game", JSON.stringify(game)); } catch (e) {} }
@@ -1952,6 +2070,14 @@ function renderGame() {
         <span class="hint" id="allocMsg" style="margin:0"></span>
       </div>
     </div>
+    ${(() => {
+      const st = returnStats(cfg, game.returns);
+      const P = PRESETS[cfg.preset] || PRESETS.off;
+      const pp = phaseParams(cfg, y);
+      return `<p class="hint">${P.info.split(" —")[0]} · 지금은 <strong>${PHASE_NAME[pp.phase]}</strong>
+        (평균 ${pp.mean.toFixed(1)}% / σ${pp.sd.toFixed(1)})
+        ${st ? ` · 지금까지 실현 <strong>CAGR ${st.cagr.toFixed(1)}%</strong> (산술 ${st.arith.toFixed(1)}%)` : ""}</p>`;
+    })()}
     <p class="hint">결정을 마치고 넘기면 <strong>그때</strong> 올해 시장 수익률이 공개됩니다. 미리 알고 고를 수는 없습니다.</p>
   `;
 
@@ -2014,9 +2140,29 @@ function rebuildStateAt(sim, y) {
   return { st, ctx: { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft: 250 } };
 }
 
+/** 실현 수익률 요약. 산술평균만 보면 변동성 침식이 안 보이므로 CAGR을 나란히 둔다. */
+function returnStats(cfg, returns) {
+  const ys = Object.keys(returns).map(Number).sort((a, b) => a - b);
+  if (!ys.length) return null;
+  const rs = ys.map(y => returns[y]);
+  const arith = rs.reduce((a, b) => a + b, 0) / rs.length;
+  const growth = rs.reduce((a, r) => a * (1 + r / 100), 1);
+  const cagr = (Math.pow(growth, 1 / rs.length) - 1) * 100;
+  const byPhase = {};
+  for (const ph of ["accum", "risk", "late"]) {
+    const v = ys.filter(y => phaseOf(cfg, y) === ph).map(y => returns[y]);
+    if (v.length) byPhase[ph] = { n: v.length, avg: v.reduce((a, b) => a + b, 0) / v.length };
+  }
+  return { n: rs.length, arith, cagr, drag: arith - cagr,
+           worst: Math.min(...rs), best: Math.max(...rs), down: rs.filter(r => r < 0).length, byPhase };
+}
+const PHASE_NAME = { accum: "적립기", risk: "위험구간", late: "후기" };
+
 function rollCard(p) {
   const up = p.ret >= 0;
-  const label = p.ret <= -20 ? "폭락" : p.ret <= -5 ? "하락" : p.ret < 5 ? "보합" : p.ret < 20 ? "상승" : "급등";
+  const label = p.crash
+    ? `${CRASHES[p.crash.key].name} ${p.crash.step + 1}/${p.crash.len}년차`
+    : (p.ret <= -20 ? "폭락" : p.ret <= -5 ? "하락" : p.ret < 5 ? "보합" : p.ret < 20 ? "상승" : "급등");
   // 총자산 변화에는 그해 납입액이 섞여 "마이너스인데 자산 증가"처럼 보인다.
   // 시장이 실제로 한 일은 운용손익뿐이므로 그것만 보여준다.
   return `<div class="roll ${up ? "up" : "dn"}">
@@ -2024,16 +2170,19 @@ function rollCard(p) {
     <div class="big">${up ? "+" : ""}${p.ret.toFixed(1)}%</div>
     <div class="sub">운용손익 <strong class="${p.pnl >= 0 ? "pos" : "neg"}">${p.pnl >= 0 ? "+" : "−"}${fmt(Math.abs(p.pnl))}</strong>만원
       · 연말 자산 ${fmt(p.after)}만원</div>
+    ${p.crash ? `<div class="sub" style="margin-top:5px">${CRASHES[p.crash.key].info}</div>` : ""}
   </div>`;
 }
 
 function turnAdvance() {
   const cfg = state.cfg, y = game.year;
-  game.returns[y] = marketReturn(cfg, y);
+  if (!game.crash) game.crash = crashPlan(cfg);
+  game.returns[y] = marketReturn(cfg, y, game.crash);
   const after = gameSim();
   const rec = after.years.find(r => r.year === y);
   const pnl = rec ? ACC.reduce((t, a) => t + (rec.acc[a.id].growth || 0), 0) : 0;
-  game.pending = { year: y, ret: game.returns[y], pnl: Math.round(pnl), after: Math.round(rec ? rec.total : 0) };
+  const cr = game.crash && game.crash[y];
+  game.pending = { year: y, ret: game.returns[y], pnl: Math.round(pnl), after: Math.round(rec ? rec.total : 0), crash: cr };
 
   const c = cashOf(cfg, y);
   game.log.push({ year: y, ret: game.returns[y], total: rec ? rec.total : 0, spend: c.living + c.spend, salary: c.salary });
@@ -2077,17 +2226,28 @@ function renderEnding(box) {
         <div class="gline"><span>총 납부 세금</span><span class="neg">−${fmt(sim.sum.cumTax)}</span></div>
         <div class="gline tot"><span>은퇴 후 세후 수령</span><span>${fmt(sim.sum.cumNet)}</span></div>
       </div>
-      <div class="gcard"><h4>시장</h4>
+      <div class="gcard"><h4>실현 수익률</h4>
         ${(() => {
-          const rs = Object.values(game.returns);
-          if (!rs.length) return "";
-          const avg = rs.reduce((a, b) => a + b, 0) / rs.length;
-          const worst = Math.min(...rs), best = Math.max(...rs);
-          const down = rs.filter(r => r < 0).length;
-          return `<div class="gline"><span>평균 수익률</span><span>${avg.toFixed(1)}%</span></div>
-            <div class="gline"><span>최악의 해</span><span class="neg">${worst.toFixed(1)}%</span></div>
-            <div class="gline"><span>최고의 해</span><span class="pos">+${best.toFixed(1)}%</span></div>
-            <div class="gline"><span>마이너스 난 해</span><span>${down} / ${rs.length}년</span></div>`;
+          const st = returnStats(cfg, game.returns);
+          if (!st) return "";
+          return `<div class="gline"><span>산술평균</span><span>${st.arith.toFixed(1)}%</span></div>
+            <div class="gline"><span><strong>실현 CAGR</strong></span><span><strong>${st.cagr.toFixed(1)}%</strong></span></div>
+            <div class="gline"><span style="color:var(--muted)">변동성 침식</span><span style="color:var(--muted)">−${st.drag.toFixed(1)}%p</span></div>
+            <div class="gline tot"><span>최악의 해</span><span class="neg">${st.worst.toFixed(1)}%</span></div>
+            <div class="gline"><span>최고의 해</span><span class="pos">+${st.best.toFixed(1)}%</span></div>
+            <div class="gline"><span>마이너스 난 해</span><span>${st.down} / ${st.n}년</span></div>
+            ${Object.entries(st.byPhase).map(([k, v]) => `<div class="gline"><span style="color:var(--muted)">${PHASE_NAME[k]} 평균 (${v.n}년)</span><span style="color:var(--muted)">${v.avg.toFixed(1)}%</span></div>`).join("")}`;
+        })()}
+      </div>
+      <div class="gcard"><h4>겪은 위기</h4>
+        ${(() => {
+          const cr = game.crash || {};
+          const seen = {};
+          Object.entries(cr).forEach(([y, c]) => { if (!seen[c.key]) seen[c.key] = +y; });
+          const ks = Object.keys(seen);
+          if (!ks.length) return `<p class="hint" style="margin:0">이번 판에는 큰 위기가 없었습니다.</p>`;
+          return ks.map(k => `<div class="evt"><span class="nm">${CRASHES[k].name}</span><span>${seen[k]}년 (만 ${seen[k] - cfg.birthYear}세)</span></div>`).join("")
+            + `<p class="hint" style="margin:8px 0 0">${ks.map(k => CRASHES[k].info).join(" · ")}</p>`;
         })()}
       </div>
     </div>
@@ -2097,6 +2257,25 @@ function renderEnding(box) {
 /* ========================================================================
    설정 UI 바인딩
    ======================================================================== */
+function buildPresetUI() {
+  const sel = document.getElementById("cfg_preset");
+  if (sel && !sel.options.length) {
+    sel.innerHTML = Object.keys(PRESETS).map(k => `<option value="${k}">${PRESETS[k].info.split(" —")[0].split(":")[0]}</option>`).join("");
+  }
+  const cp = document.getElementById("cfg_crashPick");
+  if (cp && !cp.options.length) {
+    cp.innerHTML = `<option value="">🎲 매번 랜덤</option>`
+      + Object.entries(CRASHES).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("");
+  }
+}
+function syncPresetInfo() {
+  const P = PRESETS[state.cfg.preset] || PRESETS.off;
+  const n = document.getElementById("presetInfo");
+  if (n) n.innerHTML = P.info + (P.custom ? "" : "");
+  const c = document.getElementById("customPhase");
+  if (c) c.hidden = !P.custom;
+}
+
 function buildAccCfg() {
   const wrap = document.getElementById("accCfg");
   wrap.innerHTML = ACC.map(a => `<tr>
@@ -2302,9 +2481,11 @@ function renderXfers() {
 const CFG_FIELDS = ["birthYear", "startYear", "retireYear", "endYear", "inflation", "salaryTier", "isaType",
   "timing", "realView", "sevRate", "compRate", "npsAmount", "npsAge", "npsRate",
   "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap", "pensionTotalCap",
-  "gameSpend", "gameMean", "gameVol", "gameSeed", "gameDeathAge"];
+  "gameSpend", "gameMean", "gameVol", "gameSeed", "gameDeathAge",
+  "preset", "riskFrom", "lateFrom", "crashCount", "crashPick",
+  "cAccum", "cAccumSd", "cRisk", "cRiskSd", "cLate", "cLateSd"];
 /** 값을 문자열 그대로 보관하는 필드 — 나머지는 숫자로 변환한다 */
-const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStrategy"]);
+const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStrategy", "preset", "crashPick"]);
 
 function syncCfgInputs() {
   CFG_FIELDS.forEach(k => {
@@ -2318,6 +2499,7 @@ function syncCfgInputs() {
   });
   const sb = document.getElementById("cfg_showBuckets");
   if (sb) sb.checked = !!state.cfg.showBuckets;
+  syncPresetInfo();
   syncOpening();
 }
 
@@ -2327,6 +2509,7 @@ function bindCfg() {
     if (!n) return;
     n.addEventListener("input", () => {
       state.cfg[k] = STR_FIELDS.has(k) ? n.value : num(n.value);
+      if (k === "preset") syncPresetInfo();
       if (["startYear", "endYear", "retireYear"].includes(k)) {
         const c = state.cfg;
         if (c.endYear < c.startYear || c.endYear - c.startYear > 90) return; // 입력 중간값 무시
@@ -2543,6 +2726,7 @@ function seedExample() {
   row(c.retireYear).irpSev.in = 15000;
 }
 
+buildPresetUI();
 buildAccCfg();
 buildOpening();
 bindCfg();
