@@ -532,7 +532,8 @@
         <div class="fgrid" style="margin-top:12px">
           <label class="f"><span class="t">인출 전략</span>
             <select id="cfg_wdStrategy">
-              <option value="pensionFirst">연금 저율구간 우선 (권장)</option>
+              <option value="ratio">저율구간 + 잔액 비례 (권장)</option>
+              <option value="pensionFirst">연금 저율구간 우선</option>
               <option value="taxmin">그해 세금 최소</option>
             </select>
           </label>
@@ -555,10 +556,17 @@
           국민연금 세후 수령액은 목표에서 먼저 차감합니다.
         </p>
         <p class="hint">
-          자동 배분의 <strong>연금 저율구간 우선</strong>은 사적연금 과세대상이 분리과세 문턱(기본 1,500만원)을 넘지 않는 선까지
-          연금계좌에서 먼저 뽑고, 모자란 만큼만 ISA·일반계좌에서 채웁니다. 저율 구간은 그해 안 쓰면 사라지므로 ISA를 먼저 헐어 아껴둘 이유가 없습니다.
+          <strong>저율구간 + 잔액 비례</strong>(기본) — ① <strong>연금저축 세액공제용 + IRP 투자용</strong>에서 분리과세 문턱(기본 1,500만원)
+          안쪽까지 먼저 뺍니다. 이 구간은 5.5%지만 1원이라도 넘기면 전액 16.5%가 되고, 안 쓰면 그해로 사라지는 한도입니다.
+          ② 모자란 만큼은 <strong>나머지 계좌를 인출 가능액에 비례해</strong> 고르게 헐어냅니다 — 한 계좌만 먼저 마르지 않습니다.
+          ③ 그래도 부족하면 최후 수단으로 ①의 남은 잔액까지 갑니다(이때는 문턱을 넘습니다).
+          비례 기준은 잔액이 아니라 <em>인출 가능액</em>(연금수령한도·55세 요건을 반영한 금액)입니다.
+        </p>
+        <p class="hint">
+          <strong>연금 저율구간 우선</strong>은 문턱까지 연금계좌에서 뽑는 것은 같지만, 나머지를 비례가 아니라
+          그때그때 실수령이 가장 큰 계좌에서 채웁니다.
           <strong>그해 세금 최소</strong>는 눈앞의 세금만 보고 고르기 때문에 비과세인 ISA부터 몽땅 빼는 경향이 있습니다.
-          어느 쪽이든 연금수령한도·55세 요건을 지키며, 목표를 채우지 못하는 해는 자산을 태우는 대신 부족분을 경고로 알립니다.
+          셋 다 연금수령한도·55세 요건을 지키며, 목표를 채우지 못하는 해는 자산을 태우는 대신 부족분을 경고로 알립니다.
         </p>
 
       </div>
@@ -778,11 +786,11 @@
    계좌 정의
    ======================================================================== */
 const ACC = [
-  { id:"isa",    name:"ISA",                 abbr:"ISA",        kind:"isa",     color:"--s1", rate:5.0, limit:2000, fill:1000, prio:3 },
-  { id:"irpInv", name:"IRP · 투자용",         abbr:"IRP 투자",   kind:"pension", color:"--s2", rate:5.5, limit:300,  fill:300, ded:true, prio:2, irp:true },
+  { id:"isa",    name:"ISA",                 abbr:"ISA",        kind:"isa",     color:"--s1", rate:5.0, limit:2000, fill:1000, prio:4 },
+  { id:"irpInv", name:"IRP · 투자용",         abbr:"IRP 투자",   kind:"pension", color:"--s2", rate:5.5, limit:300,  fill:300, ded:true, prio:1, irp:true },
   { id:"irpSev", name:"IRP · 퇴직금 수령",     abbr:"IRP 퇴직",   kind:"pension", color:"--s3", rate:4.0, limit:0,    fill:0,   sev:true, prio:0, irp:true },
-  { id:"psDed",  name:"연금저축 · 세액공제용",  abbr:"연저 공제",  kind:"pension", color:"--s4", rate:5.5, limit:600,  fill:600, ded:true, prio:1 },
-  { id:"psFree", name:"연금저축 · 비과세용",    abbr:"연저 비과세", kind:"pension", color:"--s5", rate:6.0, limit:900,  fill:0,   prio:4 },
+  { id:"psDed",  name:"연금저축 · 세액공제용",  abbr:"연저 공제",  kind:"pension", color:"--s4", rate:5.5, limit:600,  fill:600, ded:true, prio:2 },
+  { id:"psFree", name:"연금저축 · 비과세용",    abbr:"연저 비과세", kind:"pension", color:"--s5", rate:6.0, limit:900,  fill:0,   prio:3 },
   { id:"taxable", name:"일반계좌 · 직접투자",   abbr:"일반계좌",   kind:"taxable", color:"--s6", rate:6.0, limit:0,    fill:0,   prio:5 },
 ];
 const AID = ACC.map(a => a.id);
@@ -877,7 +885,7 @@ function defaultState() {
     npsAmount: 0, npsAge: 65, npsRate: 3.0,
     transfers: [],
     allowPenalty: 0, planTarget: null,
-    pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
+    pensionCap: 1500, wdStrategy: "ratio", showBuckets: 1,
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [], spendRules: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260812, gameSpend: 4200, gameDeathAge: 95,
     preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "geo",
@@ -1317,6 +1325,118 @@ function applyWithdrawals(st, draws, ctx) {
  * 세율표에는 계단(연금소득 1,500만원 분리과세 전환)이 있어 단순 탐욕법은 그 앞에서 멈춘다.
  * 기본 스텝으로 개선되는 계좌가 하나도 없으면 청크를 2배씩 키워 계단을 넘어본다.
  */
+/** 세액공제 재원 계좌 (연금저축 세액공제용 + IRP 투자용) — 분리과세 문턱을 같이 쓰는 짝이다 */
+const DEDIDS = ACC.filter(a => a.ded).map(a => a.id);
+
+/**
+ * 「저율구간 + 잔액 비례」 인출.
+ *   1순위 — 세액공제용 + IRP 투자용에서 분리과세 문턱(기본 1,500만) 안쪽까지.
+ *           이 구간은 5.5%지만 1원이라도 넘기면 전액 16.5%라, 넘지 않는 선까지만 쓴다.
+ *           그해 안 쓰면 사라지는 한도라 아껴 둘 이유도 없다.
+ *   2순위 — 나머지를 각 계좌의 인출 가능액에 비례해 고르게. 한 계좌만 빨리 마르지 않는다.
+ *   3순위 — 그래도 모자라면 1순위 계좌의 남은 잔액까지 (문턱을 넘으므로 최후 수단).
+ * 비례 배분은 잔액이 아니라 '인출 가능액'(연금수령한도·55세 요건 반영) 기준이다.
+ */
+function ratioDraws(st, ctx, target, capacity, floor) {
+  const draws = { ...floor };
+  const evalDraws = d => applyWithdrawals({ bal: cloneBal(st.bal), isaUsed: st.isaUsed }, d, ctx);
+  const netOf = d => evalDraws(d).net;
+  if (netOf(draws) >= target - 0.5) return draws;
+
+  const room = id => Math.max(0, capacity[id] - draws[id]);
+  const cap = clamp0(ctx.cfg.pensionCap) || Infinity;
+
+  /**
+   * amt 를 잔액 비율대로 나누되, 연금수령한도에 걸려 못 빼는 몫은 여유 있는 계좌로 다시 돌린다.
+   * 그냥 '인출 가능액'에 비례시키면 한도가 빡빡한 IRP·연금저축의 비중이 실제 잔액보다
+   * 훨씬 낮게 눌려, 잔액 비례라고 부를 수 없게 된다.
+   */
+  const spread = (ids, amt) => {
+    const out = Object.fromEntries(ids.map(id => [id, 0]));
+    let left = amt, active = ids.filter(id => room(id) > 0.5);
+    for (let g = 0; g < 12 && left > 0.5 && active.length; g++) {
+      const w = id => bTotal(st.bal[id]);
+      const wsum = active.reduce((s, id) => s + w(id), 0);
+      if (wsum <= 0) break;
+      let used = 0;
+      const next = [];
+      for (const id of active) {
+        const give = Math.min(left * w(id) / wsum, room(id) - out[id]);
+        out[id] += give; used += give;
+        if (room(id) - out[id] > 0.5) next.push(id);
+      }
+      left -= used; active = next;
+      if (used <= 0.5) break;
+    }
+    return out;
+  };
+
+  /**
+   * ids 에서 총 s × 전체여유 만큼을 잔액 비례로 빼되, 목표 세후를 채우는 가장 작은 s 를 찾는다.
+   * 문턱을 넘으면 실수령이 되레 줄 수 있어 단조를 가정하지 않고 훑은 뒤 그 구간만 이분한다.
+   * limit 은 s 의 상한 (문턱 안쪽으로 묶어야 할 때 쓴다).
+   */
+  const advance = (ids, limit = 1) => {
+    const total = ids.reduce((s, id) => s + room(id), 0);
+    if (total <= 0.5 || limit <= 1e-6) return;
+    const at = s => {
+      const add = spread(ids, total * s), d = { ...draws };
+      for (const id of ids) d[id] += add[id];
+      return d;
+    };
+    const N = 120;
+    let hit = -1;
+    for (let i = 1; i <= N; i++) if (netOf(at(limit * i / N)) >= target - 0.5) { hit = i; break; }
+    let s = limit;
+    if (hit >= 0) {
+      let lo = limit * (hit - 1) / N, hi = limit * hit / N;
+      for (let i = 0; i < 22; i++) {
+        const mid = (lo + hi) / 2;
+        if (netOf(at(mid)) >= target - 0.5) hi = mid; else lo = mid;
+      }
+      s = hi;
+    }
+    const d = at(s);
+    for (const id of ids) draws[id] = d[id];
+  };
+
+  // 1순위 — 세액공제 재원에서 분리과세 문턱 안쪽까지.
+  // 문턱은 인출 총액이 아니라 '과세대상' 기준이라, 실제로 넘지 않는 최대 지점을 먼저 찾는다.
+  const ded = DEDIDS.filter(id => room(id) > 0.5);
+  if (ded.length) {
+    let limit = 1;
+    if (cap !== Infinity) {
+      const total = ded.reduce((s, id) => s + room(id), 0);
+      const over = s => {
+        const add = spread(ded, total * s), d = { ...draws };
+        for (const id of ded) d[id] += add[id];
+        return evalDraws(d).taxablePension > cap + 1e-6;
+      };
+      if (over(1)) {
+        let lo = 0, hi = 1;
+        for (let i = 0; i < 22; i++) { const mid = (lo + hi) / 2; if (over(mid)) hi = mid; else lo = mid; }
+        limit = lo;
+      }
+    }
+    advance(ded, limit);
+  }
+
+  // 2순위 — 나머지 계좌를 잔액 비례로 동시에 헐어낸다
+  if (netOf(draws) < target - 0.5) {
+    const rest = AID.filter(id => !DEDIDS.includes(id) && room(id) > 0.5);
+    if (rest.length) advance(rest);
+  }
+
+  // 3순위 — 최후 수단. 여기까지 오면 문턱을 넘어 16.5%가 붙는다.
+  if (netOf(draws) < target - 0.5) {
+    const back = DEDIDS.filter(id => room(id) > 0.5);
+    if (back.length) advance(back);
+  }
+
+  AID.forEach(id => { draws[id] = Math.round(draws[id]); });
+  return draws;
+}
+
 function greedyDraws(st, ctx, target, strategy, seed) {
   // seed = 사용자가 계좌를 찍어 넣은 고정 인출액. 여기서 출발해 모자란 만큼만 더 채우고,
   // 되돌리기 단계에서도 이 아래로는 깎지 않는다 (명시적 지시라서).
@@ -1336,6 +1456,8 @@ function greedyDraws(st, ctx, target, strategy, seed) {
       : (ctx.eligible[a.id] ? Math.min(bal, ctx.pLimit[a.id]) : 0);
   }
   if (AID.reduce((s, id) => s + capacity[id], 0) <= 0.5) return draws;
+
+  if (strategy === "ratio") return ratioDraws(st, ctx, target, capacity, floor);
 
   // 「연금 저율구간 우선」은 사적연금 과세대상이 분리과세 문턱을 넘지 않는 선까지
   // 연금계좌에서 먼저 뽑고, 모자란 만큼만 나머지 계좌에서 채운다.
@@ -3048,6 +3170,13 @@ function migrateOpening(cfg, raw) {
   cfg.opening = { ...d.opening, ...(cfg.opening || {}) };
   cfg.openYears = { ...d.openYears, ...(cfg.openYears || {}) };
   cfg.priority = { ...d.priority, ...(cfg.priority || {}) };
+  // 납입 순서·인출 전략의 기본값이 바뀌었다. 손대지 않은 저장본만 새 기본값으로 옮기고,
+  // 직접 고친 순서는 그대로 둔다 (사용자가 정한 것을 덮어쓰면 안 된다).
+  const OLDPRIO = { psDed: 1, irpInv: 2, isa: 3, psFree: 4, taxable: 5, irpSev: 0 };
+  if (AID.every(id => clamp0(cfg.priority[id]) === OLDPRIO[id])) {
+    for (const a of ACC) cfg.priority[a.id] = a.prio;
+  }
+  if (raw.wdStrategy === "pensionFirst") cfg.wdStrategy = "ratio";
   for (const a of ACC) cfg.opening[a.id] = { free: 0, ded: 0, sev: 0, gain: 0, ...(cfg.opening[a.id] || {}) };
   // 예전 저장본의 계좌별 고정 금액을 계좌별 규칙으로 옮긴다
   if (!Array.isArray(cfg.wdRules)) cfg.wdRules = [];
