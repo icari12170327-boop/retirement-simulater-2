@@ -385,6 +385,26 @@
           </span>
           <label class="f"><span class="t">게임 · 종료 나이</span><input type="number" id="cfg_gameDeathAge"></label>
         </div>
+        <h3 style="margin-top:16px">🏠 주택담보대출</h3>
+        <div class="fgrid">
+          <label class="f"><span class="t">사용</span>
+            <select id="loan_on"><option value="1">있음</option><option value="0">없음</option></select></label>
+          <label class="f"><span class="t">현재 잔액 (만원)</span><input type="number" step="50" id="loan_balance"></label>
+          <label class="f"><span class="t">현재 금리 %</span><input type="number" step="0.1" id="loan_rate"></label>
+          <label class="f"><span class="t">만기 연도</span><input type="number" id="loan_endYear"></label>
+          <label class="f"><span class="t">만기 월</span><input type="number" min="1" max="12" id="loan_endMonth"></label>
+          <label class="f"><span class="t">상환 방식</span>
+            <select id="loan_type">
+              <option value="amort">원리금균등</option>
+              <option value="equalPrin">원금균등</option>
+              <option value="interestOnly">거치(이자만)</option>
+            </select></label>
+          <label class="f"><span class="t">금리 유형</span>
+            <select id="loan_rateMode"><option value="float">변동</option><option value="fixed">고정</option></select></label>
+          <label class="f"><span class="t">금리 변동성 %p</span><input type="number" step="0.1" id="loan_rateVol"></label>
+          <label class="f"><span class="t">금리 하한 %</span><input type="number" step="0.1" id="loan_rateMin"></label>
+          <label class="f"><span class="t">금리 상한 %</span><input type="number" step="0.1" id="loan_rateMax"></label>
+        </div>
       </div>
     </details>
     <div id="gameBody"></div>
@@ -790,17 +810,17 @@ const PRESETS = {
    pattern 은 해당 연도들의 수익률을 통째로 덮어쓴다(분포 추첨을 무시).
    투자 시작 후 시드로 뽑은 해에 터진다. */
 const CRASHES = {
-  imf1997:     { name: "🇰🇷 1997 IMF형",      pattern: [-.40, .30, .20],  info: "외환위기. 원화 급락으로 해외자산은 방어, 국내자산 직격. V자 회복" },
-  dotcom2000:  { name: "💻 2000 닷컴형",       pattern: [-.15, -.12, -.22], info: "3년 연속 하락, 회복까지 7년. 가장 무서운 장기 침체" },
-  gfc2008:     { name: "🏦 2008 금융위기형",    pattern: [-.28, .25, .15],  info: "글로벌 금융위기. 빠른 V자, 환율 +71%로 원화 손실 완화" },
-  covid2020:   { name: "🦠 2020 코로나형",      pattern: [-.15, .25, .18],  info: "단기 충격 후 V자 반등. 가장 가벼운 시나리오" },
-  hike2022:    { name: "📈 2022 긴축형",        pattern: [-.12, -.05, .18], info: "금리 인상, 주식·채권 동반 하락. All Weather·60-40에 특히 불리" },
-  lost10:      { name: "💀 잃어버린 10년형",     pattern: [-.10, -.05, -.03, 0, 0, 0, 0, 0, 0, 0], info: "일본식 장기 침체. 3년 하락 후 7년 횡보" },
-  depression:  { name: "🕳️ 1929 대공황형",      pattern: [-.25, -.34, -.09, .20, .15, .10], info: "3년간 −55%. 회복에 10년 이상. 극단적 꼬리 위험" },
-  stagflation: { name: "🛢️ 1973 스태그플레이션형", pattern: [-.18, -.28, .32, .20, -.05], info: "오일쇼크. 물가가 함께 뛰어 실질 손실은 표시보다 큽니다" },
-  fxshock:     { name: "💱 원화 급등형",         pattern: [-.18, .05, .10], info: "원화 강세로 해외자산 원화환산 손실. 한국 투자자 특유의 역풍" },
-  blackmonday: { name: "⚫ 1987 블랙먼데이형",   pattern: [-.20, .12, .25], info: "단일 폭락 후 빠른 회복. 짧고 굵은 충격" },
-  euro2011:    { name: "🇪🇺 2011 유럽 재정위기형", pattern: [-.08, .13, .16], info: "가벼운 조정. 위기 축에도 못 드는 수준" },
+  imf1997:     { name: "🇰🇷 1997 IMF형",      pattern: [-.40, .30, .20],  info: "외환위기. 원화 급락으로 해외자산은 방어, 국내자산 직격. V자 회복" , rateBump: 8.0 },
+  dotcom2000:  { name: "💻 2000 닷컴형",       pattern: [-.15, -.12, -.22], info: "3년 연속 하락, 회복까지 7년. 가장 무서운 장기 침체" , rateBump: -1.0 },
+  gfc2008:     { name: "🏦 2008 금융위기형",    pattern: [-.28, .25, .15],  info: "글로벌 금융위기. 빠른 V자, 환율 +71%로 원화 손실 완화" , rateBump: -2.0 },
+  covid2020:   { name: "🦠 2020 코로나형",      pattern: [-.15, .25, .18],  info: "단기 충격 후 V자 반등. 가장 가벼운 시나리오" , rateBump: -1.5 },
+  hike2022:    { name: "📈 2022 긴축형",        pattern: [-.12, -.05, .18], info: "금리 인상, 주식·채권 동반 하락. All Weather·60-40에 특히 불리" , rateBump: 2.5 },
+  lost10:      { name: "💀 잃어버린 10년형",     pattern: [-.10, -.05, -.03, 0, 0, 0, 0, 0, 0, 0], info: "일본식 장기 침체. 3년 하락 후 7년 횡보" , rateBump: -1.5 },
+  depression:  { name: "🕳️ 1929 대공황형",      pattern: [-.25, -.34, -.09, .20, .15, .10], info: "3년간 −55%. 회복에 10년 이상. 극단적 꼬리 위험" , rateBump: -2.0 },
+  stagflation: { name: "🛢️ 1973 스태그플레이션형", pattern: [-.18, -.28, .32, .20, -.05], info: "오일쇼크. 물가가 함께 뛰어 실질 손실은 표시보다 큽니다" , rateBump: 4.0 },
+  fxshock:     { name: "💱 원화 급등형",         pattern: [-.18, .05, .10], info: "원화 강세로 해외자산 원화환산 손실. 한국 투자자 특유의 역풍" , rateBump: 1.0 },
+  blackmonday: { name: "⚫ 1987 블랙먼데이형",   pattern: [-.20, .12, .25], info: "단일 폭락 후 빠른 회복. 짧고 굵은 충격" , rateBump: -0.5 },
+  euro2011:    { name: "🇪🇺 2011 유럽 재정위기형", pattern: [-.08, .13, .16], info: "가벼운 조정. 위기 축에도 못 드는 수준" , rateBump: -0.5 },
 };
 
 /** 잔액을 이루는 네 가지 자금 성격 — 인출 순서와 세율이 여기서 갈린다 */
@@ -843,6 +863,8 @@ function defaultState() {
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260812, gameSpend: 4200, gameDeathAge: 95,
     preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "geo",
+    loan: { on: 1, balance: 6250, rate: 4.5, endYear: 2045, endMonth: 10,
+            type: "amort", rateMode: "float", rateVol: 0.8, rateMin: 1.5, rateMax: 12 },
     cAccum: 9.0, cAccumSd: 13.5, cRisk: 8.0, cRiskSd: 9.9, cLate: 7.5, cLateSd: 9.0,
     rates: {}, limits: {}, fillAmts: {}, priority: {}, opening: {}, openYears: {},
   };
@@ -1073,6 +1095,51 @@ function eventAmount(cfg, e, y) {
   const base = clamp0(e.amt);
   return e.real ? base * Math.pow(1 + clamp0(cfg.inflation) / 100, y - cfg.startYear) : base;
 }
+/**
+ * 주택담보대출 상각표. 변동금리면 해마다 금리를 다시 뽑아 상환액을 재산정한다
+ * (실제로도 금리 변동 때 은행이 월 상환액을 다시 계산한다).
+ * 금리는 기준금리로 서서히 돌아오는 랜덤워크이고, 위기 시나리오의 금리 충격을 함께 받는다.
+ */
+function loanSchedule(cfg, crash) {
+  const L = cfg.loan || {}, out = {};
+  if (!L.on || clamp0(L.balance) <= 0) return out;
+  const base = clamp0(L.rate);
+  const endY = clamp0(L.endYear) || cfg.endYear;
+  const endM = Math.min(12, Math.max(1, clamp0(L.endMonth) || 12));
+  const lo = L.rateMin != null ? +L.rateMin : 1.5, hi = L.rateMax != null ? +L.rateMax : 12;
+
+  let bal = clamp0(L.balance), rate = base;
+  for (let y = cfg.startYear; y <= cfg.endYear; y++) {
+    let left = (endY - y) * 12 + endM;                 // 만기까지 남은 개월
+    if (bal <= 0.005 || left <= 0) break;
+    if (L.rateMode !== "fixed" && y > cfg.startYear) {
+      const z = gauss(mulberry32((clamp0(cfg.gameSeed) | 0) + y * 7907 + 31337));
+      rate += z * clamp0(L.rateVol) - (rate - base) * 0.2;   // 평균회귀
+    }
+    const c = crash && crash[y];
+    const eff = Math.max(lo, Math.min(hi, rate + (c && CRASHES[c.key].rateBump ? CRASHES[c.key].rateBump : 0)));
+    const i = eff / 100 / 12;
+    const months = Math.min(y === endY ? endM : 12, left);
+
+    // 원리금균등은 남은 개월 기준으로 월 상환액을 다시 계산한다
+    const pmt = L.type === "amort"
+      ? (i > 0 ? bal * i / (1 - Math.pow(1 + i, -left)) : bal / left)
+      : 0;
+
+    let interest = 0, paid = 0;
+    for (let m = 0; m < months && bal > 0.005; m++) {
+      const it = bal * i;
+      let pr = L.type === "equalPrin" ? bal / Math.max(1, left)
+             : L.type === "interestOnly" ? (left <= 1 ? bal : 0)
+             : pmt - it;
+      pr = Math.max(0, Math.min(pr, bal));
+      bal -= pr; interest += it; paid += it + pr; left--;
+    }
+    out[y] = { rate: eff, paid, interest, principal: paid - interest, balance: Math.max(0, bal), months };
+  }
+  return out;
+}
+
 /** 그해에 걸린 인생 이벤트 */
 function eventsOf(cfg, y) {
   const out = [];
@@ -2027,7 +2094,9 @@ function gameStart() {
   const cfg = state.cfg;
   // 게임이 진행한 해의 납입·인출은 게임이 직접 채우므로 먼저 비운다
   for (let y = cfg.startYear; y <= cfg.endYear; y++) AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
-  game = { year: cfg.startYear, returns: {}, log: [], over: null, pending: null, crash: returnPath(cfg).crash };
+  const rp0 = returnPath(cfg);
+  game = { year: cfg.startYear, returns: {}, log: [], over: null, pending: null,
+           crash: rp0.crash, loan: loanSchedule(cfg, rp0.crash) };
   saveGame(); renderGame();
 }
 function saveGame() { try { localStorage.setItem(LS_KEY + ":game", JSON.stringify(game)); } catch (e) {} }
@@ -2039,7 +2108,7 @@ function loadGame() {
 function gameSim() { return simulate({ returns: game.returns }); }
 
 /** 그해 현금 사정 — 이벤트에서 소득·지출을 모은다 */
-function cashOf(cfg, y) {
+function cashOf(cfg, y, loan) {
   let salary = 0, lump = 0, spend = 0, sev = 0;
   const list = eventsOf(cfg, y);
   for (const e of list) {
@@ -2049,7 +2118,8 @@ function cashOf(cfg, y) {
     else if (e.kind === "severance") sev += v;   // 현금이 아니라 IRP로 직행
     else spend += v;
   }
-  return { list, salary, lump, spend, sev, living: clamp0(cfg.gameSpend) };
+  const ln = loan && loan[y];
+  return { list, salary, lump, spend, sev, loan: ln, living: clamp0(cfg.gameSpend) };
 }
 
 /** 시작 화면 — 어떤 조건으로 출발하는지 한눈에 보여준다.
@@ -2090,6 +2160,21 @@ function renderStart(box) {
         ${nEvt ? "" : `<p class="hint" style="margin:6px 0 0">일정이 없으면 소득도 0입니다. 아래 <strong>「4. 자동 채우기 → 인생 일정」</strong>에서 「기본 계획 불러오기」를 눌러 보세요.</p>`}
       </div>
 
+      ${(() => {
+        const L = cfg.loan || {};
+        if (!L.on || clamp0(L.balance) <= 0) return "";
+        const sch = loanSchedule(cfg, {});
+        const first = sch[cfg.startYear];
+        return `<div class="gcard">
+          <h4>🏠 주택담보대출</h4>
+          <div class="gline"><span>현재 잔액</span><span>${fmt(L.balance)}</span></div>
+          <div class="gline"><span>금리</span><span>${(+L.rate).toFixed(2)}% ${L.rateMode === "fixed" ? "(고정)" : "(변동)"}</span></div>
+          <div class="gline"><span>만기</span><span>${L.endYear}.${String(L.endMonth).padStart(2, "0")}</span></div>
+          <div class="gline tot"><span>첫해 상환</span><span class="neg">−${fmt(first ? first.paid : 0)}</span></div>
+          <p class="hint" style="margin:8px 0 0">변동금리라 해마다 금리를 다시 뽑아 상환액을 재산정합니다. 위기 시나리오의 금리 충격도 함께 받습니다.</p>
+        </div>`;
+      })()}
+
       <div class="gcard">
         <h4>시장</h4>
         <div class="gline"><span>포트폴리오</span><span>${P.info.split(" —")[0].split(":")[0]}</span></div>
@@ -2128,10 +2213,11 @@ function renderGame() {
   const prev = sim.years.find(r => r.year === y - 1);
   const bal = prev ? prev.acc : null;
   const startAssets = prev ? prev.total : ACC.reduce((s, a) => s + accBuckets(a).reduce((t, k) => t + clamp0((cfg.opening[a.id] || {})[k]), 0), 0);
-  const c = cashOf(cfg, y);
+  const c = cashOf(cfg, y, game.loan);
   // 퇴직금은 IRP(퇴직금 수령)로 직행한다. 현금으로 받아 배분하는 돈이 아니다.
   row(y).irpSev.in = Math.round(c.sev);
-  const spare = c.salary + c.lump - c.living - c.spend;
+  const loanPay = c.loan ? c.loan.paid : 0;
+  const spare = c.salary + c.lump - c.living - c.spend - loanPay;
   const total = cfg.endYear - cfg.startYear + 1;
   const turn = y - cfg.startYear + 1;
 
@@ -2160,6 +2246,7 @@ function renderGame() {
         ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
         <div class="gline"><span>생활비</span><span class="neg">−${fmt(c.living)}</span></div>
         ${c.spend > 0 ? `<div class="gline"><span>예정 지출</span><span class="neg">−${fmt(c.spend)}</span></div>` : ""}
+        ${loanPay > 0 ? `<div class="gline"><span>🏠 주담대 상환 <span style="font-size:10.5px;color:var(--muted)">금리 ${c.loan.rate.toFixed(2)}%</span></span><span class="neg">−${fmt(loanPay)}</span></div>` : ""}
         ${c.sev > 0 ? `<div class="gline"><span style="color:var(--muted)">퇴직금 → IRP (자동)</span><span style="color:var(--muted)">${fmt(c.sev)}</span></div>` : ""}
         <div class="gline tot"><span>${spare >= 0 ? "투자 여력" : "부족"}</span>
           <span class="${spare >= 0 ? "pos" : "neg"}">${spare >= 0 ? "" : "−"}${fmt(Math.abs(spare))}</span></div>
@@ -2169,6 +2256,15 @@ function renderGame() {
         <h4>올해 일정</h4>
         ${evtRows}
       </div>
+
+      ${loanPay > 0 ? `<div class="gcard">
+        <h4>🏠 주택담보대출</h4>
+        <div class="gline"><span>올해 상환</span><span class="neg">−${fmt(loanPay)}</span></div>
+        <div class="gline"><span style="color:var(--muted)">└ 이자</span><span style="color:var(--muted)">${fmt(c.loan.interest)}</span></div>
+        <div class="gline"><span style="color:var(--muted)">└ 원금</span><span style="color:var(--muted)">${fmt(c.loan.principal)}</span></div>
+        <div class="gline"><span>적용 금리</span><span>${c.loan.rate.toFixed(2)}%</span></div>
+        <div class="gline tot"><span>남은 잔액</span><span>${fmt(c.loan.balance)}</span></div>
+      </div>` : ""}
 
       <div class="gcard">
         <h4>자산 ${fmtBig(startAssets)}</h4>
@@ -2309,6 +2405,7 @@ function turnAdvance() {
   const cfg = state.cfg, y = game.year;
   const rp = returnPath(cfg);
   game.crash = rp.crash;
+  game.loan = loanSchedule(cfg, rp.crash);
   game.returns[y] = rp.path[y];
   const after = gameSim();
   const rec = after.years.find(r => r.year === y);
@@ -2316,8 +2413,8 @@ function turnAdvance() {
   const cr = game.crash && game.crash[y];
   game.pending = { year: y, ret: game.returns[y], pnl: Math.round(pnl), after: Math.round(rec ? rec.total : 0), crash: cr };
 
-  const c = cashOf(cfg, y);
-  game.log.push({ year: y, ret: game.returns[y], total: rec ? rec.total : 0, spend: c.living + c.spend, salary: c.salary });
+  const c = cashOf(cfg, y, game.loan);
+  game.log.push({ year: y, ret: game.returns[y], total: rec ? rec.total : 0, spend: c.living + c.spend + (c.loan ? c.loan.paid : 0), salary: c.salary });
 
   const bankrupt = rec && rec.total < 1 && y > cfg.startYear;
   const deathYear = cfg.birthYear + clamp0(cfg.gameDeathAge);
@@ -2335,8 +2432,8 @@ function renderEnding(box) {
   const post = yrs.filter(r => r.year >= retireYear);
   const need = clamp0(cfg.gameSpend);
   const met = post.filter(r => {
-    const c = cashOf(cfg, r.year);
-    return r.net + c.salary >= (need + c.spend) * 0.98;
+    const c = cashOf(cfg, r.year, game.loan);
+    return r.net + c.salary >= (need + c.spend + (c.loan ? c.loan.paid : 0)) * 0.98;
   }).length;
   const pct = post.length ? met / post.length * 100 : 0;
   const last = yrs[yrs.length - 1];
@@ -2373,6 +2470,22 @@ function renderEnding(box) {
             ${Object.entries(st.byPhase).map(([k, v]) => `<div class="gline"><span style="color:var(--muted)">${PHASE_NAME[k]} 평균 (${v.n}년)</span><span style="color:var(--muted)">${v.avg.toFixed(1)}%</span></div>`).join("")}`;
         })()}
       </div>
+      ${(() => {
+        const ln = game.loan || {};
+        // 중도에 끝난 게임이면 살아본 해까지만 집계한다
+        const ys = Object.keys(ln).filter(y => +y <= game.over.year);
+        if (!ys.length) return "";
+        const tot = ys.reduce((s, y) => s + ln[y].paid, 0);
+        const int = ys.reduce((s, y) => s + ln[y].interest, 0);
+        const rates = ys.map(y => ln[y].rate);
+        const last = ys[ys.length - 1];
+        return `<div class="gcard"><h4>🏠 주택담보대출</h4>
+          <div class="gline"><span>총 상환</span><span>${fmt(tot)}</span></div>
+          <div class="gline"><span>└ 이자</span><span class="neg">${fmt(int)}</span></div>
+          <div class="gline"><span>금리 범위</span><span>${Math.min(...rates).toFixed(2)} ~ ${Math.max(...rates).toFixed(2)}%</span></div>
+          <div class="gline tot"><span>완납</span><span>${ln[last].balance < 1 ? last + "년" : `미완 (${fmt(ln[last].balance)} 남음)`}</span></div>
+        </div>`;
+      })()}
       <div class="gcard"><h4>겪은 위기</h4>
         ${(() => {
           const cr = game.crash || {};
@@ -2411,6 +2524,27 @@ function syncRetMode() {
   const n = document.getElementById("retModeInfo");
   if (n) n.innerHTML = RET_MODE_INFO[state.cfg.retMode] || "";
 }
+const LOAN_FIELDS = ["on","balance","rate","endYear","endMonth","type","rateMode","rateVol","rateMin","rateMax"];
+const LOAN_STR = new Set(["type", "rateMode"]);
+function bindLoan() {
+  LOAN_FIELDS.forEach(k => {
+    const n = document.getElementById("loan_" + k);
+    if (!n) return;
+    n.addEventListener("input", () => {
+      state.cfg.loan[k] = LOAN_STR.has(k) ? n.value : num(n.value);
+      if (game) { const rp = returnPath(state.cfg); game.loan = loanSchedule(state.cfg, rp.crash); }
+      render(false);
+    });
+  });
+}
+function syncLoan() {
+  const L = state.cfg.loan || {};
+  LOAN_FIELDS.forEach(k => {
+    const n = document.getElementById("loan_" + k);
+    if (n && n !== document.activeElement) n.value = L[k];
+  });
+}
+
 function syncPresetInfo() {
   const P = PRESETS[state.cfg.preset] || PRESETS.off;
   const n = document.getElementById("presetInfo");
@@ -2644,6 +2778,7 @@ function syncCfgInputs() {
   if (sb) sb.checked = !!state.cfg.showBuckets;
   syncPresetInfo();
   syncRetMode();
+  syncLoan();
   syncOpening();
 }
 
@@ -2776,6 +2911,7 @@ function migrateOpening(cfg, raw) {
   // 예전 저장본의 계좌별 고정 금액을 계좌별 규칙으로 옮긴다
   if (!Array.isArray(cfg.wdRules)) cfg.wdRules = [];
   if (!Array.isArray(cfg.events)) cfg.events = [];
+  cfg.loan = { ...d.loan, ...(cfg.loan || {}) };
   // 예전 저장본의 단발성 목표 생활비 설정을 인출 규칙으로 옮긴다
   if (!Array.isArray(raw.wdRules) && raw.planTarget && raw.planTarget.target > 0) {
     const pt = raw.planTarget;
@@ -2872,6 +3008,7 @@ function seedExample() {
 }
 
 buildPresetUI();
+bindLoan();
 buildAccCfg();
 buildOpening();
 bindCfg();
