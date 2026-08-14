@@ -1831,16 +1831,24 @@ function renderKpis(sim) {
   const rr = sim.years.find(r => r.year === cfg.retireYear);
   const def = rr ? rr.deflator : 1;
   const real = cfg.realView;
-  const wd = sim.years.filter(r => r.year >= cfg.retireYear && r.net > 0);
-  const avgNet = wd.length ? wd.reduce((a, r) => a + (real ? r.net / r.deflator : r.net), 0) / wd.length : 0;
+  // '은퇴 후'라고 적혀 있으면 은퇴 후만 세어야 한다. cumNet 은 은퇴 전 인출까지 포함한 전체 합이다.
+  const post = sim.years.filter(r => r.year >= cfg.retireYear);
+  const postNet = post.reduce((a, r) => a + (real ? r.net / r.deflator : r.net), 0);
+  const preNet = s.cumNet - post.reduce((a, r) => a + r.net, 0);
+  // 분모는 '수령이 있었던 해'가 아니라 은퇴 후 전체 연수다. 0원인 해를 빼면
+  // 실제로 매년 쓸 수 있는 돈보다 훨씬 큰 수가 나온다.
+  const drawn = post.filter(r => r.net > 0).length;
+  const avgNet = post.length ? postNet / post.length : 0;
   const taxPct = s.cumNet + s.cumTax > 0 ? s.cumTax / (s.cumNet + s.cumTax) * 100 : 0;
 
   const tiles = [
     { lab: `은퇴 시점(${cfg.retireYear}년) 총자산`, val: fmtBig(real ? s.atRetire / def : s.atRetire), note: real ? "실질 기준" : "명목 기준" },
     { lab: "총 납입액", val: fmtBig(s.cumIn), note: "명목 합계" },
     { lab: "세액공제 환급 누계", val: fmtBig(s.cumCredit), note: "연말정산 환급분" },
-    { lab: "은퇴 후 세후 수령 총액", val: fmtBig(s.cumNet), note: `국민연금 포함${real ? " · 실질 아님" : ""}` },
-    { lab: "연평균 세후 수령액", val: fmtBig(avgNet), note: real ? "실질 기준" : "명목 기준" },
+    { lab: "은퇴 후 세후 수령 총액", val: fmtBig(postNet),
+      note: `국민연금 포함${preNet > 0.5 ? ` · 은퇴 전 ${fmtBig(preNet)} 별도` : ""}` },
+    { lab: "연평균 세후 수령액", val: fmtBig(avgNet),
+      note: `은퇴 후 ${post.length}년 평균${drawn < post.length ? ` · 실제 수령은 ${drawn}년` : ""}` },
     { lab: "총 납부 세금", val: fmtBig(s.cumTax),
       note: s.cumOtherTax > 0.5 ? `인출 ${fmtBig(s.cumWdTax)} · 보유·이전 ${fmtBig(s.cumOtherTax)}`
                                 : `수령액 대비 ${taxPct.toFixed(1)}%` },
