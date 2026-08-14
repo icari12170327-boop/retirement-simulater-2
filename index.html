@@ -1999,10 +1999,73 @@ function cashOf(cfg, y) {
   return { list, salary, lump, spend, sev, living: clamp0(cfg.gameSpend) };
 }
 
+/** 시작 화면 — 어떤 조건으로 출발하는지 한눈에 보여준다.
+    기초 잔액 패널이 설정 맨 아래에 묻혀 있어 안 보인다는 문제가 있었다. */
+function refreshGame() {
+  const panel = document.getElementById("gamePanel");
+  if (panel && !panel.hidden) renderGame();   // game 이 null 이면 renderGame 이 시작 화면을 그린다
+}
+
+function renderStart(box) {
+  const cfg = state.cfg;
+  const open = ACC.map(a => ({ a, v: accBuckets(a).reduce((t, k) => t + clamp0((cfg.opening[a.id] || {})[k]), 0) }));
+  const total = open.reduce((s, o) => s + o.v, 0);
+  const P = PRESETS[cfg.preset] || PRESETS.off;
+  const nEvt = (cfg.events || []).length;
+
+  box.innerHTML = `
+    <div class="gcols">
+      <div class="gcard">
+        <h4>시작 자산</h4>
+        ${total > 0
+          ? open.filter(o => o.v > 0).map(o => `<div class="gline"><span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${css(o.a.color)};margin-right:6px"></span>${o.a.abbr}</span><span>${fmt(o.v)}</span></div>`).join("")
+            + `<div class="gline tot"><span>합계</span><span>${fmtBig(total)}</span></div>`
+          : `<p class="hint" style="margin:0 0 8px">아직 <strong>0원</strong>에서 출발하도록 되어 있습니다.
+               지금 들고 있는 계좌가 있다면 넣고 시작하세요 — 자금 성격별로 넣어야 인출 세금이 맞게 계산됩니다.</p>`}
+        <div class="btnrow" style="margin-top:10px">
+          <button type="button" id="btnGoOpening">${total > 0 ? "기초 잔액 고치기" : "내 자산 입력하기"}</button>
+        </div>
+      </div>
+
+      <div class="gcard">
+        <h4>조건</h4>
+        <div class="gline"><span>기간</span><span>${cfg.startYear} ~ ${cfg.endYear} (${cfg.endYear - cfg.startYear + 1}턴)</span></div>
+        <div class="gline"><span>나이</span><span>만 ${cfg.startYear - cfg.birthYear}세 → ${cfg.endYear - cfg.birthYear}세</span></div>
+        <div class="gline"><span>은퇴</span><span>${cfg.retireYear}년</span></div>
+        <div class="gline"><span>목표 생활비</span><span>연 ${fmt(cfg.gameSpend)}만원</span></div>
+        <div class="gline"><span>인생 일정</span><span>${nEvt ? nEvt + "건" : "없음"}</span></div>
+        ${nEvt ? "" : `<p class="hint" style="margin:6px 0 0">일정이 없으면 소득도 0입니다. 아래 <strong>「4. 자동 채우기 → 인생 일정」</strong>에서 「기본 계획 불러오기」를 눌러 보세요.</p>`}
+      </div>
+
+      <div class="gcard">
+        <h4>시장</h4>
+        <div class="gline"><span>포트폴리오</span><span>${P.info.split(" —")[0].split(":")[0]}</span></div>
+        <div class="gline"><span>위기</span><span>${clamp0(cfg.crashCount) ? `${clamp0(cfg.crashCount)}회 · ${cfg.crashPick && CRASHES[cfg.crashPick] ? CRASHES[cfg.crashPick].name : "랜덤"}` : "없음"}</span></div>
+        <div class="gline"><span>시드</span><span>${cfg.gameSeed}</span></div>
+        <p class="hint" style="margin:8px 0 0">${P.info}</p>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:12px">
+      「새로 시작」을 누르면 ${cfg.startYear}년부터 한 해씩 진행합니다.
+      매년 결정을 내린 <strong>다음에</strong> 그해 시장 수익률이 공개됩니다.
+      포트폴리오·위기·시드는 아래 <strong>「5. 기본 설정 → 퇴직소득세·국민연금·기타 세율」</strong>에서 바꿉니다.
+    </p>`;
+
+  const jump = document.getElementById("btnGoOpening");
+  if (jump) jump.onclick = () => {
+    const panel = document.getElementById("openPanel");
+    panel.open = true;
+    panel.closest("details.grp") && (panel.closest("details.grp").open = true);
+    let n = panel.parentElement;
+    while (n) { if (n.tagName === "DETAILS") n.open = true; n = n.parentElement; }
+    panel.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+}
+
 function renderGame() {
   const box = document.getElementById("gameBody");
   const cfg = state.cfg;
-  if (!game) { box.innerHTML = `<p class="hint">「새로 시작」을 누르면 ${cfg.startYear}년부터 한 해씩 진행합니다.</p>`; return; }
+  if (!game) return renderStart(box);
   if (game.over) return renderEnding(box);
 
   const y = game.year, age = y - cfg.birthYear;
@@ -2398,10 +2461,10 @@ function renderEvents() {
   box.querySelectorAll("[data-e]").forEach(n => n.addEventListener("input", () => {
     const e = state.cfg.events[+n.dataset.i], k = n.dataset.e;
     e[k] = (k === "name" || k === "kind") ? n.value : clamp0(num(n.value));
-    save(); if (game) renderGame();
+    save(); refreshGame();
   }));
   box.querySelectorAll("[data-edel]").forEach(n => n.addEventListener("click", () => {
-    state.cfg.events.splice(+n.dataset.edel, 1); renderEvents(); save(); if (game) renderGame();
+    state.cfg.events.splice(+n.dataset.edel, 1); renderEvents(); save(); refreshGame();
   }));
 }
 
@@ -2709,7 +2772,7 @@ function render(rebuild, syncInputs) {
   renderMatrix(sim);
   renderChart1(sim);
   renderChart2(sim);
-  if (game && !document.getElementById("gamePanel").hidden) renderGame();
+  refreshGame();
   save();
 }
 
@@ -2749,6 +2812,13 @@ document.getElementById("tabGame").onclick = () => setMode(true);
 document.getElementById("tabPlan").onclick = () => setMode(false);
 document.getElementById("btnGameNew").onclick = () => {
   if (game && !game.over && !confirm("진행 중인 게임을 버리고 새로 시작할까요?")) return;
+  const c = state.cfg;
+  const total = ACC.reduce((s, a) => s + accBuckets(a).reduce((t, k) => t + clamp0((c.opening[a.id] || {})[k]), 0), 0);
+  if (total <= 0 && !confirm("기초 잔액이 0입니다. 지금 들고 있는 자산 없이 0원부터 시작할까요?\n\n(취소하면 기초 잔액 입력 칸으로 이동합니다)")) {
+    setMode(true); renderStart(document.getElementById("gameBody"));
+    document.getElementById("btnGoOpening").click();
+    return;
+  }
   gameStart(); render(true, true);
 };
 document.getElementById("btnGameUndo").onclick = () => {
@@ -2762,7 +2832,7 @@ document.getElementById("btnGameUndo").onclick = () => {
 document.getElementById("btnAddEvt").onclick = () => {
   const c = state.cfg;
   c.events.push({ name: "새 일정", kind: "expense", amt: 1000, year: c.startYear, until: c.startYear, every: 1 });
-  renderEvents(); save(); if (game) renderGame();
+  renderEvents(); save(); refreshGame();
 };
 document.getElementById("btnEvtSample").onclick = () => {
   const c = state.cfg;
@@ -2788,7 +2858,7 @@ document.getElementById("btnEvtSample").onclick = () => {
     { name: "💡 주택 수선",              kind: "expense",   amt: 2000,  year: 2038, until: 2068, every: 15, real: 1, jitter: 2 },
   ];
   document.getElementById("evtPanel").open = true;
-  renderEvents(); save(); if (game) renderGame();
+  renderEvents(); save(); refreshGame();
 };
 
 document.getElementById("btnAddXfer").onclick = () => {
