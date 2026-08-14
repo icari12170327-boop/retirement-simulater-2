@@ -602,6 +602,8 @@
           <label class="f"><span class="t">연금계좌 합산 납입한도</span><input type="number" step="100" id="cfg_pensionTotalCap"></label>
         </div>
         <p class="hint">
+          <strong>수익률은 플래너에서만 씁니다.</strong> 인생 시뮬에서 포트폴리오 프리셋을 고르면 그 프리셋 하나가
+          모든 계좌에 적용되고 이 값은 무시됩니다(프리셋을 <code>off</code>로 두면 이 값이 시장 변동의 기준선이 됩니다).
           한도는 <em>표에 경고를 띄우는 기준</em>이자 <em>자동 배분의 상한</em>입니다. 직접 입력을 막지는 않습니다.
           법정 한도 — 연금저축+IRP 납입 합계 연 1,800만 / 세액공제 대상 연 900만(연금저축은 그중 600만까지) / ISA 연 2,000만·총 1억.
         </p>
@@ -740,7 +742,7 @@ const LS_KEY = "tax-retire-sim-v1";
    적립기 → 위험구간(은퇴 전후) → 후기 순으로 평균/표준편차가 바뀐다.
    숫자는 원화 환노출 기준 장기 가정치다. */
 const PRESETS = {
-  off:                 { info: "계좌별 수익률 설정을 그대로 씁니다 (변동 없음)" },
+  off:                 { info: "프리셋 안 씀 — 계좌별 수익률 + 아래 평균/변동성으로 시장을 뽑습니다" },
   aggressive:          { info: "🟢 공격형: 9.7 → 9.0 → 8.5", accum:9.7, accumSd:14.4, risk:9.0, riskSd:11.7, late:8.5, lateSd:10.8 },
   standard:            { info: "🟡 표준형: 9.0 → 8.0 → 7.5", accum:9.0, accumSd:13.5, risk:8.0, riskSd:9.9, late:7.5, lateSd:9.0 },
   conservative:        { info: "🟠 보수형: 8.5 → 7.0 → 6.5", accum:8.5, accumSd:11.7, risk:7.0, riskSd:8.1, late:6.5, lateSd:7.2 },
@@ -1504,7 +1506,7 @@ function simulate(opts = {}) {
     years.push(rec);
   }
 
-  if (shortYears.length) {
+  if (shortYears.length && !game) {   // 게임 중이면 인출을 턴마다 직접 정하므로 이 규칙은 적용되지 않는다
     const f = shortYears[0];
     warnings.push(`목표 생활비 미달 ${shortYears.length}개 연도 — 최초 ${f.y}년: 목표 ${fmt(f.want)}만원 중 ${fmt(f.got)}만원만 확보`);
   }
@@ -2043,6 +2045,7 @@ function renderStart(box) {
         <div class="gline"><span>위기</span><span>${clamp0(cfg.crashCount) ? `${clamp0(cfg.crashCount)}회 · ${cfg.crashPick && CRASHES[cfg.crashPick] ? CRASHES[cfg.crashPick].name : "랜덤"}` : "없음"}</span></div>
         <div class="gline"><span>시드</span><span>${cfg.gameSeed}</span></div>
         <p class="hint" style="margin:8px 0 0">${P.info}</p>
+        <p class="hint" style="margin:6px 0 0">${returnSourceNote(cfg)}</p>
       </div>
     </div>
     <p class="hint" style="margin-top:12px">
@@ -2139,7 +2142,8 @@ function renderGame() {
       const pp = phaseParams(cfg, y);
       return `<p class="hint">${P.info.split(" —")[0]} · 지금은 <strong>${PHASE_NAME[pp.phase]}</strong>
         (평균 ${pp.mean.toFixed(1)}% / σ${pp.sd.toFixed(1)})
-        ${st ? ` · 지금까지 실현 <strong>CAGR ${st.cagr.toFixed(1)}%</strong> (산술 ${st.arith.toFixed(1)}%)` : ""}</p>`;
+        ${st ? ` · 지금까지 실현 <strong>CAGR ${st.cagr.toFixed(1)}%</strong> (산술 ${st.arith.toFixed(1)}%)` : ""}</p>
+        <p class="hint">${returnSourceNote(cfg)}</p>`;
     })()}
     <p class="hint">결정을 마치고 넘기면 <strong>그때</strong> 올해 시장 수익률이 공개됩니다. 미리 알고 고를 수는 없습니다.</p>
   `;
@@ -2220,6 +2224,17 @@ function returnStats(cfg, returns) {
            worst: Math.min(...rs), best: Math.max(...rs), down: rs.filter(r => r < 0).length, byPhase };
 }
 const PHASE_NAME = { accum: "적립기", risk: "위험구간", late: "후기" };
+
+/** 지금 수익률이 어디서 나오는지 — 세 군데가 겹쳐 보여 헷갈리기 쉬운 지점 */
+function returnSourceNote(cfg) {
+  const P = PRESETS[cfg.preset] || PRESETS.off;
+  if (cfg.preset && cfg.preset !== "off") {
+    return `<strong>${P.info.split(" —")[0].split(":")[0]}</strong> 하나가 <strong>모든 계좌</strong>에 적용됩니다. `
+      + `설정의 「계좌별 수익률」은 게임에서 쓰이지 않습니다(플래너 전용).`;
+  }
+  return `프리셋을 쓰지 않는 모드입니다. 「프리셋 off · 평균/변동성」으로 그해 시장을 뽑고, `
+    + `각 계좌는 <strong>계좌별 수익률과 평균의 차이만큼</strong> 더하거나 뺀 값을 받습니다.`;
+}
 
 function rollCard(p) {
   const up = p.ret >= 0;
