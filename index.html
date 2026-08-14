@@ -388,6 +388,20 @@
           </span>
           <label class="f"><span class="t">게임 · 종료 나이</span><input type="number" id="cfg_gameDeathAge"></label>
         </div>
+        <h3 style="margin-top:16px">🍚 생활비 구간</h3>
+        <p class="hint" style="margin:0 0 8px">
+          위 「목표 생활비」가 기본값이고, 여기 넣은 구간이 그 해의 생활비를 덮어씁니다.
+          자녀 독립·은퇴·후기 고령처럼 씀씀이가 달라지는 구간을 넣으세요.
+          <strong>겹치면 아래 줄이 이깁니다.</strong>
+        </p>
+        <div id="spendRows"></div>
+        <div class="btnrow" style="margin-top:8px">
+          <button type="button" id="btnAddSpend">+ 구간 추가</button>
+          <button type="button" id="btnSpendCurve">표준 곡선 채우기</button>
+          <span class="hint" id="spendResult" style="margin:0"></span>
+        </div>
+        <div id="spendPreview"></div>
+
         <h3 style="margin-top:16px">🏠 주택담보대출</h3>
         <div class="fgrid">
           <label class="f"><span class="t">사용</span>
@@ -864,7 +878,7 @@ function defaultState() {
     transfers: [],
     allowPenalty: 0, planTarget: null,
     pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
-    pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [],
+    pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [], spendRules: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260812, gameSpend: 4200, gameDeathAge: 95,
     preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "geo",
     loan: { on: 1, balance: 6250, rate: 4.5, endYear: 2045, endMonth: 10,
@@ -1095,6 +1109,26 @@ function eventShift(cfg, e, idx) {
   return Math.round((mulberry32((clamp0(cfg.gameSeed) | 0) + idx * 7919 + 104729)() * 2 - 1) * j);
 }
 /** real 이면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불려 준다 */
+/**
+ * 그해 생활비. 기본 금액 위에 「생활비 구간」이 덮어씌워진다.
+ * 겹치는 구간이 있으면 마지막 줄이 이긴다 — 아래에 덧붙일수록 더 구체적인 조정이라고 본다.
+ * 생활비는 한 번 정하고 끝나는 값이 아니다. 물가로 오르고, 자녀가 독립하면 내려가고,
+ * 후기 고령에는 의료·간병으로 다시 오른다.
+ */
+function livingOf(cfg, y) {
+  const infl = Math.pow(1 + clamp0(cfg.inflation) / 100, y - cfg.startYear);
+  let amt = clamp0(cfg.gameSpend) * infl, name = "";
+  for (const r of (cfg.spendRules || [])) {
+    if (!r || !isFinite(r.from)) continue;                 // 손으로 고친 저장본 방어
+    const to = isFinite(r.to) && r.to >= r.from ? r.to : r.from;
+    if (y < r.from || y > to) continue;
+    const base = r.unit === "month" ? clamp0(r.amt) * 12 : clamp0(r.amt);
+    amt = r.real ? base * infl : base;
+    name = r.name || "";
+  }
+  return { amt, name };
+}
+
 function eventAmount(cfg, e, y) {
   const base = clamp0(e.amt);
   return e.real ? base * Math.pow(1 + clamp0(cfg.inflation) / 100, y - cfg.startYear) : base;
@@ -2130,10 +2164,8 @@ function cashOf(cfg, y, loan) {
     else spend += v;
   }
   const ln = loan && loan[y];
-  // 생활비도 물가를 탄다. 명목 고정으로 두면 물가연동 국민연금이 해마다 불어나는 동안
-  // 생활비만 제자리에 있어, 은퇴 후인데도 현금이 남는 것처럼 보인다.
-  const living = clamp0(cfg.gameSpend) * Math.pow(1 + clamp0(cfg.inflation) / 100, y - cfg.startYear);
-  return { list, salary, lump, spend, sev, loan: ln, living };
+  const lv = livingOf(cfg, y);
+  return { list, salary, lump, spend, sev, loan: ln, living: lv.amt, livingName: lv.name };
 }
 
 /** 시작 화면 — 어떤 조건으로 출발하는지 한눈에 보여준다.
@@ -2170,6 +2202,7 @@ function renderStart(box) {
         <div class="gline"><span>나이</span><span>만 ${cfg.startYear - cfg.birthYear}세 → ${cfg.endYear - cfg.birthYear}세</span></div>
         <div class="gline"><span>은퇴</span><span>${cfg.retireYear}년</span></div>
         <div class="gline"><span>목표 생활비</span><span>연 ${fmt(cfg.gameSpend)}만원</span></div>
+        ${(cfg.spendRules || []).length ? `<div class="gline"><span style="color:var(--muted)">생활비 구간</span><span style="color:var(--muted)">${cfg.spendRules.length}개 · ${fmt(livingOf(cfg, cfg.retireYear).amt)} → ${fmt(livingOf(cfg, cfg.endYear).amt)}</span></div>` : ""}
         <div class="gline"><span>인생 일정</span><span>${nEvt ? nEvt + "건" : "없음"}</span></div>
         ${nEvt ? "" : `<p class="hint" style="margin:6px 0 0">일정이 없으면 소득도 0입니다. 아래 <strong>「4. 자동 채우기 → 인생 일정」</strong>에서 「기본 계획 불러오기」를 눌러 보세요.</p>`}
       </div>
@@ -2261,7 +2294,7 @@ function renderGame() {
         <h4>올해 현금</h4>
         <div class="gline"><span>소득</span><span class="pos">+${fmt(c.salary)}</span></div>
         ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
-        <div class="gline"><span>생활비 <span style="font-size:10.5px;color:var(--muted)">${y > cfg.startYear ? `물가연동 · ${cfg.startYear}년 ${fmt(cfg.gameSpend)} 기준` : "물가연동"}</span></span><span class="neg">−${fmt(c.living)}</span></div>
+        <div class="gline"><span>생활비 <span style="font-size:10.5px;color:var(--muted)">${c.livingName || (y > cfg.startYear ? `물가연동 · ${cfg.startYear}년 ${fmt(cfg.gameSpend)} 기준` : "물가연동")}</span></span><span class="neg">−${fmt(c.living)}</span></div>
         ${c.spend > 0 ? `<div class="gline"><span>예정 지출</span><span class="neg">−${fmt(c.spend)}</span></div>` : ""}
         ${loanPay > 0 ? `<div class="gline"><span>🏠 주담대 상환 <span style="font-size:10.5px;color:var(--muted)">금리 ${c.loan.rate.toFixed(2)}%</span></span><span class="neg">−${fmt(loanPay)}</span></div>` : ""}
         ${c.sev > 0 ? `<div class="gline"><span style="color:var(--muted)">퇴직금 → IRP (자동)</span><span style="color:var(--muted)">${fmt(c.sev)}</span></div>` : ""}
@@ -2696,6 +2729,68 @@ function renderFillRules() {
   }));
 }
 
+/* ---- 생활비 구간 편집기 ---- */
+function renderSpendRules() {
+  const box = document.getElementById("spendRows");
+  if (!box) return;
+  const list = state.cfg.spendRules || [];
+  box.innerHTML = list.length ? list.map((r, i) => `
+    <div class="xrow">
+      <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-s="name" data-i="${i}" value="${(r.name || "").replace(/"/g, "&quot;")}" placeholder="예: 자녀 독립 후"></label>
+      <label class="f"><span class="t">시작</span><input type="number" data-s="from" data-i="${i}" value="${r.from}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-s="to" data-i="${i}" value="${r.to}"></label>
+      <label class="f"><span class="t">단위</span>
+        <select data-s="unit" data-i="${i}">
+          <option value="month"${r.unit === "month" ? " selected" : ""}>월</option>
+          <option value="year"${r.unit === "year" ? " selected" : ""}>연</option>
+        </select></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="10" data-s="amt" data-i="${i}" value="${r.amt}"></label>
+      <label class="f"><span class="t" title="켜면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불립니다">금액 기준</span>
+        <select data-s="real" data-i="${i}"><option value="0"${r.real ? "" : " selected"}>명목 고정</option><option value="1"${r.real ? " selected" : ""}>물가 연동</option></select></label>
+      <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-sdel="${i}">삭제</button></label>
+    </div>`).join("")
+    : `<p class="hint" style="margin:0">구간이 없습니다 — 목표 생활비가 물가만 타고 끝까지 갑니다.</p>`;
+
+  box.querySelectorAll("[data-s]").forEach(n => n.addEventListener("input", () => {
+    const r = state.cfg.spendRules[+n.dataset.i], k = n.dataset.s;
+    r[k] = (k === "name" || k === "unit") ? n.value : (k === "from" || k === "to") ? num(n.value) : clamp0(num(n.value));
+    save(); renderSpendPreview(); refreshGame();
+  }));
+  box.querySelectorAll("[data-sdel]").forEach(n => n.addEventListener("click", () => {
+    state.cfg.spendRules.splice(+n.dataset.sdel, 1);
+    renderSpendRules(); renderSpendPreview(); save(); refreshGame();
+  }));
+  renderSpendPreview();
+}
+
+/** 생활비가 실제로 어떻게 움직이는지 5년 간격으로 보여준다 — 구간을 넣고도 결과를 못 보면 소용없다 */
+function renderSpendPreview() {
+  const el = document.getElementById("spendPreview");
+  if (!el) return;
+  const cfg = state.cfg;
+  const cells = [];
+  for (let y = cfg.startYear; y <= cfg.endYear; y += 5) {
+    const lv = livingOf(cfg, y);
+    cells.push(`<div class="gline"><span>${y} <span style="color:var(--muted)">만 ${y - cfg.birthYear}세${lv.name ? " · " + lv.name : ""}</span></span><span>${fmt(lv.amt)}</span></div>`);
+  }
+  el.innerHTML = `<div class="gcard" style="margin-top:10px"><h4>생활비 미리보기 (5년 간격 · 명목)</h4>${cells.join("")}</div>`;
+}
+
+/** 은퇴 후 생활비는 대개 U자를 그린다 — 활동기에 많이 쓰다 줄고, 후기 고령에 의료·간병으로 다시 오른다. */
+function spendCurve() {
+  const cfg = state.cfg, base = clamp0(cfg.gameSpend);
+  const age = a => cfg.birthYear + a;
+  const kidsOut = Math.max(cfg.startYear, cfg.retireYear + 5);   // 대략 막내 독립 시점
+  const rows = [
+    { name: "자녀 양육기", from: cfg.startYear, to: kidsOut - 1, amt: Math.round(base), real: 1 },
+    { name: "자녀 독립 후 · 활동기", from: kidsOut, to: age(74), amt: Math.round(base * 0.8), real: 1 },
+    { name: "안정기 (75~84세)", from: age(75), to: age(84), amt: Math.round(base * 0.7), real: 1 },
+    { name: "후기 · 의료·간병 (85세~)", from: age(85), to: cfg.endYear, amt: Math.round(base * 0.85), real: 1 },
+  ];
+  return rows.filter(r => r.to >= r.from && r.from <= cfg.endYear)
+    .map(r => ({ ...r, from: Math.max(r.from, cfg.startYear), to: Math.min(r.to, cfg.endYear), unit: "year" }));
+}
+
 /* ---- 인생 일정 편집기 ---- */
 function renderEvents() {
   const box = document.getElementById("evtRows");
@@ -2957,6 +3052,7 @@ function migrateOpening(cfg, raw) {
   // 예전 저장본의 계좌별 고정 금액을 계좌별 규칙으로 옮긴다
   if (!Array.isArray(cfg.wdRules)) cfg.wdRules = [];
   if (!Array.isArray(cfg.events)) cfg.events = [];
+  if (!Array.isArray(cfg.spendRules)) cfg.spendRules = [];
   cfg.loan = { ...d.loan, ...(cfg.loan || {}) };
   // 예전 저장본의 단발성 목표 생활비 설정을 인출 규칙으로 옮긴다
   if (!Array.isArray(raw.wdRules) && raw.planTarget && raw.planTarget.target > 0) {
@@ -3033,6 +3129,7 @@ function render(rebuild, syncInputs) {
   const sim = simulate(game ? { returns: game.returns } : {});
   lastSim = sim;
   renderGameLink();
+  renderSpendPreview();   // 목표 생활비·물가·연도를 고치면 곡선도 같이 움직여야 한다
   renderKpis(sim);
   renderWarnings(sim);
   paintTable(sim, !!syncInputs);
@@ -3082,6 +3179,7 @@ renderFillRules();
 renderWdRules();
 renderXfers();
 renderEvents();
+renderSpendRules();
 loadGame();
 render(true, true);
 
@@ -3193,6 +3291,22 @@ document.getElementById("btnRuleStep").onclick = () => {
     { from: c.startYear, to: mid - 1, unit: "month", amt: 150, growth: 0, target: "priority" },
     { from: mid, to: Math.max(mid, c.retireYear - 1), unit: "month", amt: 250, growth: 0, target: "priority" });
   renderFillRules(); save();
+};
+document.getElementById("btnAddSpend").onclick = () => {
+  const c = state.cfg, list = c.spendRules;
+  // 마지막 구간 다음부터 이어 붙인다 — 구간을 쌓는 게 이 목록의 쓰임새다
+  const from = list.length ? Math.min(c.endYear, Math.max(...list.map(r => r.to)) + 1) : c.retireYear;
+  list.push({ name: "", from, to: c.endYear, unit: "month",
+              amt: Math.round(clamp0(c.gameSpend) / 12), real: 1 });
+  renderSpendRules(); save(); refreshGame();
+  document.getElementById("spendResult").textContent = "";
+};
+document.getElementById("btnSpendCurve").onclick = () => {
+  const rows = spendCurve();
+  state.cfg.spendRules = rows;
+  renderSpendRules(); save(); refreshGame();
+  document.getElementById("spendResult").textContent =
+    `${rows.length}개 구간을 채웠습니다 (기존 구간은 대체됨). 금액은 직접 고치세요.`;
 };
 document.getElementById("btnPlan").onclick = doPlan;
 document.getElementById("btnAddWdPlan").onclick = () => {
