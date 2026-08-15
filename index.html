@@ -819,7 +819,7 @@
               <th title="퇴직금으로 들어온 돈 — 인출 시 퇴직소득세">퇴직 재원</th>
               <th title="굴려서 불어난 돈">운용수익 · 평가익</th>
               <th>합계</th>
-              <th title="연금수령 요건의 가입 5년을 세는 기준. 비우면 시작연도로 봅니다">가입연도</th>
+              <th title="연금계좌는 가입 5년, ISA는 3년 요건을 세는 기준. 비우면 시작연도로 봅니다">가입연도</th>
             </tr></thead>
             <tbody id="openRows"></tbody>
           </table>
@@ -1770,7 +1770,10 @@ function applyWithdrawals(st, draws, ctx) {
     if (a.kind === "isa") {
       const fromP = Math.min(b.free, amt); b.free -= fromP;
       const fromG = Math.min(b.gain, amt - fromP); b.gain -= fromG;
-      const matured = ctx.year >= cfg.startYear + 3;
+      // 3년 요건은 시뮬 시작연도가 아니라 'ISA 가입연도' 기준이다.
+      // 시작연도로 재면, 10년 굴린 계좌도 시뮬 첫 3년은 15.4% 를 물게 된다.
+      const isaOpen = (ctx.openYear || {})[a.id];
+      const matured = isaOpen ? ctx.year - isaOpen >= 3 : true;
       if (!matured && fromG > 0) {
         d.tax = fromG * .154; d.flags.push("ISA 3년 미만 인출 → 15.4% 과세");
       } else {
@@ -1984,7 +1987,31 @@ function ratioDraws(st, ctx, target, capacity, floor) {
   }
 
   AID.forEach(id => { draws[id] = Math.round(draws[id]); });
+  topUp(draws, capacity, evalDraws, target);
   return draws;
+}
+
+/**
+ * 마지막 1~3만원을 마저 채운다.
+ * 탐색은 목표를 0.5만원 오차로 맞추고 계좌마다 반올림까지 하므로, 그대로 두면
+ * 거의 매 턴 "1만원 더 빼야 합니다"가 떠서 사용자가 손으로 보태야 했다.
+ * 여기서 1만원 단위로 실수령이 가장 큰 계좌에 얹어 목표를 실제로 넘긴다.
+ */
+function topUp(draws, capacity, evalDraws, target) {
+  for (let guard = 0; guard < 60; guard++) {
+    const now = evalDraws(draws).net;
+    if (now >= target - 1e-6) return;
+    let best = null;
+    for (const id of AID) {
+      const room = Math.floor(clamp0(capacity[id]) - draws[id]);
+      if (room < 1) continue;
+      const trial = { ...draws }; trial[id] += 1;
+      const gain = evalDraws(trial).net - now;
+      if (gain > 0 && (!best || gain > best.gain)) best = { id, gain };
+    }
+    if (!best) return;              // 더 뺄 곳이 없다 — 부족분은 정직하게 남긴다
+    draws[best.id] += 1;
+  }
 }
 
 function greedyDraws(st, ctx, target, strategy, seed) {
@@ -2072,6 +2099,7 @@ function greedyDraws(st, ctx, target, strategy, seed) {
     }
   }
   AID.forEach(id => { draws[id] = Math.round(draws[id]); });
+  topUp(draws, capacity, evalDraws, target);
   return draws;
 }
 
@@ -2280,7 +2308,7 @@ function simulate(opts = {}) {
     }
     // 종합과세는 그해 다른 소득까지 합산해 세율이 정해진다 — 일정에 적은 소득을 같이 넘긴다
     const otherComp = eventsOf(cfg, y).reduce((t, e) => t + (e.kind === "salary" ? clamp0(e.amt) : 0), 0);
-    const ctx = { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft, otherComp };
+    const ctx = { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft, otherComp, openYear };
 
     // ---- 인출
     let draws;
@@ -3300,7 +3328,9 @@ function rebuildStateAt(sim, y) {
     pLimit[id] = pYear[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - Math.min(pYear[id], 10)) * 1.2;
   }
   const otherComp = eventsOf(cfg, y).reduce((t, e) => t + (e.kind === "salary" ? clamp0(e.amt) : 0), 0);
-  return { st, ctx: { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft: 250, otherComp } };
+  // ISA 3년 요건 판정에 쓴다 — 시뮬 시작연도가 아니라 그 계좌의 가입연도를 봐야 한다
+  const openYear = Object.fromEntries(AID.map(id => [id, clamp0((cfg.openYears || {})[id]) || cfg.startYear]));
+  return { st, ctx: { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft: 250, otherComp, openYear } };
 }
 
 /** 실현 수익률 요약. 산술평균만 보면 변동성 침식이 안 보이므로 CAGR을 나란히 둔다. */
@@ -3944,7 +3974,8 @@ function buildOpening() {
     const cells = BUCKETS.map(bk => ks.includes(bk.key)
       ? `<td><input type="number" step="100" data-o="${bk.key}" data-a="${a.id}" title="${bk.tip}"></td>`
       : `<td class="na">–</td>`).join("");
-    const needYear = a.kind === "pension";
+    // 연금계좌는 가입 5년 요건, ISA 는 3년 요건이 걸린다 — 둘 다 개설연도가 있어야 판정된다
+    const needYear = a.kind === "pension" || a.kind === "isa";
     return `<tr>
       <th class="rowhd"><span class="dot" style="background:${css(a.color)}"></span>${a.name}</th>
       ${cells}
