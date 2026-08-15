@@ -1266,11 +1266,40 @@ function drawReturn(cfg, y) {
   return Math.max(-85, Math.min(300, (Math.exp(m + z * sg) - 1) * 100));
 }
 
+/* ------------------------------------------------------------------
+   위기 시나리오의 낙폭은 '주식'을 기준으로 적어 둔 값이다 (2008년 −28% 같은).
+   그걸 어떤 포트폴리오에나 그대로 씌우면 정기예금(σ0.3)이 −28%를 맞는다 —
+   σ 기준으로 93시그마짜리, 현실에 존재할 수 없는 사건이다. 그래서 방어적으로
+   짠 포트폴리오일수록 오히려 위기 한 번에 파산하는 이상한 결과가 나왔다.
+
+   대신 '주식 대비 얼마나 흔들리는 포트폴리오냐'(σ 비율)만큼만 충격을 옮긴다.
+       그해 수익률 = 내 평균 + (시나리오 − 주식 평균) × (내 σ ÷ 주식 σ)
+   σ가 주식과 같으면 시나리오 값이 그대로 나오고, σ가 0에 가까우면 평년처럼
+   지나간다. 반등하는 해도 같은 비율로 줄어드니 위기를 피해 이득 보는 일은 없다.
+
+   자산군 간 상관구조를 따로 두지 않은 단순화라서, 실제 2008년에 금·채권이
+   올라 방어된 몫까지 재현하지는 못한다. σ 하나로 잡은 근사다.
+   ------------------------------------------------------------------ */
+const CRASH_REF_MEAN = 10.5, CRASH_REF_SD = 13.5;   // 시나리오를 적을 때 기준으로 삼은 주식 (S&P 500)
+const CRASH_BETA_MAX = 2.5;                          // 2x 레버리지도 이 선에서 멈춘다 (2008년 −75%쯤)
+
+/** 위기 연도의 수익률 — 시나리오 값을 내 포트폴리오 변동성에 맞춰 옮긴 값 */
+function crashReturn(cfg, y, scenario) {
+  const { mean, sd } = phaseParams(cfg, y);
+  const beta = Math.min(CRASH_BETA_MAX, clamp0(sd) / CRASH_REF_SD);
+  return Math.max(-85, Math.min(300, mean + (scenario - CRASH_REF_MEAN) * beta));
+}
+/** 주식 대비 변동성 배수 — 화면에 "충격의 몇 %가 반영됐는지" 설명할 때 쓴다 */
+function crashBeta(cfg, y) {
+  return Math.min(CRASH_BETA_MAX, clamp0(phaseParams(cfg, y).sd) / CRASH_REF_SD);
+}
+
 /**
  * 전체 기간의 수익률을 한 번에 만든다.
  * exact 모드는 여기서 로그수익 합을 목표에 맞춰 평행이동하므로 전 구간을 알아야 한다.
- * 위기 연도는 시나리오 값 자체가 의미라 건드리지 않고 나머지 해로만 조정한다 —
+ * 위기 연도는 시나리오가 정한 해라서 평행이동에서 빼고 나머지 해로만 조정한다 —
  * 그래서 exact 에서 위기는 총수익이 아니라 '언제 맞느냐'만 바꾼다(순서위험만 분리해서 보는 모드).
+ * (위기 연도 값 자체는 crashReturn 이 포트폴리오 변동성에 맞춰 정한다.)
  */
 function returnPath(cfg) {
   const crash = crashPlan(cfg);
@@ -1278,7 +1307,7 @@ function returnPath(cfg) {
   let targetLog = 0;
   for (let y = cfg.startYear; y <= cfg.endYear; y++) {
     targetLog += Math.log(1 + phaseParams(cfg, y).mean / 100);
-    if (crash[y]) path[y] = crash[y].ret;
+    if (crash[y]) path[y] = crashReturn(cfg, y, crash[y].ret);
     else { path[y] = drawReturn(cfg, y); free.push(y); }
   }
   if (cfg.retMode === "exact" && free.length) {
@@ -3196,7 +3225,21 @@ function rollCard(p) {
     <div class="sub">운용손익 <strong class="${p.pnl >= 0 ? "pos" : "neg"}">${p.pnl >= 0 ? "+" : "−"}${fmt(Math.abs(p.pnl))}</strong>만원
       · 연말 자산 ${fmt(p.after)}만원</div>
     ${p.crash ? `<div class="sub" style="margin-top:5px">${CRASHES[p.crash.key].info}</div>` : ""}
+    ${p.crash ? crashScaleLine(state.cfg, p.year, p.crash) : ""}
   </div>`;
+}
+
+/** 시나리오 원본 낙폭과 내가 실제로 맞은 값이 다른 이유를 한 줄로 밝힌다.
+    "2008년인데 왜 −28%가 아니라 −13%지?" 가 안 보이면 계산이 틀린 것처럼 읽힌다. */
+function crashScaleLine(cfg, y, crash) {
+  const beta = crashBeta(cfg, y);
+  if (Math.abs(beta - 1) < 0.05) return "";
+  const raw = CRASHES[crash.key].pattern[crash.step] * 100;
+  const mine = crashReturn(cfg, y, raw);
+  return `<div class="sub" style="margin-top:4px;color:var(--muted)">
+    주식 기준 시나리오 <strong>${raw >= 0 ? "+" : ""}${raw.toFixed(1)}%</strong> →
+    이 포트폴리오는 변동성이 주식의 <strong>${Math.round(beta * 100)}%</strong>라
+    <strong>${mine >= 0 ? "+" : ""}${mine.toFixed(1)}%</strong>로 반영됩니다</div>`;
 }
 
 function turnAdvance() {
@@ -3573,7 +3616,7 @@ function buildPresetUI() {
   }
 }
 const RET_MODE_INFO = {
-  geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다. 다만 <strong>위기를 켜면 그만큼 평균도 내려갑니다</strong>(위기 1회당 약 0.6~0.9%p) — 프리셋 수익률에 이미 과거 위기가 반영돼 있다면 이중 차감입니다.",
+  geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다. 다만 <strong>위기를 켜면 그만큼 평균도 내려갑니다</strong> — 얼마나 내려가는지는 아래 '위기까지 반영한 기대 CAGR'에 실제로 계산해 둡니다. 프리셋 수익률에 이미 과거 위기가 반영돼 있다면 이중 차감입니다.",
   exact: "매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 총수익이 고정되므로 <strong>순서위험만 따로</strong> 볼 수 있습니다. 위기도 총수익이 아니라 '언제 맞느냐'만 바꿉니다. 포트폴리오 비교용.",
   arith: "프리셋 숫자를 <strong>산술평균</strong>으로 씁니다. 복리로 굴리면 실현 CAGR은 그보다 낮아지며, 변동성이 클수록 차이가 큽니다(나스닥 2x는 5%p 이상).",
 };
