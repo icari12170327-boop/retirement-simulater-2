@@ -306,6 +306,16 @@
   .evt:last-child { border-bottom: none; }
   .evt .nm { display: flex; align-items: center; gap: 6px; }
 
+  .alloccols { display: grid; grid-template-columns: minmax(280px, 420px) 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 760px) { .alloccols { grid-template-columns: 1fr; } }
+  .brief { border-left: 3px solid var(--accent); padding: 2px 0 2px 14px; }
+  .brief h5 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+  .brief .bhead { margin: 0 0 7px; font-size: 15px; font-weight: 600; line-height: 1.4; }
+  .brief .bbody { margin: 0 0 6px; font-size: 13px; line-height: 1.65; color: var(--text-secondary); }
+  .brief .btag { margin: 0 0 6px; font-size: 12px; color: var(--critical); }
+  .brief .bfoot { margin: 9px 0 0; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .brief .pos { color: var(--good); }
+  .brief .neg { color: var(--critical); }
   .allocgrid { display: grid; grid-template-columns: max-content 110px 1fr; gap: 7px 14px; align-items: center; font-size: 13px; }
   .allocgrid input { width: 100%; text-align: right; }
   .allocgrid .bal { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
@@ -1120,6 +1130,80 @@ function expectedCagr(cfg, samples = 24) {
     if (k) { lg += s / k; n++; }
   }
   return n ? (Math.exp(lg / n) - 1) * 100 : null;
+}
+
+/* ------------------------------------------------------------------
+   시장 브리핑 — 그해 수익률이 왜 그렇게 나왔는지 소설을 붙인다.
+   숫자만 보면 -20%가 그냥 숫자지만, 이유가 붙으면 기억에 남는다.
+   시드에 묶여 있어 같은 판을 다시 돌리면 같은 기사가 나온다.
+   ------------------------------------------------------------------ */
+const STORY_ERA = [
+  { to: 2032, name: "AI 설비 사이클",
+    topic: ["AI 데이터센터", "고대역폭 메모리(HBM)", "전력 인프라", "온디바이스 AI", "자율주행 반도체", "전력망 증설"] },
+  { to: 2042, name: "자동화·바이오 확산기",
+    topic: ["휴머노이드 로봇", "비만·대사질환 치료제", "소형모듈원자로(SMR)", "탄소포집", "AI 신약개발", "스마트 물류"] },
+  { to: 2052, name: "우주·양자 상용화기",
+    topic: ["상업 우주물류", "양자컴퓨팅", "세포·유전자 치료", "합성생물학", "해상풍력", "차세대 배터리"] },
+  { to: 9999, name: "장수·에너지 전환기",
+    topic: ["장수의학", "핵융합 발전", "완전자율 물류망", "뇌-기계 인터페이스", "우주 자원채굴", "담수·식량 기술"] },
+];
+const STORY_MACRO = ["기준금리", "원/달러 환율", "국제유가", "글로벌 공급망", "인구구조", "재정적자"];
+const STORY = {
+  crash: [
+    ["{T} 거품 붕괴 — 밸류에이션 리셋", "몇 년치 기대가 한 해에 되돌려졌습니다. 팔 사람이 다 팔 때까지 바닥은 보이지 않습니다."],
+    ["연쇄 디레버리징, {M} 충격까지 겹쳐", "빚으로 산 자산이 먼저 쏟아졌습니다. 좋은 자산도 현금이 필요하면 팔립니다."],
+    ["{T} 대장주 회계 이슈 — 신뢰의 붕괴", "숫자가 아니라 믿음이 무너지면 회복이 오래 걸립니다."],
+  ],
+  crushed: [
+    ["{T} 성장 전망 하향 — 설비 투자 축소 도미노", "\"수요가 생각보다 빨리 오지 않는다\"는 한 줄이 업계 전체의 발주를 멈춰 세웠습니다."],
+    ["{M} 급변에 위험자산 일제히 이탈", "이유는 나중에 붙습니다. 먼저 팔고 나중에 묻는 국면이었습니다."],
+    ["{T} 규제 리스크 부각 — 성장 프리미엄 반납", "성장주는 미래를 당겨 쓴 값이라, 미래가 흔들리면 가장 크게 흔들립니다."],
+  ],
+  down: [
+    ["{T} 과열 논란 — 기대치 되돌림", "실적이 나빴다기보다 기대가 너무 앞서 있었습니다."],
+    ["{M} 부담에 조정 국면", "지수는 빠졌지만 이익은 그대로였습니다. 이런 해가 나중에 보면 기회입니다."],
+    ["{T} 재고 조정 진입 — 숨 고르기", "사이클 산업은 늘 이렇게 한 번 쉬고 갑니다."],
+  ],
+  flat: [
+    ["{T} 기대와 실적 사이 — 지수는 제자리", "좋은 뉴스와 나쁜 뉴스가 정확히 상쇄된 한 해였습니다."],
+    ["{M} 관망세 — 방향성 없는 횡보", "아무 일도 일어나지 않는 해가 사실은 가장 흔합니다."],
+    ["{T} 옥석 가리기 시작", "지수는 그대로인데 안에서는 순위가 크게 바뀌었습니다."],
+  ],
+  up: [
+    ["{T} 수요 견조 — 완만한 상승", "놀랄 일 없이 이익이 늘었습니다. 복리는 이런 해에 쌓입니다."],
+    ["{M} 안정에 위험자산 선호 회복", "불확실성이 걷히자 돈이 조용히 돌아왔습니다."],
+    ["{T} 실적 시즌 무난한 통과", "기대만큼 나왔습니다. 그걸로 충분한 해였습니다."],
+  ],
+  boom: [
+    ["{T} 투자 사이클 재점화 — 설비 발주 사상 최대", "\"이번엔 다르다\"는 말이 돌기 시작했습니다. 대개 그 말이 돌 때가 가장 좋은 구간입니다."],
+    ["{T} 실적 서프라이즈 — 목표주가 줄상향", "숫자가 기대를 넘자 계산기를 다시 두드리는 소리가 여기저기서 났습니다."],
+    ["{M} 우호적 전환 — 유동성 랠리", "돈이 갈 곳을 찾자 가장 위험한 자산부터 올랐습니다."],
+  ],
+};
+function storyBucket(r) {
+  return r <= -25 ? "crash" : r <= -12 ? "crushed" : r < -3 ? "down"
+       : r <= 4 ? "flat" : r <= 18 ? "up" : "boom";
+}
+/** 그해 기사 한 편. crash 가 있으면 시나리오 이름을 앞세운다. */
+function marketStory(cfg, year, ret, crash) {
+  const rnd = mulberry32((clamp0(cfg.gameSeed) | 0) + year * 40503 + 17);
+  const era = STORY_ERA.find(e => year <= e.to) || STORY_ERA[STORY_ERA.length - 1];
+  const T = era.topic[Math.floor(rnd() * era.topic.length)];
+  const M = STORY_MACRO[Math.floor(rnd() * STORY_MACRO.length)];
+  const pool = STORY[storyBucket(ret)];
+  const pick = pool[Math.floor(rnd() * pool.length)];
+  const fill = s => s.replace(/\{T\}/g, T).replace(/\{M\}/g, M);
+  // 위기 시나리오는 여러 해에 걸친다. 첫해만 위기 이름을 앞세우고,
+  // 이후는 그해 수익률에 맞는 기사에 '여파 N년차'만 붙인다 —
+  // 반등한 해까지 폭락 헤드라인을 달면 오히려 읽기가 이상해진다.
+  const c = crash && CRASHES[crash.key];
+  const first = c && !crash.step;
+  return {
+    era: era.name,
+    head: first ? `${c.name} 발생` : fill(pick[0]),
+    body: first ? c.info : fill(pick[1]),
+    tag: c ? (first ? `${crash.len}년에 걸친 시나리오` : `${c.name} 여파 ${crash.step + 1}년차 / ${crash.len}년`) : "",
+  };
 }
 
 const EVENT_KINDS = {
@@ -2466,6 +2550,21 @@ function renderGame() {
         ${evtRows}
       </div>
 
+      ${(() => {
+        // 이전 규칙은 게임과 무관하게 자동으로 돈다. 화면에 안 보이면
+        // "ISA 잔액이 저절로 사라졌다"로 읽힌다.
+        const cur = sim.years.find(r => r.year === y);
+        const xs = (cur && cur.transfers) || [];
+        if (!xs.length) return "";
+        return `<div class="gcard" style="border-color:var(--accent)">
+          <h4>🔄 올해 계좌 간 이전 (자동)</h4>
+          ${xs.map(t => `<p class="hint" style="margin:0 0 6px">${t}</p>`).join("")}
+          <p class="hint" style="margin:6px 0 0;color:var(--muted)">
+            「4. 자동 채우기 → 계좌 간 이전」에 넣어 둔 규칙이 그해에 걸려 실행된 것입니다.
+            원하지 않으면 그 목록에서 지우세요.</p>
+        </div>`;
+      })()}
+
       ${loanPay > 0 ? `<div class="gcard">
         <h4>🏠 주택담보대출</h4>
         <div class="gline"><span>올해 상환</span><span class="neg">−${fmt(loanPay)}</span></div>
@@ -2487,7 +2586,27 @@ function renderGame() {
     <div class="gcard" style="margin-top:14px">
       <h4>${isIn ? "어디에 넣을까요" : "어디서 뺄까요"} <span style="color:var(--muted);font-weight:400">(${isIn ? "납입" : "인출"} · 만원)</span>
         <button type="button" id="btnFlip" class="flip">${isIn ? "인출로 바꾸기" : "납입으로 바꾸기"}</button></h4>
-      <div class="allocgrid" id="allocGrid"></div>
+      <div class="alloccols">
+        <div>
+          <div class="allocgrid" id="allocGrid"></div>
+        </div>
+        ${(() => {
+          const pd = game.pending;
+          if (!pd) return `<div class="brief"><h5>📰 시장 브리핑</h5>
+            <p class="hint" style="margin:0">첫 해입니다. 결정을 마치고 넘기면 그해 시장이 공개되고, 왜 그랬는지 여기에 기사로 붙습니다.</p></div>`;
+          const st = marketStory(cfg, pd.year, pd.ret, pd.crash);
+          const sign = pd.ret >= 0 ? "pos" : "neg";
+          return `<div class="brief">
+            <h5>📰 ${pd.year}년 시장 브리핑 <span style="color:var(--muted);font-weight:400">· ${st.era}</span></h5>
+            <p class="bhead">${st.head}</p>
+            <p class="bbody">${st.body}</p>
+            ${st.tag ? `<p class="btag">💥 ${st.tag}</p>` : ""}
+            <p class="bfoot">그래서 그해 내 포트폴리오는
+              <strong class="${sign}">${pd.ret >= 0 ? "+" : ""}${pd.ret.toFixed(1)}%</strong>,
+              운용손익 <strong class="${pd.pnl >= 0 ? "pos" : "neg"}">${pd.pnl >= 0 ? "+" : "−"}${fmt(Math.abs(pd.pnl))}만원</strong>이었습니다.</p>
+          </div>`;
+        })()}
+      </div>
       ${!isIn && bal && bal.taxable.bal > 0.5 ? `<p class="hint" style="margin:9px 0 0">
         일반계좌는 지금 <strong>${TAXTYPE_NAME[cfg.taxType] || cfg.taxType}</strong>로 계산합니다 —
         ${TAXTYPE_NOTE[cfg.taxType] || ""}
