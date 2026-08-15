@@ -277,6 +277,51 @@
     button { padding: 6px 10px; }
   }
 
+  .modebar { display: flex; gap: 6px; margin-bottom: 14px; }
+  .tab {
+    font-size: 13.5px; font-weight: 600; padding: 8px 16px; border-radius: 9px;
+    background: transparent; border: 1px solid var(--border-strong); color: var(--text-secondary);
+  }
+  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tab.on:hover { background: var(--accent); filter: brightness(1.08); }
+
+  .turnhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .turnhead .yr { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+  .turnhead .age { color: var(--text-secondary); font-size: 14px; }
+  .turnhead .prog { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bar { height: 4px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin: 8px 0 16px; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+
+  .gcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+  .gcard { border: 1px solid var(--border); border-radius: 11px; padding: 13px 14px; background: var(--surface-1); }
+  .gcard h4 { margin: 0 0 9px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+  .flip { margin-left: 8px; padding: 2px 8px; font-size: 11px; font-weight: 500; border-radius: 5px;
+    background: transparent; border: 1px solid var(--border-strong); color: var(--text-secondary); cursor: pointer; }
+  .flip:hover { border-color: var(--accent); color: var(--accent); }
+  .gline { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .gline.tot { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 7px; font-weight: 600; }
+  .gline .neg { color: var(--critical); }
+  .gline .pos { color: var(--good); }
+  .evt { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 13px; border-bottom: 1px solid var(--grid); }
+  .evt:last-child { border-bottom: none; }
+  .evt .nm { display: flex; align-items: center; gap: 6px; }
+
+  .allocgrid { display: grid; grid-template-columns: max-content 110px 1fr; gap: 7px 14px; align-items: center; font-size: 13px; }
+  .allocgrid input { width: 100%; text-align: right; }
+  .allocgrid .bal { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+  .roll { text-align: center; padding: 18px 12px; border-radius: 11px; margin-bottom: 14px; border: 1px solid var(--border); }
+  .roll .big { font-size: 34px; font-weight: 600; letter-spacing: -0.02em; }
+  .roll.up { background: rgba(12,163,12,.09); border-color: rgba(12,163,12,.4); }
+  .roll.up .big { color: var(--good); }
+  .roll.dn { background: rgba(208,59,59,.09); border-color: rgba(208,59,59,.4); }
+  .roll.dn .big { color: var(--critical); }
+  .roll .sub { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
+
+  .ending { text-align: center; padding: 26px 16px; }
+  .ending .big { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
+  .ending .grade { font-size: 52px; line-height: 1; margin-bottom: 8px; }
+
   footer { color: var(--muted); font-size: 11.5px; line-height: 1.7; margin-top: 26px; }
   footer h3 { color: var(--text-secondary); margin-top: 14px; }
   footer ul { padding-left: 18px; margin: 4px 0; }
@@ -294,6 +339,94 @@
   <div class="kpis" id="kpis"></div>
   <div id="warnzone"></div>
 
+  <div class="modebar">
+    <button type="button" id="tabPlan" class="tab on">📋 플래너</button>
+    <button type="button" id="tabGame" class="tab">🎮 인생 시뮬</button>
+  </div>
+
+  <!-- ================= 게임 ================= -->
+  <section class="panel" id="gamePanel" hidden>
+    <div class="hd">
+      <h2 id="gameTitle">인생 시뮬</h2>
+      <div class="btnrow">
+        <button type="button" id="btnGameNew" class="primary">새로 시작</button>
+        <button type="button" id="btnGameUndo">한 턴 되돌리기</button>
+      </div>
+    </div>
+    <details class="grp" id="gameCfg" style="border-top:none;margin-top:0;padding-top:0">
+      <summary>⚙️ 게임 설정 — 포트폴리오 · 위기 · 생활비</summary>
+      <div class="body">
+        <div class="fgrid">
+          <label class="f" style="grid-column:span 2"><span class="t">📐 프리셋 수익률을 무엇으로 볼지</span>
+            <select id="cfg_retMode">
+              <option value="geo">장기 목표 CAGR — 오래 굴리면 그 값에 수렴 (권장)</option>
+              <option value="exact">장기 수익률 고정 — 반드시 그 CAGR로 끝남</option>
+              <option value="arith">산술평균 그대로 — 실현 CAGR은 더 낮게 나옴</option>
+            </select></label>
+          <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
+            <span class="hint" id="retModeInfo" style="margin:0"></span></label>
+          <label class="f" style="grid-column:span 2"><span class="t">📦 포트폴리오 프리셋</span>
+            <select id="cfg_preset"></select></label>
+          <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
+            <span class="hint" id="presetInfo" style="margin:0"></span></label>
+          <label class="f"><span class="t" title="은퇴 몇 년 전부터 위험구간으로 볼지">위험구간 시작 (은퇴 기준)</span><input type="number" id="cfg_riskFrom"></label>
+          <label class="f"><span class="t" title="은퇴 몇 년 후부터 후기로 볼지">후기 시작 (은퇴 기준)</span><input type="number" id="cfg_lateFrom"></label>
+          <label class="f"><span class="t">💥 위기 횟수 (0~3)</span><input type="number" min="0" max="3" id="cfg_crashCount"></label>
+          <label class="f" style="grid-column:span 2"><span class="t">위기 종류</span>
+            <select id="cfg_crashPick"></select></label>
+          <label class="f"><span class="t">게임 · 목표 생활비/연 (물가연동)</span><input type="number" step="100" id="cfg_gameSpend"></label>
+          <label class="f"><span class="t">프리셋 off · 평균 %</span><input type="number" step="0.5" id="cfg_gameMean"></label>
+          <label class="f"><span class="t">프리셋 off · 변동성 %</span><input type="number" step="1" id="cfg_gameVol"></label>
+          <label class="f"><span class="t">게임 · 시드</span><input type="number" id="cfg_gameSeed"></label>
+          <span id="customPhase" hidden style="display:contents">
+            <label class="f"><span class="t">커스텀 적립 %/σ</span><input type="number" step="0.1" id="cfg_cAccum"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cAccumSd"></label>
+            <label class="f"><span class="t">커스텀 위험 %/σ</span><input type="number" step="0.1" id="cfg_cRisk"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cRiskSd"></label>
+            <label class="f"><span class="t">커스텀 후기 %/σ</span><input type="number" step="0.1" id="cfg_cLate"></label>
+            <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cLateSd"></label>
+          </span>
+          <label class="f"><span class="t">게임 · 종료 나이</span><input type="number" id="cfg_gameDeathAge"></label>
+        </div>
+        <h3 style="margin-top:16px">🍚 생활비 구간</h3>
+        <p class="hint" style="margin:0 0 8px">
+          위 「목표 생활비」가 기본값이고, 여기 넣은 구간이 그 해의 생활비를 덮어씁니다.
+          자녀 독립·은퇴·후기 고령처럼 씀씀이가 달라지는 구간을 넣으세요.
+          <strong>겹치면 아래 줄이 이깁니다.</strong>
+        </p>
+        <div id="spendRows"></div>
+        <div class="btnrow" style="margin-top:8px">
+          <button type="button" id="btnAddSpend">+ 구간 추가</button>
+          <button type="button" id="btnSpendCurve">표준 곡선 채우기</button>
+          <span class="hint" id="spendResult" style="margin:0"></span>
+        </div>
+        <div id="spendPreview"></div>
+
+        <h3 style="margin-top:16px">🏠 주택담보대출</h3>
+        <div class="fgrid">
+          <label class="f"><span class="t">사용</span>
+            <select id="loan_on"><option value="1">있음</option><option value="0">없음</option></select></label>
+          <label class="f"><span class="t">현재 잔액 (만원)</span><input type="number" step="50" id="loan_balance"></label>
+          <label class="f"><span class="t">현재 금리 %</span><input type="number" step="0.1" id="loan_rate"></label>
+          <label class="f"><span class="t">만기 연도</span><input type="number" id="loan_endYear"></label>
+          <label class="f"><span class="t">만기 월</span><input type="number" min="1" max="12" id="loan_endMonth"></label>
+          <label class="f"><span class="t">상환 방식</span>
+            <select id="loan_type">
+              <option value="amort">원리금균등</option>
+              <option value="equalPrin">원금균등</option>
+              <option value="interestOnly">거치(이자만)</option>
+            </select></label>
+          <label class="f"><span class="t">금리 유형</span>
+            <select id="loan_rateMode"><option value="float">변동</option><option value="fixed">고정</option></select></label>
+          <label class="f"><span class="t">금리 변동성 %p</span><input type="number" step="0.1" id="loan_rateVol"></label>
+          <label class="f"><span class="t">금리 하한 %</span><input type="number" step="0.1" id="loan_rateMin"></label>
+          <label class="f"><span class="t">금리 상한 %</span><input type="number" step="0.1" id="loan_rateMax"></label>
+        </div>
+      </div>
+    </details>
+    <div id="gameBody"></div>
+  </section>
+
   <!-- ================= 표 ================= -->
   <section class="panel">
     <div class="hd">
@@ -306,6 +439,7 @@
         <button type="button" id="btnCsv">CSV</button>
       </div>
     </div>
+    <div id="gameLink"></div>
     <div class="tablebox" id="tablebox"></div>
     <div class="hd" style="margin-top:16px">
       <h3 style="margin:0">계좌별 재원 구성 — <span id="mxYearLabel">–</span></h3>
@@ -367,6 +501,23 @@
       순서와 한도는 아래 <em>계좌별 수익률 · 한도 · 적립 우선순위</em>에서 바꾸세요(우선순위 0 = 자동 배분에서 제외).
     </p>
 
+    <details class="grp" open id="evtPanel">
+      <summary>인생 일정 — 미리 짜두는 이벤트 (게임 모드에서 씁니다)</summary>
+      <div class="body">
+        <div id="evtRows"></div>
+        <div class="btnrow" style="margin-top:10px">
+          <button type="button" id="btnAddEvt">+ 일정 추가</button>
+          <button type="button" id="btnEvtSample">기본 계획 불러오기</button>
+        </div>
+        <p class="hint">
+          <strong>소득</strong>은 그해 쓸 수 있는 세후 소득, <strong>지출</strong>은 등록금·결혼 지원처럼 그해 나가야 하는 목돈,
+          <strong>목돈 유입</strong>은 퇴직금·상속입니다. 게임은 매년 <code>소득 + 유입 − 생활비 − 지출</code>을 계산해
+          남으면 「어디에 넣을지」, 모자라면 「어디서 뺄지」를 묻습니다.
+          <strong>주기</strong>를 쓰면 반복됩니다 — 자녀 대학 4년은 <code>시작 2044 · 종료 2047 · 주기 1</code>.
+        </p>
+      </div>
+    </details>
+
     <details class="grp" open>
       <summary>인출기 — 목표 생활비로 세금 최소 인출 계획 자동 생성</summary>
       <div class="body">
@@ -381,7 +532,8 @@
         <div class="fgrid" style="margin-top:12px">
           <label class="f"><span class="t">인출 전략</span>
             <select id="cfg_wdStrategy">
-              <option value="pensionFirst">연금 저율구간 우선 (권장)</option>
+              <option value="ratio">저율구간 + 잔액 비례 (권장)</option>
+              <option value="pensionFirst">연금 저율구간 우선</option>
               <option value="taxmin">그해 세금 최소</option>
             </select>
           </label>
@@ -404,10 +556,17 @@
           국민연금 세후 수령액은 목표에서 먼저 차감합니다.
         </p>
         <p class="hint">
-          자동 배분의 <strong>연금 저율구간 우선</strong>은 사적연금 과세대상이 분리과세 문턱(기본 1,500만원)을 넘지 않는 선까지
-          연금계좌에서 먼저 뽑고, 모자란 만큼만 ISA·일반계좌에서 채웁니다. 저율 구간은 그해 안 쓰면 사라지므로 ISA를 먼저 헐어 아껴둘 이유가 없습니다.
+          <strong>저율구간 + 잔액 비례</strong>(기본) — ① <strong>연금저축 세액공제용 + IRP 투자용</strong>에서 분리과세 문턱(기본 1,500만원)
+          안쪽까지 먼저 뺍니다. 이 구간은 5.5%지만 1원이라도 넘기면 전액 16.5%가 되고, 안 쓰면 그해로 사라지는 한도입니다.
+          ② 모자란 만큼은 <strong>나머지 계좌를 인출 가능액에 비례해</strong> 고르게 헐어냅니다 — 한 계좌만 먼저 마르지 않습니다.
+          ③ 그래도 부족하면 최후 수단으로 ①의 남은 잔액까지 갑니다(이때는 문턱을 넘습니다).
+          비례 기준은 잔액이 아니라 <em>인출 가능액</em>(연금수령한도·55세 요건을 반영한 금액)입니다.
+        </p>
+        <p class="hint">
+          <strong>연금 저율구간 우선</strong>은 문턱까지 연금계좌에서 뽑는 것은 같지만, 나머지를 비례가 아니라
+          그때그때 실수령이 가장 큰 계좌에서 채웁니다.
           <strong>그해 세금 최소</strong>는 눈앞의 세금만 보고 고르기 때문에 비과세인 ISA부터 몽땅 빼는 경향이 있습니다.
-          어느 쪽이든 연금수령한도·55세 요건을 지키며, 목표를 채우지 못하는 해는 자산을 태우는 대신 부족분을 경고로 알립니다.
+          셋 다 연금수령한도·55세 요건을 지키며, 목표를 채우지 못하는 해는 자산을 태우는 대신 부족분을 경고로 알립니다.
         </p>
 
       </div>
@@ -504,6 +663,8 @@
           <label class="f"><span class="t">연금계좌 합산 납입한도</span><input type="number" step="100" id="cfg_pensionTotalCap"></label>
         </div>
         <p class="hint">
+          <strong>수익률은 플래너에서만 씁니다.</strong> 인생 시뮬에서 포트폴리오 프리셋을 고르면 그 프리셋 하나가
+          모든 계좌에 적용되고 이 값은 무시됩니다(프리셋을 <code>off</code>로 두면 이 값이 시장 변동의 기준선이 됩니다).
           한도는 <em>표에 경고를 띄우는 기준</em>이자 <em>자동 배분의 상한</em>입니다. 직접 입력을 막지는 않습니다.
           법정 한도 — 연금저축+IRP 납입 합계 연 1,800만 / 세액공제 대상 연 900만(연금저축은 그중 600만까지) / ISA 연 2,000만·총 1억.
         </p>
@@ -625,11 +786,11 @@
    계좌 정의
    ======================================================================== */
 const ACC = [
-  { id:"isa",    name:"ISA",                 abbr:"ISA",        kind:"isa",     color:"--s1", rate:5.0, limit:2000, fill:1000, prio:3 },
-  { id:"irpInv", name:"IRP · 투자용",         abbr:"IRP 투자",   kind:"pension", color:"--s2", rate:5.5, limit:300,  fill:300, ded:true, prio:2, irp:true },
+  { id:"isa",    name:"ISA",                 abbr:"ISA",        kind:"isa",     color:"--s1", rate:5.0, limit:2000, fill:1000, prio:4 },
+  { id:"irpInv", name:"IRP · 투자용",         abbr:"IRP 투자",   kind:"pension", color:"--s2", rate:5.5, limit:300,  fill:300, ded:true, prio:1, irp:true },
   { id:"irpSev", name:"IRP · 퇴직금 수령",     abbr:"IRP 퇴직",   kind:"pension", color:"--s3", rate:4.0, limit:0,    fill:0,   sev:true, prio:0, irp:true },
-  { id:"psDed",  name:"연금저축 · 세액공제용",  abbr:"연저 공제",  kind:"pension", color:"--s4", rate:5.5, limit:600,  fill:600, ded:true, prio:1 },
-  { id:"psFree", name:"연금저축 · 비과세용",    abbr:"연저 비과세", kind:"pension", color:"--s5", rate:6.0, limit:900,  fill:0,   prio:4 },
+  { id:"psDed",  name:"연금저축 · 세액공제용",  abbr:"연저 공제",  kind:"pension", color:"--s4", rate:5.5, limit:600,  fill:600, ded:true, prio:2 },
+  { id:"psFree", name:"연금저축 · 비과세용",    abbr:"연저 비과세", kind:"pension", color:"--s5", rate:6.0, limit:900,  fill:0,   prio:3 },
   { id:"taxable", name:"일반계좌 · 직접투자",   abbr:"일반계좌",   kind:"taxable", color:"--s6", rate:6.0, limit:0,    fill:0,   prio:5 },
 ];
 const AID = ACC.map(a => a.id);
@@ -637,6 +798,56 @@ const byId = Object.fromEntries(ACC.map(a => [a.id, a]));
 const PENSION = ACC.filter(a => a.kind === "pension").map(a => a.id);
 
 const LS_KEY = "tax-retire-sim-v1";
+
+/* ── 포트폴리오 프리셋 ────────────────────────────────────────────────
+   적립기 → 위험구간(은퇴 전후) → 후기 순으로 평균/표준편차가 바뀐다.
+   숫자는 원화 환노출 기준 장기 가정치다. */
+const PRESETS = {
+  off:                 { info: "프리셋 안 씀 — 계좌별 수익률 + 아래 평균/변동성으로 시장을 뽑습니다" },
+  aggressive:          { info: "🟢 공격형: 9.7 → 9.0 → 8.5", accum:9.7, accumSd:14.4, risk:9.0, riskSd:11.7, late:8.5, lateSd:10.8 },
+  standard:            { info: "🟡 표준형: 9.0 → 8.0 → 7.5", accum:9.0, accumSd:13.5, risk:8.0, riskSd:9.9, late:7.5, lateSd:9.0 },
+  conservative:        { info: "🟠 보수형: 8.5 → 7.0 → 6.5", accum:8.5, accumSd:11.7, risk:7.0, riskSd:8.1, late:6.5, lateSd:7.2 },
+  "very-conservative": { info: "🔴 매우 보수형: 8.0 → 6.0 → 5.5", accum:8.0, accumSd:10.8, risk:6.0, riskSd:6.3, late:5.5, lateSd:5.4 },
+  sp500:               { info: "📈 S&P 500 100% — 10.5% / σ13.5. 샤프 0.52", accum:10.5, accumSd:13.5, risk:10.5, riskSd:13.5, late:10.5, lateSd:13.5 },
+  nasdaq:              { info: "🚀 나스닥 100% — 13.5% / σ19.8. 최대낙폭 −83% 경험", accum:13.5, accumSd:19.8, risk:13.5, riskSd:19.8, late:13.5, lateSd:19.8 },
+  "sp-nasdaq":         { info: "⚖️ S&P70+나스닥30 — 11.4% / σ15.3", accum:11.4, accumSd:15.3, risk:11.4, riskSd:15.3, late:11.4, lateSd:15.3 },
+  "sp-nasdaq-5050":    { info: "⚖️ S&P50+나스닥50 — 12.0% / σ16.6", accum:12.0, accumSd:16.6, risk:12.0, riskSd:16.6, late:12.0, lateSd:16.6 },
+  "option-f":          { info: "⭐ 옵션 F — 미국주력70+버크셔10+인도5+금6+단기채9. 10.6% / σ14.3", accum:10.6, accumSd:14.3, risk:10.6, riskSd:14.3, late:10.6, lateSd:14.3 },
+  buffett:             { info: "💼 버핏 90/10 — 9.8% / σ12.6", accum:9.8, accumSd:12.6, risk:9.8, riskSd:12.6, late:9.8, lateSd:12.6 },
+  twofund:             { info: "⚡ Two-Fund 80/20 — 9.5% / σ12.6", accum:9.5, accumSd:12.6, risk:9.5, riskSd:12.6, late:9.5, lateSd:12.6 },
+  dividend:            { info: "💰 배당성장 SCHD형 — 8.5% / σ11.7", accum:8.5, accumSd:11.7, risk:8.5, riskSd:11.7, late:8.5, lateSd:11.7 },
+  balanced60:          { info: "📊 60-40 클래식 — 7.5% / σ11.0", accum:7.5, accumSd:11.0, risk:7.5, riskSd:11.0, late:7.5, lateSd:11.0 },
+  "3fund":             { info: "📚 3-Fund Bogleheads — 8.5% / σ11.0", accum:8.5, accumSd:11.0, risk:8.5, riskSd:11.0, late:8.5, lateSd:11.0 },
+  lazy:                { info: "😴 레이지 — 7.8% / σ10.2", accum:7.8, accumSd:10.2, risk:7.8, riskSd:10.2, late:7.8, lateSd:10.2 },
+  tdf2040:             { info: "🎯 타겟데이트 2040 — 7.5% / σ10.1", accum:7.5, accumSd:10.1, risk:7.5, riskSd:10.1, late:7.5, lateSd:10.1 },
+  allweather:          { info: "🌦️ All Weather — 6.5% / σ7.6", accum:6.5, accumSd:7.6, risk:6.5, riskSd:7.6, late:6.5, lateSd:7.6 },
+  permanent:           { info: "🛡️ 영구 포트폴리오 — 5.8% / σ6.5. 4국면 전천후 방어", accum:5.8, accumSd:6.5, risk:5.8, riskSd:6.5, late:5.8, lateSd:6.5 },
+  butterfly:           { info: "🦋 골든 버터플라이 — 6.8% / σ8.0", accum:6.8, accumSd:8.0, risk:6.8, riskSd:8.0, late:6.8, lateSd:8.0 },
+  vt:                  { info: "🌍 전세계 주식 VT형 — 8.8% / σ12.6", accum:8.8, accumSd:12.6, risk:8.8, riskSd:12.6, late:8.8, lateSd:12.6 },
+  "korea-tax":         { info: "🇰🇷 한국 절세형 — 실효 8.5% / σ11.0", accum:8.5, accumSd:11.0, risk:8.5, riskSd:11.0, late:8.5, lateSd:11.0 },
+  deposit:             { info: "🏦 정기예금 100% — 3.0% / σ0.3. 실질 ~0.8%, 인출을 못 버팁니다 (시연용)", accum:3.0, accumSd:0.3, risk:3.0, riskSd:0.3, late:3.0, lateSd:0.3 },
+  kospi:               { info: "🇰🇷 코스피 100% — 5.5% / σ18.0. 샤프 0.11, 홈 바이어스 시연용", accum:5.5, accumSd:18.0, risk:5.5, riskSd:18.0, late:5.5, lateSd:18.0 },
+  gold100:             { info: "🥇 금 100% — 5.0% / σ15.3. 샤프 0.10, 단독 보유 비효율 시연용", accum:5.0, accumSd:15.3, risk:5.0, riskSd:15.3, late:5.0, lateSd:15.3 },
+  nasdaq2x:            { info: "⚡ 나스닥 2x — 21.0% / σ39.6. ⚠️ 산술평균이지 실현 수익이 아닙니다. 아래 CAGR을 보세요", accum:21.0, accumSd:39.6, risk:21.0, riskSd:39.6, late:21.0, lateSd:39.6 },
+  custom:              { info: "⚙️ 커스텀 — 아래 구간별 값을 직접 입력하세요", custom: true },
+};
+
+/* ── 위기 시나리오 ────────────────────────────────────────────────────
+   pattern 은 해당 연도들의 수익률을 통째로 덮어쓴다(분포 추첨을 무시).
+   투자 시작 후 시드로 뽑은 해에 터진다. */
+const CRASHES = {
+  imf1997:     { name: "🇰🇷 1997 IMF형",      pattern: [-.40, .30, .20],  info: "외환위기. 원화 급락으로 해외자산은 방어, 국내자산 직격. V자 회복" , rateBump: 8.0 },
+  dotcom2000:  { name: "💻 2000 닷컴형",       pattern: [-.15, -.12, -.22], info: "3년 연속 하락, 회복까지 7년. 가장 무서운 장기 침체" , rateBump: -1.0 },
+  gfc2008:     { name: "🏦 2008 금융위기형",    pattern: [-.28, .25, .15],  info: "글로벌 금융위기. 빠른 V자, 환율 +71%로 원화 손실 완화" , rateBump: -2.0 },
+  covid2020:   { name: "🦠 2020 코로나형",      pattern: [-.15, .25, .18],  info: "단기 충격 후 V자 반등. 가장 가벼운 시나리오" , rateBump: -1.5 },
+  hike2022:    { name: "📈 2022 긴축형",        pattern: [-.12, -.05, .18], info: "금리 인상, 주식·채권 동반 하락. All Weather·60-40에 특히 불리" , rateBump: 2.5 },
+  lost10:      { name: "💀 잃어버린 10년형",     pattern: [-.10, -.05, -.03, 0, 0, 0, 0, 0, 0, 0], info: "일본식 장기 침체. 3년 하락 후 7년 횡보" , rateBump: -1.5 },
+  depression:  { name: "🕳️ 1929 대공황형",      pattern: [-.25, -.34, -.09, .20, .15, .10], info: "3년간 −55%. 회복에 10년 이상. 극단적 꼬리 위험" , rateBump: -2.0 },
+  stagflation: { name: "🛢️ 1973 스태그플레이션형", pattern: [-.18, -.28, .32, .20, -.05], info: "오일쇼크. 물가가 함께 뛰어 실질 손실은 표시보다 큽니다" , rateBump: 4.0 },
+  fxshock:     { name: "💱 원화 급등형",         pattern: [-.18, .05, .10], info: "원화 강세로 해외자산 원화환산 손실. 한국 투자자 특유의 역풍" , rateBump: 1.0 },
+  blackmonday: { name: "⚫ 1987 블랙먼데이형",   pattern: [-.20, .12, .25], info: "단일 폭락 후 빠른 회복. 짧고 굵은 충격" , rateBump: -0.5 },
+  euro2011:    { name: "🇪🇺 2011 유럽 재정위기형", pattern: [-.08, .13, .16], info: "가벼운 조정. 위기 축에도 못 드는 수준" , rateBump: -0.5 },
+};
 
 /** 잔액을 이루는 네 가지 자금 성격 — 인출 순서와 세율이 여기서 갈린다 */
 const BUCKETS = [
@@ -666,7 +877,7 @@ function bucketLabel(a, key) {
    ======================================================================== */
 function defaultState() {
   const cfg = {
-    birthYear: 1985, startYear: 2026, retireYear: 2040, endYear: 2070,
+    birthYear: 1980, startYear: 2026, retireYear: 2041, endYear: 2075,
     inflation: 2.0, salaryTier: "low", isaType: "general",
     timing: "end", realView: 0,
     sevRate: 3.0, compRate: 16.5,
@@ -674,8 +885,13 @@ function defaultState() {
     npsAmount: 0, npsAge: 65, npsRate: 3.0,
     transfers: [],
     allowPenalty: 0, planTarget: null,
-    pensionCap: 1500, wdStrategy: "pensionFirst", showBuckets: 1,
-    pensionTotalCap: 1800, fillRules: [], wdRules: [],
+    pensionCap: 1500, wdStrategy: "ratio", showBuckets: 1,
+    pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [], spendRules: [],
+    gameMean: 6.0, gameVol: 18.0, gameSeed: 20260812, gameSpend: 4200, gameDeathAge: 95,
+    preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "geo",
+    loan: { on: 1, balance: 6250, rate: 4.5, endYear: 2045, endMonth: 10,
+            type: "amort", rateMode: "float", rateVol: 0.8, rateMin: 1.5, rateMax: 12 },
+    cAccum: 9.0, cAccumSd: 13.5, cRisk: 8.0, cRiskSd: 9.9, cLate: 7.5, cLateSd: 9.0,
     rates: {}, limits: {}, fillAmts: {}, priority: {}, opening: {}, openYears: {},
   };
   ACC.forEach(a => {
@@ -782,6 +998,207 @@ function wdFixedOf(cfg, y) {
 /** 그해에 인출 규칙이 하나라도 걸려 있는가 */
 function wdActive(cfg, y) {
   return (cfg.wdRules || []).some(r => r && y >= r.from && y <= r.to);
+}
+
+/** 시드 고정 난수 — 연도마다 독립적으로 뽑아, 어느 순서로 계산해도 같은 해는 같은 값이 나온다 */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function gauss(rnd) {
+  let u = 0, v = 0;
+  while (u === 0) u = rnd();
+  while (v === 0) v = rnd();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+/** 연도가 속한 구간 — 위험구간은 은퇴 전후로, 순서위험이 가장 큰 시기다 */
+function phaseOf(cfg, y) {
+  const rs = cfg.retireYear + (+cfg.riskFrom || -5);
+  const ls = cfg.retireYear + (+cfg.lateFrom || 10);
+  return y < rs ? "accum" : y < ls ? "risk" : "late";
+}
+/** 선택한 프리셋의 구간별 평균/표준편차 */
+function phaseParams(cfg, y) {
+  const ph = phaseOf(cfg, y);
+  const P = PRESETS[cfg.preset];
+  if (!P || cfg.preset === "off") return { mean: clamp0(cfg.gameMean), sd: clamp0(cfg.gameVol), phase: ph };
+  if (P.custom) {
+    const m = { accum: cfg.cAccum, risk: cfg.cRisk, late: cfg.cLate }[ph];
+    const d = { accum: cfg.cAccumSd, risk: cfg.cRiskSd, late: cfg.cLateSd }[ph];
+    return { mean: clamp0(m), sd: clamp0(d), phase: ph };
+  }
+  const m = { accum: P.accum, risk: P.risk, late: P.late }[ph];
+  const d = { accum: P.accumSd, risk: P.riskSd, late: P.lateSd }[ph];
+  return { mean: m, sd: d, phase: ph };
+}
+
+/** 이번 판에 터질 위기 — 종류와 시작 연도를 시드로 정한다. 투자 시작 후에만 온다. */
+function crashPlan(cfg) {
+  const n = Math.max(0, Math.min(3, +cfg.crashCount || 0));
+  if (!n) return {};
+  const keys = Object.keys(CRASHES);
+  const r = mulberry32((clamp0(cfg.gameSeed) | 0) ^ 0xC0FFEE);
+  const first = cfg.startYear + 3, last = cfg.endYear;
+  const map = {}, used = [];
+  for (let i = 0; i < n; i++) {
+    const key = cfg.crashPick && CRASHES[cfg.crashPick] ? cfg.crashPick : keys[Math.floor(r() * keys.length)];
+    const pat = CRASHES[key].pattern;
+    let start = 0;
+    for (let tries = 0; tries < 40; tries++) {          // 이미 터진 위기와 겹치지 않게
+      start = first + Math.floor(r() * Math.max(1, last - first - pat.length));
+      if (!used.some(u => start < u.end && start + pat.length > u.start)) break;
+    }
+    used.push({ start, end: start + pat.length });
+    pat.forEach((v, k) => { map[start + k] = { key, ret: v * 100, step: k, len: pat.length }; });
+  }
+  return map;
+}
+
+/**
+ * 그해 수익률 한 번 추첨.
+ *  arith — 프리셋 숫자를 산술평균으로 본다. 복리로 굴리면 실현 CAGR은 이보다 σ²/2쯤 낮다.
+ *  geo   — 프리셋 숫자를 장기 목표 CAGR로 본다. 로그수익을 정규로 두면 기간이 길수록 그 값에 수렴한다.
+ */
+function drawReturn(cfg, y) {
+  const { mean, sd } = phaseParams(cfg, y);
+  const z = gauss(mulberry32((clamp0(cfg.gameSeed) | 0) + y * 2654435761));
+  if (cfg.retMode === "arith") return Math.max(-70, Math.min(150, mean + z * sd));
+  const m = Math.log(1 + mean / 100);
+  const sg = (sd / 100) / (1 + mean / 100);
+  return Math.max(-85, Math.min(300, (Math.exp(m + z * sg) - 1) * 100));
+}
+
+/**
+ * 전체 기간의 수익률을 한 번에 만든다.
+ * exact 모드는 여기서 로그수익 합을 목표에 맞춰 평행이동하므로 전 구간을 알아야 한다.
+ * 위기 연도는 시나리오 값 자체가 의미라 건드리지 않고 나머지 해로만 조정한다 —
+ * 그래서 exact 에서 위기는 총수익이 아니라 '언제 맞느냐'만 바꾼다(순서위험만 분리해서 보는 모드).
+ */
+function returnPath(cfg) {
+  const crash = crashPlan(cfg);
+  const path = {}, free = [];
+  let targetLog = 0;
+  for (let y = cfg.startYear; y <= cfg.endYear; y++) {
+    targetLog += Math.log(1 + phaseParams(cfg, y).mean / 100);
+    if (crash[y]) path[y] = crash[y].ret;
+    else { path[y] = drawReturn(cfg, y); free.push(y); }
+  }
+  if (cfg.retMode === "exact" && free.length) {
+    let cur = 0;
+    for (let y = cfg.startYear; y <= cfg.endYear; y++) cur += Math.log(1 + path[y] / 100);
+    const adj = (targetLog - cur) / free.length;
+    for (const y of free) path[y] = (Math.exp(Math.log(1 + path[y] / 100) + adj) - 1) * 100;
+  }
+  return { path, crash };
+}
+
+/** 프리셋이 내건 장기 목표 CAGR (구간 평균의 기하 가중) */
+function targetCagr(cfg, upto) {
+  let lg = 0, n = 0;
+  for (let y = cfg.startYear; y <= (upto || cfg.endYear); y++) { lg += Math.log(1 + phaseParams(cfg, y).mean / 100); n++; }
+  return n ? (Math.exp(lg / n) - 1) * 100 : 0;
+}
+
+const EVENT_KINDS = {
+  salary:    { name: "소득",     sign: +1, tip: "그해 쓸 수 있는 세후 소득 (근로소득·연금 수령)" },
+  income:    { name: "목돈 유입", sign: +1, tip: "상속·보너스처럼 한 번에 들어오는 현금. 어디에 넣을지 직접 정합니다" },
+  severance: { name: "퇴직금",   sign: +1, tip: "IRP(퇴직금 수령)에 퇴직 재원으로 자동 유입. 퇴직소득세 대상" },
+  expense:   { name: "지출",     sign: -1, tip: "등록금·결혼 지원처럼 그해 나가야 하는 목돈" },
+};
+
+/** ±공차가 걸린 이벤트의 연도 이동폭. 시드에 묶여 있어 되돌려도 흔들리지 않는다. */
+function eventShift(cfg, e, idx) {
+  const j = Math.abs(+e.jitter || 0);
+  if (!j) return 0;
+  return Math.round((mulberry32((clamp0(cfg.gameSeed) | 0) + idx * 7919 + 104729)() * 2 - 1) * j);
+}
+/** real 이면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불려 준다 */
+/**
+ * 그해 생활비. 기본 금액 위에 「생활비 구간」이 덮어씌워진다.
+ * 겹치는 구간이 있으면 마지막 줄이 이긴다 — 아래에 덧붙일수록 더 구체적인 조정이라고 본다.
+ * 생활비는 한 번 정하고 끝나는 값이 아니다. 물가로 오르고, 자녀가 독립하면 내려가고,
+ * 후기 고령에는 의료·간병으로 다시 오른다.
+ */
+function livingOf(cfg, y) {
+  const infl = Math.pow(1 + clamp0(cfg.inflation) / 100, y - cfg.startYear);
+  let amt = clamp0(cfg.gameSpend) * infl, name = "";
+  for (const r of (cfg.spendRules || [])) {
+    if (!r || !isFinite(r.from)) continue;                 // 손으로 고친 저장본 방어
+    const to = isFinite(r.to) && r.to >= r.from ? r.to : r.from;
+    if (y < r.from || y > to) continue;
+    const base = r.unit === "month" ? clamp0(r.amt) * 12 : clamp0(r.amt);
+    amt = r.real ? base * infl : base;
+    name = r.name || "";
+  }
+  return { amt, name };
+}
+
+function eventAmount(cfg, e, y) {
+  const base = clamp0(e.amt);
+  return e.real ? base * Math.pow(1 + clamp0(cfg.inflation) / 100, y - cfg.startYear) : base;
+}
+/**
+ * 주택담보대출 상각표. 변동금리면 해마다 금리를 다시 뽑아 상환액을 재산정한다
+ * (실제로도 금리 변동 때 은행이 월 상환액을 다시 계산한다).
+ * 금리는 기준금리로 서서히 돌아오는 랜덤워크이고, 위기 시나리오의 금리 충격을 함께 받는다.
+ */
+function loanSchedule(cfg, crash) {
+  const L = cfg.loan || {}, out = {};
+  if (!L.on || clamp0(L.balance) <= 0) return out;
+  const base = clamp0(L.rate);
+  const endY = clamp0(L.endYear) || cfg.endYear;
+  const endM = Math.min(12, Math.max(1, clamp0(L.endMonth) || 12));
+  const lo = L.rateMin != null ? +L.rateMin : 1.5, hi = L.rateMax != null ? +L.rateMax : 12;
+
+  let bal = clamp0(L.balance), rate = base;
+  for (let y = cfg.startYear; y <= cfg.endYear; y++) {
+    let left = (endY - y) * 12 + endM;                 // 만기까지 남은 개월
+    if (bal <= 0.005 || left <= 0) break;
+    if (L.rateMode !== "fixed" && y > cfg.startYear) {
+      const z = gauss(mulberry32((clamp0(cfg.gameSeed) | 0) + y * 7907 + 31337));
+      rate += z * clamp0(L.rateVol) - (rate - base) * 0.2;   // 평균회귀
+    }
+    const c = crash && crash[y];
+    const eff = Math.max(lo, Math.min(hi, rate + (c && CRASHES[c.key].rateBump ? CRASHES[c.key].rateBump : 0)));
+    const i = eff / 100 / 12;
+    const months = Math.min(y === endY ? endM : 12, left);
+
+    // 원리금균등은 남은 개월 기준으로 월 상환액을 다시 계산한다
+    const pmt = L.type === "amort"
+      ? (i > 0 ? bal * i / (1 - Math.pow(1 + i, -left)) : bal / left)
+      : 0;
+
+    let interest = 0, paid = 0;
+    for (let m = 0; m < months && bal > 0.005; m++) {
+      const it = bal * i;
+      let pr = L.type === "equalPrin" ? bal / Math.max(1, left)
+             : L.type === "interestOnly" ? (left <= 1 ? bal : 0)
+             : pmt - it;
+      pr = Math.max(0, Math.min(pr, bal));
+      bal -= pr; interest += it; paid += it + pr; left--;
+    }
+    out[y] = { rate: eff, paid, interest, principal: paid - interest, balance: Math.max(0, bal), months };
+  }
+  return out;
+}
+
+/** 그해에 걸린 인생 이벤트 */
+function eventsOf(cfg, y) {
+  const out = [];
+  (cfg.events || []).forEach((e, i) => {
+    if (!e || !e.year) return;
+    const sh = eventShift(cfg, e, i);
+    const start = e.year + sh;
+    const end = ((+e.until || 0) >= e.year ? +e.until : e.year) + sh;
+    if (y < start || y > end) return;
+    if ((y - start) % Math.max(1, +e.every || 1) !== 0) return;
+    out.push({ ...e, amt: eventAmount(cfg, e, y), shift: sh });
+  });
+  return out;
 }
 
 function emptyBuckets() { return { free: 0, ded: 0, sev: 0, gain: 0 }; }
@@ -908,6 +1325,118 @@ function applyWithdrawals(st, draws, ctx) {
  * 세율표에는 계단(연금소득 1,500만원 분리과세 전환)이 있어 단순 탐욕법은 그 앞에서 멈춘다.
  * 기본 스텝으로 개선되는 계좌가 하나도 없으면 청크를 2배씩 키워 계단을 넘어본다.
  */
+/** 세액공제 재원 계좌 (연금저축 세액공제용 + IRP 투자용) — 분리과세 문턱을 같이 쓰는 짝이다 */
+const DEDIDS = ACC.filter(a => a.ded).map(a => a.id);
+
+/**
+ * 「저율구간 + 잔액 비례」 인출.
+ *   1순위 — 세액공제용 + IRP 투자용에서 분리과세 문턱(기본 1,500만) 안쪽까지.
+ *           이 구간은 5.5%지만 1원이라도 넘기면 전액 16.5%라, 넘지 않는 선까지만 쓴다.
+ *           그해 안 쓰면 사라지는 한도라 아껴 둘 이유도 없다.
+ *   2순위 — 나머지를 각 계좌의 인출 가능액에 비례해 고르게. 한 계좌만 빨리 마르지 않는다.
+ *   3순위 — 그래도 모자라면 1순위 계좌의 남은 잔액까지 (문턱을 넘으므로 최후 수단).
+ * 비례 배분은 잔액이 아니라 '인출 가능액'(연금수령한도·55세 요건 반영) 기준이다.
+ */
+function ratioDraws(st, ctx, target, capacity, floor) {
+  const draws = { ...floor };
+  const evalDraws = d => applyWithdrawals({ bal: cloneBal(st.bal), isaUsed: st.isaUsed }, d, ctx);
+  const netOf = d => evalDraws(d).net;
+  if (netOf(draws) >= target - 0.5) return draws;
+
+  const room = id => Math.max(0, capacity[id] - draws[id]);
+  const cap = clamp0(ctx.cfg.pensionCap) || Infinity;
+
+  /**
+   * amt 를 잔액 비율대로 나누되, 연금수령한도에 걸려 못 빼는 몫은 여유 있는 계좌로 다시 돌린다.
+   * 그냥 '인출 가능액'에 비례시키면 한도가 빡빡한 IRP·연금저축의 비중이 실제 잔액보다
+   * 훨씬 낮게 눌려, 잔액 비례라고 부를 수 없게 된다.
+   */
+  const spread = (ids, amt) => {
+    const out = Object.fromEntries(ids.map(id => [id, 0]));
+    let left = amt, active = ids.filter(id => room(id) > 0.5);
+    for (let g = 0; g < 12 && left > 0.5 && active.length; g++) {
+      const w = id => bTotal(st.bal[id]);
+      const wsum = active.reduce((s, id) => s + w(id), 0);
+      if (wsum <= 0) break;
+      let used = 0;
+      const next = [];
+      for (const id of active) {
+        const give = Math.min(left * w(id) / wsum, room(id) - out[id]);
+        out[id] += give; used += give;
+        if (room(id) - out[id] > 0.5) next.push(id);
+      }
+      left -= used; active = next;
+      if (used <= 0.5) break;
+    }
+    return out;
+  };
+
+  /**
+   * ids 에서 총 s × 전체여유 만큼을 잔액 비례로 빼되, 목표 세후를 채우는 가장 작은 s 를 찾는다.
+   * 문턱을 넘으면 실수령이 되레 줄 수 있어 단조를 가정하지 않고 훑은 뒤 그 구간만 이분한다.
+   * limit 은 s 의 상한 (문턱 안쪽으로 묶어야 할 때 쓴다).
+   */
+  const advance = (ids, limit = 1) => {
+    const total = ids.reduce((s, id) => s + room(id), 0);
+    if (total <= 0.5 || limit <= 1e-6) return;
+    const at = s => {
+      const add = spread(ids, total * s), d = { ...draws };
+      for (const id of ids) d[id] += add[id];
+      return d;
+    };
+    const N = 120;
+    let hit = -1;
+    for (let i = 1; i <= N; i++) if (netOf(at(limit * i / N)) >= target - 0.5) { hit = i; break; }
+    let s = limit;
+    if (hit >= 0) {
+      let lo = limit * (hit - 1) / N, hi = limit * hit / N;
+      for (let i = 0; i < 22; i++) {
+        const mid = (lo + hi) / 2;
+        if (netOf(at(mid)) >= target - 0.5) hi = mid; else lo = mid;
+      }
+      s = hi;
+    }
+    const d = at(s);
+    for (const id of ids) draws[id] = d[id];
+  };
+
+  // 1순위 — 세액공제 재원에서 분리과세 문턱 안쪽까지.
+  // 문턱은 인출 총액이 아니라 '과세대상' 기준이라, 실제로 넘지 않는 최대 지점을 먼저 찾는다.
+  const ded = DEDIDS.filter(id => room(id) > 0.5);
+  if (ded.length) {
+    let limit = 1;
+    if (cap !== Infinity) {
+      const total = ded.reduce((s, id) => s + room(id), 0);
+      const over = s => {
+        const add = spread(ded, total * s), d = { ...draws };
+        for (const id of ded) d[id] += add[id];
+        return evalDraws(d).taxablePension > cap + 1e-6;
+      };
+      if (over(1)) {
+        let lo = 0, hi = 1;
+        for (let i = 0; i < 22; i++) { const mid = (lo + hi) / 2; if (over(mid)) hi = mid; else lo = mid; }
+        limit = lo;
+      }
+    }
+    advance(ded, limit);
+  }
+
+  // 2순위 — 나머지 계좌를 잔액 비례로 동시에 헐어낸다
+  if (netOf(draws) < target - 0.5) {
+    const rest = AID.filter(id => !DEDIDS.includes(id) && room(id) > 0.5);
+    if (rest.length) advance(rest);
+  }
+
+  // 3순위 — 최후 수단. 여기까지 오면 문턱을 넘어 16.5%가 붙는다.
+  if (netOf(draws) < target - 0.5) {
+    const back = DEDIDS.filter(id => room(id) > 0.5);
+    if (back.length) advance(back);
+  }
+
+  AID.forEach(id => { draws[id] = Math.round(draws[id]); });
+  return draws;
+}
+
 function greedyDraws(st, ctx, target, strategy, seed) {
   // seed = 사용자가 계좌를 찍어 넣은 고정 인출액. 여기서 출발해 모자란 만큼만 더 채우고,
   // 되돌리기 단계에서도 이 아래로는 깎지 않는다 (명시적 지시라서).
@@ -927,6 +1456,8 @@ function greedyDraws(st, ctx, target, strategy, seed) {
       : (ctx.eligible[a.id] ? Math.min(bal, ctx.pLimit[a.id]) : 0);
   }
   if (AID.reduce((s, id) => s + capacity[id], 0) <= 0.5) return draws;
+
+  if (strategy === "ratio") return ratioDraws(st, ctx, target, capacity, floor);
 
   // 「연금 저율구간 우선」은 사적연금 과세대상이 분리과세 문턱을 넘지 않는 선까지
   // 연금계좌에서 먼저 뽑고, 모자란 만큼만 나머지 계좌에서 채운다.
@@ -1052,7 +1583,13 @@ function simulate(opts = {}) {
       for (const a of ACC) {
         const b = st.bal[a.id];
         const base = bTotal(b);
-        const rate = cfg.rates[a.id] || 0;
+        // 프리셋을 고르면 포트폴리오 하나를 모든 계좌에 적용한다.
+        // off 일 때만 계좌별 수익률 차이를 유지한다.
+        const rate = (opts.returns && opts.returns[y] != null)
+          ? (cfg.preset && cfg.preset !== "off"
+              ? opts.returns[y]
+              : (cfg.rates[a.id] || 0) - clamp0(cfg.gameMean) + opts.returns[y])
+          : (cfg.rates[a.id] || 0);
         if (a.kind === "taxable") {
           // 절세계좌와 달리 배당은 인출 여부와 무관하게 매년 원천징수(15.4%)된다.
           // 세후 배당을 재투자하므로 취득가(원금)가 늘고, 나머지는 미실현 평가익으로 쌓인다.
@@ -1247,7 +1784,7 @@ function simulate(opts = {}) {
     years.push(rec);
   }
 
-  if (shortYears.length) {
+  if (shortYears.length && !game) {   // 게임 중이면 인출을 턴마다 직접 정하므로 이 규칙은 적용되지 않는다
     const f = shortYears[0];
     warnings.push(`목표 생활비 미달 ${shortYears.length}개 연도 — 최초 ${f.y}년: 목표 ${fmt(f.want)}만원 중 ${fmt(f.got)}만원만 확보`);
   }
@@ -1294,16 +1831,24 @@ function renderKpis(sim) {
   const rr = sim.years.find(r => r.year === cfg.retireYear);
   const def = rr ? rr.deflator : 1;
   const real = cfg.realView;
-  const wd = sim.years.filter(r => r.year >= cfg.retireYear && r.net > 0);
-  const avgNet = wd.length ? wd.reduce((a, r) => a + (real ? r.net / r.deflator : r.net), 0) / wd.length : 0;
+  // '은퇴 후'라고 적혀 있으면 은퇴 후만 세어야 한다. cumNet 은 은퇴 전 인출까지 포함한 전체 합이다.
+  const post = sim.years.filter(r => r.year >= cfg.retireYear);
+  const postNet = post.reduce((a, r) => a + (real ? r.net / r.deflator : r.net), 0);
+  const preNet = s.cumNet - post.reduce((a, r) => a + r.net, 0);
+  // 분모는 '수령이 있었던 해'가 아니라 은퇴 후 전체 연수다. 0원인 해를 빼면
+  // 실제로 매년 쓸 수 있는 돈보다 훨씬 큰 수가 나온다.
+  const drawn = post.filter(r => r.net > 0).length;
+  const avgNet = post.length ? postNet / post.length : 0;
   const taxPct = s.cumNet + s.cumTax > 0 ? s.cumTax / (s.cumNet + s.cumTax) * 100 : 0;
 
   const tiles = [
     { lab: `은퇴 시점(${cfg.retireYear}년) 총자산`, val: fmtBig(real ? s.atRetire / def : s.atRetire), note: real ? "실질 기준" : "명목 기준" },
     { lab: "총 납입액", val: fmtBig(s.cumIn), note: "명목 합계" },
     { lab: "세액공제 환급 누계", val: fmtBig(s.cumCredit), note: "연말정산 환급분" },
-    { lab: "은퇴 후 세후 수령 총액", val: fmtBig(s.cumNet), note: `국민연금 포함${real ? " · 실질 아님" : ""}` },
-    { lab: "연평균 세후 수령액", val: fmtBig(avgNet), note: real ? "실질 기준" : "명목 기준" },
+    { lab: "은퇴 후 세후 수령 총액", val: fmtBig(postNet),
+      note: `국민연금 포함${preNet > 0.5 ? ` · 은퇴 전 ${fmtBig(preNet)} 별도` : ""}` },
+    { lab: "연평균 세후 수령액", val: fmtBig(avgNet),
+      note: `은퇴 후 ${post.length}년 평균${drawn < post.length ? ` · 실제 수령은 ${drawn}년` : ""}` },
     { lab: "총 납부 세금", val: fmtBig(s.cumTax),
       note: s.cumOtherTax > 0.5 ? `인출 ${fmtBig(s.cumWdTax)} · 보유·이전 ${fmtBig(s.cumOtherTax)}`
                                 : `수령액 대비 ${taxPct.toFixed(1)}%` },
@@ -1707,8 +2252,515 @@ function renderMatrix(sim) {
 }
 
 /* ========================================================================
+   인생 시뮬 (턴제)
+   ======================================================================== */
+/* 한 턴 = 1년. 결정을 먼저 하고 그 다음에 그해 수익률이 공개된다.
+   순서가 반대면 위험이 사라져 그냥 계산 문제가 된다. */
+const TAXTYPE_NAME = { domestic: "국내주식", overseas: "해외주식 직투", etf: "국내상장 ETF·펀드" };
+const TAXTYPE_NOTE = {
+  domestic: "양도차익은 비과세라 매도해도 세금이 붙지 않습니다(대주주 제외).",
+  overseas: "양도차익에 22%, 연 250만원 기본공제가 있습니다.",
+  etf: "매매차익도 배당소득으로 보아 15.4%입니다.",
+};
+
+let game = null; // { year, returns:{}, log:[], over, pending, flip }
+
+function gameStart() {
+  const cfg = state.cfg;
+  // 게임이 진행한 해의 납입·인출은 게임이 직접 채우므로 먼저 비운다
+  for (let y = cfg.startYear; y <= cfg.endYear; y++) AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
+  const rp0 = returnPath(cfg);
+  game = { year: cfg.startYear, returns: {}, log: [], over: null, pending: null,
+           crash: rp0.crash, loan: loanSchedule(cfg, rp0.crash) };
+  saveGame(); renderGame();
+}
+function saveGame() { try { localStorage.setItem(LS_KEY + ":game", JSON.stringify(game)); } catch (e) {} }
+function loadGame() {
+  try { const raw = localStorage.getItem(LS_KEY + ":game"); game = raw ? JSON.parse(raw) : null; } catch (e) { game = null; }
+}
+
+/** 게임이 확정한 수익률만 반영해 지금까지의 자산을 계산한다 */
+function gameSim() { return simulate({ returns: game.returns }); }
+
+/** 그해 현금 사정 — 이벤트에서 소득·지출을 모은다 */
+function cashOf(cfg, y, loan) {
+  let salary = 0, lump = 0, spend = 0, sev = 0;
+  const list = eventsOf(cfg, y);
+  for (const e of list) {
+    const v = clamp0(e.amt);
+    if (e.kind === "salary") salary += v;
+    else if (e.kind === "income") lump += v;
+    else if (e.kind === "severance") sev += v;   // 현금이 아니라 IRP로 직행
+    else spend += v;
+  }
+  const ln = loan && loan[y];
+  const lv = livingOf(cfg, y);
+  return { list, salary, lump, spend, sev, loan: ln, living: lv.amt, livingName: lv.name };
+}
+
+/** 시작 화면 — 어떤 조건으로 출발하는지 한눈에 보여준다.
+    기초 잔액 패널이 설정 맨 아래에 묻혀 있어 안 보인다는 문제가 있었다. */
+function refreshGame() {
+  const panel = document.getElementById("gamePanel");
+  if (panel && !panel.hidden) renderGame();   // game 이 null 이면 renderGame 이 시작 화면을 그린다
+}
+
+function renderStart(box) {
+  const cfg = state.cfg;
+  const open = ACC.map(a => ({ a, v: accBuckets(a).reduce((t, k) => t + clamp0((cfg.opening[a.id] || {})[k]), 0) }));
+  const total = open.reduce((s, o) => s + o.v, 0);
+  const P = PRESETS[cfg.preset] || PRESETS.off;
+  const nEvt = (cfg.events || []).length;
+
+  box.innerHTML = `
+    <div class="gcols">
+      <div class="gcard">
+        <h4>시작 자산</h4>
+        ${total > 0
+          ? open.filter(o => o.v > 0).map(o => `<div class="gline"><span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${css(o.a.color)};margin-right:6px"></span>${o.a.abbr}</span><span>${fmt(o.v)}</span></div>`).join("")
+            + `<div class="gline tot"><span>합계</span><span>${fmtBig(total)}</span></div>`
+          : `<p class="hint" style="margin:0 0 8px">아직 <strong>0원</strong>에서 출발하도록 되어 있습니다.
+               지금 들고 있는 계좌가 있다면 넣고 시작하세요 — 자금 성격별로 넣어야 인출 세금이 맞게 계산됩니다.</p>`}
+        <div class="btnrow" style="margin-top:10px">
+          <button type="button" id="btnGoOpening">${total > 0 ? "기초 잔액 고치기" : "내 자산 입력하기"}</button>
+        </div>
+      </div>
+
+      <div class="gcard">
+        <h4>조건</h4>
+        <div class="gline"><span>기간</span><span>${cfg.startYear} ~ ${cfg.endYear} (${cfg.endYear - cfg.startYear + 1}턴)</span></div>
+        <div class="gline"><span>나이</span><span>만 ${cfg.startYear - cfg.birthYear}세 → ${cfg.endYear - cfg.birthYear}세</span></div>
+        <div class="gline"><span>은퇴</span><span>${cfg.retireYear}년</span></div>
+        <div class="gline"><span>목표 생활비</span><span>연 ${fmt(cfg.gameSpend)}만원</span></div>
+        ${(cfg.spendRules || []).length ? `<div class="gline"><span style="color:var(--muted)">생활비 구간</span><span style="color:var(--muted)">${cfg.spendRules.length}개 · ${fmt(livingOf(cfg, cfg.retireYear).amt)} → ${fmt(livingOf(cfg, cfg.endYear).amt)}</span></div>` : ""}
+        <div class="gline"><span>인생 일정</span><span>${nEvt ? nEvt + "건" : "없음"}</span></div>
+        ${nEvt ? "" : `<p class="hint" style="margin:6px 0 0">일정이 없으면 소득도 0입니다. 아래 <strong>「4. 자동 채우기 → 인생 일정」</strong>에서 「기본 계획 불러오기」를 눌러 보세요.</p>`}
+      </div>
+
+      ${(() => {
+        const L = cfg.loan || {};
+        if (!L.on || clamp0(L.balance) <= 0) return "";
+        const sch = loanSchedule(cfg, {});
+        const first = sch[cfg.startYear];
+        return `<div class="gcard">
+          <h4>🏠 주택담보대출</h4>
+          <div class="gline"><span>현재 잔액</span><span>${fmt(L.balance)}</span></div>
+          <div class="gline"><span>금리</span><span>${(+L.rate).toFixed(2)}% ${L.rateMode === "fixed" ? "(고정)" : "(변동)"}</span></div>
+          <div class="gline"><span>만기</span><span>${L.endYear}.${String(L.endMonth).padStart(2, "0")}</span></div>
+          <div class="gline tot"><span>첫해 상환</span><span class="neg">−${fmt(first ? first.paid : 0)}</span></div>
+          <p class="hint" style="margin:8px 0 0">변동금리라 해마다 금리를 다시 뽑아 상환액을 재산정합니다. 위기 시나리오의 금리 충격도 함께 받습니다.</p>
+        </div>`;
+      })()}
+
+      <div class="gcard">
+        <h4>시장</h4>
+        <div class="gline"><span>포트폴리오</span><span>${P.info.split(" —")[0].split(":")[0]}</span></div>
+        <div class="gline"><span>위기</span><span>${clamp0(cfg.crashCount) ? `${clamp0(cfg.crashCount)}회 · ${cfg.crashPick && CRASHES[cfg.crashPick] ? CRASHES[cfg.crashPick].name : "랜덤"}` : "없음"}</span></div>
+        <div class="gline"><span>시드</span><span>${cfg.gameSeed}</span></div>
+        <div class="gline tot"><span>목표 장기 CAGR</span><span>${cfg.retMode === "arith" ? "—" : targetCagr(cfg).toFixed(1) + "%"}</span></div>
+        <p class="hint" style="margin:8px 0 0">${P.info}</p>
+        <p class="hint" style="margin:6px 0 0">${returnSourceNote(cfg)}</p>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:12px">
+      「새로 시작」을 누르면 ${cfg.startYear}년부터 한 해씩 진행합니다.
+      매년 결정을 내린 <strong>다음에</strong> 그해 시장 수익률이 공개됩니다.
+      포트폴리오·위기·시드·생활비는 바로 위 <strong>「⚙️ 게임 설정」</strong>에서 바꿉니다.
+    </p>`;
+
+  const jump = document.getElementById("btnGoOpening");
+  if (jump) jump.onclick = () => {
+    const panel = document.getElementById("openPanel");
+    panel.open = true;
+    panel.closest("details.grp") && (panel.closest("details.grp").open = true);
+    let n = panel.parentElement;
+    while (n) { if (n.tagName === "DETAILS") n.open = true; n = n.parentElement; }
+    panel.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+}
+
+function renderGame() {
+  const box = document.getElementById("gameBody");
+  const cfg = state.cfg;
+  if (!game) return renderStart(box);
+  if (game.over) return renderEnding(box);
+
+  const y = game.year, age = y - cfg.birthYear;
+  const sim = gameSim();
+  const prev = sim.years.find(r => r.year === y - 1);
+  const bal = prev ? prev.acc : null;
+  const startAssets = prev ? prev.total : ACC.reduce((s, a) => s + accBuckets(a).reduce((t, k) => t + clamp0((cfg.opening[a.id] || {})[k]), 0), 0);
+  const c = cashOf(cfg, y, game.loan);
+  // 퇴직금은 IRP(퇴직금 수령)로 직행한다. 현금으로 받아 배분하는 돈이 아니다.
+  row(y).irpSev.in = Math.round(c.sev);
+  const loanPay = c.loan ? c.loan.paid : 0;
+  const spare = c.salary + c.lump - c.living - c.spend - loanPay;
+  const total = cfg.endYear - cfg.startYear + 1;
+  const turn = y - cfg.startYear + 1;
+  // 여력 부호가 방향을 정하지만, 플레이어가 뒤집을 수 있다 (여윳돈이 남는 해에도
+  // ISA 만기 자금을 연금으로 옮기려고 인출을 걸고 싶을 수 있다).
+  const isIn = game.flip != null && game.flip.year === y ? game.flip.isIn : spare >= 0;
+
+  const evtRows = c.list.length
+    ? c.list.map(e => {
+        const k = EVENT_KINDS[e.kind] || EVENT_KINDS.expense;
+        const tags = [e.real ? "물가연동" : "", e.shift ? `예정보다 ${e.shift > 0 ? e.shift + "년 늦게" : -e.shift + "년 일찍"}` : ""].filter(Boolean);
+        return `<div class="evt"><span class="nm">${k.sign < 0 ? "🔻" : "🔺"} ${e.name || k.name}` +
+          `${tags.length ? ` <span style="font-size:10.5px;color:var(--muted)">${tags.join(" · ")}</span>` : ""}</span>
+          <span class="${k.sign < 0 ? "neg" : "pos"}">${k.sign < 0 ? "−" : "+"}${fmt(clamp0(e.amt))}</span></div>`;
+      }).join("")
+    : `<p class="hint" style="margin:0">올해는 예정된 일정이 없습니다.</p>`;
+
+  box.innerHTML = `
+    ${game.pending ? rollCard(game.pending) : ""}
+    <div class="turnhead">
+      <span class="yr">${y}년</span><span class="age">만 ${age}세</span>
+      <span class="prog">${turn} / ${total}턴</span>
+    </div>
+    <div class="bar"><i style="width:${(turn / total * 100).toFixed(1)}%"></i></div>
+
+    <div class="gcols">
+      <div class="gcard">
+        <h4>올해 현금</h4>
+        <div class="gline"><span>소득</span><span class="pos">+${fmt(c.salary)}</span></div>
+        ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
+        <div class="gline"><span>생활비 <span style="font-size:10.5px;color:var(--muted)">${c.livingName || (y > cfg.startYear ? `물가연동 · ${cfg.startYear}년 ${fmt(cfg.gameSpend)} 기준` : "물가연동")}</span></span><span class="neg">−${fmt(c.living)}</span></div>
+        ${c.spend > 0 ? `<div class="gline"><span>예정 지출</span><span class="neg">−${fmt(c.spend)}</span></div>` : ""}
+        ${loanPay > 0 ? `<div class="gline"><span>🏠 주담대 상환 <span style="font-size:10.5px;color:var(--muted)">금리 ${c.loan.rate.toFixed(2)}%</span></span><span class="neg">−${fmt(loanPay)}</span></div>` : ""}
+        ${c.sev > 0 ? `<div class="gline"><span style="color:var(--muted)">퇴직금 → IRP (자동)</span><span style="color:var(--muted)">${fmt(c.sev)}</span></div>` : ""}
+        <div class="gline tot"><span>${spare >= 0 ? "투자 여력" : "부족"}</span>
+          <span class="${spare >= 0 ? "pos" : "neg"}">${spare >= 0 ? "" : "−"}${fmt(Math.abs(spare))}</span></div>
+      </div>
+
+      <div class="gcard">
+        <h4>올해 일정</h4>
+        ${evtRows}
+      </div>
+
+      ${loanPay > 0 ? `<div class="gcard">
+        <h4>🏠 주택담보대출</h4>
+        <div class="gline"><span>올해 상환</span><span class="neg">−${fmt(loanPay)}</span></div>
+        <div class="gline"><span style="color:var(--muted)">└ 이자</span><span style="color:var(--muted)">${fmt(c.loan.interest)}</span></div>
+        <div class="gline"><span style="color:var(--muted)">└ 원금</span><span style="color:var(--muted)">${fmt(c.loan.principal)}</span></div>
+        <div class="gline"><span>적용 금리</span><span>${c.loan.rate.toFixed(2)}%</span></div>
+        <div class="gline tot"><span>남은 잔액</span><span>${fmt(c.loan.balance)}</span></div>
+      </div>` : ""}
+
+      <div class="gcard">
+        <h4>자산 ${fmtBig(startAssets)}</h4>
+        ${ACC.map(a => {
+          const v = bal ? bal[a.id].bal : accBuckets(a).reduce((t, k) => t + clamp0((cfg.opening[a.id] || {})[k]), 0);
+          return v < .5 ? "" : `<div class="gline"><span><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${css(a.color)};margin-right:6px"></span>${a.abbr}</span><span>${fmt(v)}</span></div>`;
+        }).join("") || `<p class="hint" style="margin:0">아직 없습니다.</p>`}
+      </div>
+    </div>
+
+    <div class="gcard" style="margin-top:14px">
+      <h4>${isIn ? "어디에 넣을까요" : "어디서 뺄까요"} <span style="color:var(--muted);font-weight:400">(${isIn ? "납입" : "인출"} · 만원)</span>
+        <button type="button" id="btnFlip" class="flip">${isIn ? "인출로 바꾸기" : "납입으로 바꾸기"}</button></h4>
+      <div class="allocgrid" id="allocGrid"></div>
+      ${!isIn && bal && bal.taxable.bal > 0.5 ? `<p class="hint" style="margin:9px 0 0">
+        일반계좌는 지금 <strong>${TAXTYPE_NAME[cfg.taxType] || cfg.taxType}</strong>로 계산합니다 —
+        ${TAXTYPE_NOTE[cfg.taxType] || ""}
+        매도하면 취득가와 평가익이 보유 비중대로 함께 빠지므로, 지금 평가익 비중은
+        <strong>${(bal.taxable.buckets.gain / bal.taxable.bal * 100).toFixed(0)}%</strong>입니다
+        (배당은 이와 별개로 해마다 15.4% 원천징수됩니다).
+        해외 ETF·미국주식을 담고 있다면 「일반계좌」 설정에서 과세 유형을 바꾸세요.</p>` : ""}
+      <div class="btnrow" style="margin-top:12px">
+        <button type="button" class="primary" id="btnTurnGo">다음 해로 →</button>
+        <button type="button" id="btnAuto">자동 배분</button>
+        <span class="hint" id="allocMsg" style="margin:0"></span>
+      </div>
+    </div>
+    ${(() => {
+      const st = returnStats(cfg, game.returns);
+      const P = PRESETS[cfg.preset] || PRESETS.off;
+      const pp = phaseParams(cfg, y);
+      return `<p class="hint">${P.info.split(" —")[0]} · 지금은 <strong>${PHASE_NAME[pp.phase]}</strong>
+        (평균 ${pp.mean.toFixed(1)}% / σ${pp.sd.toFixed(1)})
+        ${st ? ` · 지금까지 실현 <strong>CAGR ${st.cagr.toFixed(1)}%</strong> (산술 ${st.arith.toFixed(1)}%)` : ""}</p>
+        <p class="hint">${returnSourceNote(cfg)}</p>`;
+    })()}
+    <p class="hint">결정을 마치고 넘기면 <strong>그때</strong> 올해 시장 수익률이 공개됩니다. 미리 알고 고를 수는 없습니다.</p>
+  `;
+
+  // 배분 입력
+  const grid = document.getElementById("allocGrid");
+  document.getElementById("btnFlip").onclick = () => {
+    AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
+    game.flip = { year: y, isIn: !isIn };
+    saveGame(); render(false, true);
+  };
+  grid.innerHTML = ACC.map(a => {
+    const v = bal ? bal[a.id].bal : 0;
+    return `<label>${a.name}</label>
+      <input type="number" step="50" data-g="${a.id}" value="${clamp0(row(y)[a.id][isIn ? "in" : "out"]) || ""}">
+      <span class="bal">${isIn ? "" : "잔액 " + fmt(v)}</span>`;
+  }).join("");
+  grid.querySelectorAll("[data-g]").forEach(n => n.addEventListener("input", () => {
+    row(y)[n.dataset.g][isIn ? "in" : "out"] = clamp0(num(n.value));
+    updateAllocMsg(spare, isIn, y);
+  }));
+  updateAllocMsg(spare, isIn, y);
+
+  document.getElementById("btnAuto").onclick = () => {
+    AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
+    if (isIn) allocByPriority(y, Math.max(0, spare));
+    else {
+      // 부족분은 세금이 가장 적게 나오도록 뽑는다 (플래너의 전략을 그대로 씀).
+      // greedyDraws 의 목표는 세후 금액이라 세금만큼 더 뽑아 준다.
+      const st = rebuildStateAt(gameSim(), y);
+      if (st) {
+        const d = greedyDraws(st.st, st.ctx, Math.max(0, -spare), cfg.wdStrategy);
+        AID.forEach(id => { row(y)[id].out = Math.round(d[id]); });
+      }
+    }
+    renderGame();
+  };
+  document.getElementById("btnTurnGo").onclick = turnAdvance;
+}
+
+function updateAllocMsg(spare, isIn, y) {
+  const put = ACC.reduce((s, a) => s + clamp0(row(y)[a.id][isIn ? "in" : "out"]), 0);
+  const el = document.getElementById("allocMsg");
+  if (!el) return;
+  if (isIn) {
+    const gap = Math.max(0, spare) - put;
+    el.innerHTML = gap > 0.5 ? `투자 여력 중 <strong>${fmt(gap)}만원</strong>이 남습니다 (그냥 현금으로 사라집니다)`
+      : gap < -0.5 ? `<span style="color:var(--critical)">여력보다 ${fmt(-gap)}만원 많습니다</span>` : "여력을 모두 배분했습니다";
+    return;
+  }
+  // 인출은 세전으로 적으므로 세금을 떼고 나서야 실제로 손에 쥐는 돈이 나온다.
+  // 세전 기준으로 맞춰 놓으면 세금만큼 모자란 채로 넘어가 버린다.
+  const st = rebuildStateAt(gameSim(), y);
+  let tax = 0, net = put;
+  if (st && put > 0) {
+    const draws = Object.fromEntries(AID.map(id => [id, clamp0(row(y)[id].out)]));
+    const res = applyWithdrawals({ bal: cloneBal(st.st.bal), isaUsed: st.st.isaUsed }, draws, st.ctx);
+    tax = res.tax - res.npsTax;          // 국민연금은 인출과 무관한 별도 소득
+    net = res.gross - tax;
+  }
+  const need = Math.max(0, -spare);
+  const gap = need - net;
+  const taxNote = put > 0
+    ? ` <span style="color:var(--muted)">세전 ${fmt(put)} − 세금 ${fmt(tax)} = <strong>세후 ${fmt(net)}</strong></span>` : "";
+  el.innerHTML = (gap > 0.5
+    ? `<span style="color:var(--critical)">세후 기준 ${fmt(gap)}만원 더 빼야 합니다</span>`
+    : "부족분을 채웠습니다") + taxNote;
+}
+
+/** 특정 연도 시작 시점의 잔액·문맥을 시뮬레이션에서 되살린다 (자동 인출 배분용) */
+function rebuildStateAt(sim, y) {
+  const cfg = state.cfg, prev = sim.years.find(r => r.year === y - 1);
+  if (!prev) return null;
+  const st = { bal: Object.fromEntries(AID.map(id => [id, { ...prev.acc[id].buckets }])), isaUsed: 0 };
+  const age = y - cfg.birthYear;
+  const eligible = {}, pLimit = {}, pYear = {};
+  for (const id of PENSION) {
+    eligible[id] = age >= 55;
+    pYear[id] = Math.max(1, age - 54);
+    pLimit[id] = pYear[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - Math.min(pYear[id], 10)) * 1.2;
+  }
+  return { st, ctx: { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft: 250 } };
+}
+
+/** 실현 수익률 요약. 산술평균만 보면 변동성 침식이 안 보이므로 CAGR을 나란히 둔다. */
+function returnStats(cfg, returns) {
+  const ys = Object.keys(returns).map(Number).sort((a, b) => a - b);
+  if (!ys.length) return null;
+  const rs = ys.map(y => returns[y]);
+  const arith = rs.reduce((a, b) => a + b, 0) / rs.length;
+  const growth = rs.reduce((a, r) => a * (1 + r / 100), 1);
+  const cagr = (Math.pow(growth, 1 / rs.length) - 1) * 100;
+  const byPhase = {};
+  for (const ph of ["accum", "risk", "late"]) {
+    const v = ys.filter(y => phaseOf(cfg, y) === ph).map(y => returns[y]);
+    if (v.length) byPhase[ph] = { n: v.length, avg: v.reduce((a, b) => a + b, 0) / v.length };
+  }
+  return { n: rs.length, arith, cagr, drag: arith - cagr,
+           worst: Math.min(...rs), best: Math.max(...rs), down: rs.filter(r => r < 0).length, byPhase };
+}
+const PHASE_NAME = { accum: "적립기", risk: "위험구간", late: "후기" };
+
+/** 지금 수익률이 어디서 나오는지 — 세 군데가 겹쳐 보여 헷갈리기 쉬운 지점 */
+function returnSourceNote(cfg) {
+  const P = PRESETS[cfg.preset] || PRESETS.off;
+  const mode = { geo: "장기 목표 CAGR", exact: "장기 수익률 고정", arith: "산술평균" }[cfg.retMode] || "";
+  if (cfg.preset && cfg.preset !== "off") {
+    return `<strong>${P.info.split(" —")[0].split(":")[0]}</strong> 하나가 <strong>모든 계좌</strong>에 적용됩니다`
+      + ` (수익률 해석: <strong>${mode}</strong>). 설정의 「계좌별 수익률」은 게임에서 쓰이지 않습니다(플래너 전용).`;
+  }
+  return `프리셋을 쓰지 않는 모드입니다. 「프리셋 off · 평균/변동성」으로 그해 시장을 뽑고, `
+    + `각 계좌는 <strong>계좌별 수익률과 평균의 차이만큼</strong> 더하거나 뺀 값을 받습니다.`;
+}
+
+function rollCard(p) {
+  const up = p.ret >= 0;
+  const label = p.crash
+    ? `${CRASHES[p.crash.key].name} ${p.crash.step + 1}/${p.crash.len}년차`
+    : (p.ret <= -20 ? "폭락" : p.ret <= -5 ? "하락" : p.ret < 5 ? "보합" : p.ret < 20 ? "상승" : "급등");
+  // 총자산 변화에는 그해 납입액이 섞여 "마이너스인데 자산 증가"처럼 보인다.
+  // 시장이 실제로 한 일은 운용손익뿐이므로 그것만 보여준다.
+  return `<div class="roll ${up ? "up" : "dn"}">
+    <div style="font-size:12px;color:var(--muted)">${p.year}년 시장 · ${label}</div>
+    <div class="big">${up ? "+" : ""}${p.ret.toFixed(1)}%</div>
+    <div class="sub">운용손익 <strong class="${p.pnl >= 0 ? "pos" : "neg"}">${p.pnl >= 0 ? "+" : "−"}${fmt(Math.abs(p.pnl))}</strong>만원
+      · 연말 자산 ${fmt(p.after)}만원</div>
+    ${p.crash ? `<div class="sub" style="margin-top:5px">${CRASHES[p.crash.key].info}</div>` : ""}
+  </div>`;
+}
+
+function turnAdvance() {
+  const cfg = state.cfg, y = game.year;
+  const rp = returnPath(cfg);
+  game.crash = rp.crash;
+  game.loan = loanSchedule(cfg, rp.crash);
+  game.returns[y] = rp.path[y];
+  const after = gameSim();
+  const rec = after.years.find(r => r.year === y);
+  const pnl = rec ? ACC.reduce((t, a) => t + (rec.acc[a.id].growth || 0), 0) : 0;
+  const cr = game.crash && game.crash[y];
+  game.pending = { year: y, ret: game.returns[y], pnl: Math.round(pnl), after: Math.round(rec ? rec.total : 0), crash: cr };
+
+  const c = cashOf(cfg, y, game.loan);
+  game.log.push({ year: y, ret: game.returns[y], total: rec ? rec.total : 0, spend: c.living + c.spend + (c.loan ? c.loan.paid : 0), salary: c.salary });
+
+  const bankrupt = rec && rec.total < 1 && y > cfg.startYear;
+  const deathYear = cfg.birthYear + clamp0(cfg.gameDeathAge);
+  if (bankrupt) game.over = { why: "bankrupt", year: y };
+  else if (y >= Math.min(cfg.endYear, deathYear)) game.over = { why: "end", year: y };
+  else game.year = y + 1;
+
+  saveGame(); render(true, true);
+}
+
+function renderEnding(box) {
+  const cfg = state.cfg, sim = gameSim();
+  const yrs = sim.years.filter(r => r.year <= game.over.year);
+  const retireYear = cfg.retireYear;
+  const post = yrs.filter(r => r.year >= retireYear);
+  const met = post.filter(r => {
+    const c = cashOf(cfg, r.year, game.loan);
+    return r.net + c.salary >= (c.living + c.spend + (c.loan ? c.loan.paid : 0)) * 0.98;
+  }).length;
+  const pct = post.length ? met / post.length * 100 : 0;
+  const last = yrs[yrs.length - 1];
+  const grade = game.over.why === "bankrupt" ? "💸" : pct >= 95 ? "🏆" : pct >= 80 ? "🥈" : pct >= 60 ? "🥉" : "😬";
+  const title = game.over.why === "bankrupt"
+    ? `${game.over.year}년, 만 ${game.over.year - cfg.birthYear}세에 자산이 바닥났습니다`
+    : `${game.over.year}년, 만 ${game.over.year - cfg.birthYear}세까지 완주했습니다`;
+
+  box.innerHTML = `<div class="ending">
+      <div class="grade">${grade}</div>
+      <div class="big">${title}</div>
+      <p class="hint" style="margin:6px 0 0">은퇴 후 ${post.length}년 중 <strong>${met}년</strong>(${pct.toFixed(0)}%)을 목표 생활비대로 살았습니다.</p>
+    </div>
+    <div class="gcols">
+      <div class="gcard"><h4>결과</h4>
+        <div class="gline"><span>최종 자산</span><span>${fmt(last ? last.total : 0)}</span></div>
+        <div class="gline"><span>총 납입</span><span>${fmt(sim.sum.cumIn)}</span></div>
+        <div class="gline"><span>세액공제 환급</span><span class="pos">+${fmt(sim.sum.cumCredit)}</span></div>
+        <div class="gline"><span>총 납부 세금</span><span class="neg">−${fmt(sim.sum.cumTax)}</span></div>
+        <div class="gline tot"><span>은퇴 후 세후 수령</span><span>${fmt(sim.sum.cumNet)}</span></div>
+      </div>
+      <div class="gcard"><h4>실현 수익률</h4>
+        ${(() => {
+          const st = returnStats(cfg, game.returns);
+          if (!st) return "";
+          const tg = cfg.retMode === "arith" ? null : targetCagr(cfg);
+          return `${tg != null ? `<div class="gline"><span>목표 CAGR</span><span>${tg.toFixed(1)}%</span></div>` : ""}
+            <div class="gline"><span>산술평균</span><span>${st.arith.toFixed(1)}%</span></div>
+            <div class="gline"><span><strong>실현 CAGR</strong></span><span><strong>${st.cagr.toFixed(1)}%</strong></span></div>
+            <div class="gline"><span style="color:var(--muted)">변동성 침식</span><span style="color:var(--muted)">−${st.drag.toFixed(1)}%p</span></div>
+            <div class="gline tot"><span>최악의 해</span><span class="neg">${st.worst.toFixed(1)}%</span></div>
+            <div class="gline"><span>최고의 해</span><span class="pos">+${st.best.toFixed(1)}%</span></div>
+            <div class="gline"><span>마이너스 난 해</span><span>${st.down} / ${st.n}년</span></div>
+            ${Object.entries(st.byPhase).map(([k, v]) => `<div class="gline"><span style="color:var(--muted)">${PHASE_NAME[k]} 평균 (${v.n}년)</span><span style="color:var(--muted)">${v.avg.toFixed(1)}%</span></div>`).join("")}`;
+        })()}
+      </div>
+      ${(() => {
+        const ln = game.loan || {};
+        // 중도에 끝난 게임이면 살아본 해까지만 집계한다
+        const ys = Object.keys(ln).filter(y => +y <= game.over.year);
+        if (!ys.length) return "";
+        const tot = ys.reduce((s, y) => s + ln[y].paid, 0);
+        const int = ys.reduce((s, y) => s + ln[y].interest, 0);
+        const rates = ys.map(y => ln[y].rate);
+        const last = ys[ys.length - 1];
+        return `<div class="gcard"><h4>🏠 주택담보대출</h4>
+          <div class="gline"><span>총 상환</span><span>${fmt(tot)}</span></div>
+          <div class="gline"><span>└ 이자</span><span class="neg">${fmt(int)}</span></div>
+          <div class="gline"><span>금리 범위</span><span>${Math.min(...rates).toFixed(2)} ~ ${Math.max(...rates).toFixed(2)}%</span></div>
+          <div class="gline tot"><span>완납</span><span>${ln[last].balance < 1 ? last + "년" : `미완 (${fmt(ln[last].balance)} 남음)`}</span></div>
+        </div>`;
+      })()}
+      <div class="gcard"><h4>겪은 위기</h4>
+        ${(() => {
+          const cr = game.crash || {};
+          const seen = {};
+          Object.entries(cr).forEach(([y, c]) => { if (!seen[c.key]) seen[c.key] = +y; });
+          const ks = Object.keys(seen);
+          if (!ks.length) return `<p class="hint" style="margin:0">이번 판에는 큰 위기가 없었습니다.</p>`;
+          return ks.map(k => `<div class="evt"><span class="nm">${CRASHES[k].name}</span><span>${seen[k]}년 (만 ${seen[k] - cfg.birthYear}세)</span></div>`).join("")
+            + `<p class="hint" style="margin:8px 0 0">${ks.map(k => CRASHES[k].info).join(" · ")}</p>`;
+        })()}
+      </div>
+    </div>
+    <p class="hint">같은 시드(${cfg.gameSeed})로 다시 시작하면 <strong>똑같은 시장</strong>을 만납니다. 전략만 바꿔서 비교해 보세요. 아래 표에 이번 플레이가 그대로 기록돼 있습니다.</p>`;
+}
+
+/* ========================================================================
    설정 UI 바인딩
    ======================================================================== */
+function buildPresetUI() {
+  const sel = document.getElementById("cfg_preset");
+  if (sel && !sel.options.length) {
+    sel.innerHTML = Object.keys(PRESETS).map(k => `<option value="${k}">${PRESETS[k].info.split(" —")[0].split(":")[0]}</option>`).join("");
+  }
+  const cp = document.getElementById("cfg_crashPick");
+  if (cp && !cp.options.length) {
+    cp.innerHTML = `<option value="">🎲 매번 랜덤</option>`
+      + Object.entries(CRASHES).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("");
+  }
+}
+const RET_MODE_INFO = {
+  geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다 — 가장 현실에 가깝습니다.",
+  exact: "매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 총수익이 고정되므로 <strong>순서위험만 따로</strong> 볼 수 있습니다. 위기도 총수익이 아니라 '언제 맞느냐'만 바꿉니다. 포트폴리오 비교용.",
+  arith: "프리셋 숫자를 <strong>산술평균</strong>으로 씁니다. 복리로 굴리면 실현 CAGR은 그보다 낮아지며, 변동성이 클수록 차이가 큽니다(나스닥 2x는 5%p 이상).",
+};
+function syncRetMode() {
+  const n = document.getElementById("retModeInfo");
+  if (n) n.innerHTML = RET_MODE_INFO[state.cfg.retMode] || "";
+}
+const LOAN_FIELDS = ["on","balance","rate","endYear","endMonth","type","rateMode","rateVol","rateMin","rateMax"];
+const LOAN_STR = new Set(["type", "rateMode"]);
+function bindLoan() {
+  LOAN_FIELDS.forEach(k => {
+    const n = document.getElementById("loan_" + k);
+    if (!n) return;
+    n.addEventListener("input", () => {
+      state.cfg.loan[k] = LOAN_STR.has(k) ? n.value : num(n.value);
+      if (game) { const rp = returnPath(state.cfg); game.loan = loanSchedule(state.cfg, rp.crash); }
+      render(false);
+    });
+  });
+}
+function syncLoan() {
+  const L = state.cfg.loan || {};
+  LOAN_FIELDS.forEach(k => {
+    const n = document.getElementById("loan_" + k);
+    if (n && n !== document.activeElement) n.value = L[k];
+  });
+}
+
+function syncPresetInfo() {
+  const P = PRESETS[state.cfg.preset] || PRESETS.off;
+  const n = document.getElementById("presetInfo");
+  if (n) n.innerHTML = P.info + (P.custom ? "" : "");
+  const c = document.getElementById("customPhase");
+  if (c) c.hidden = !P.custom;
+}
+
 function buildAccCfg() {
   const wrap = document.getElementById("accCfg");
   wrap.innerHTML = ACC.map(a => `<tr>
@@ -1807,6 +2859,99 @@ function renderFillRules() {
   }));
 }
 
+/* ---- 생활비 구간 편집기 ---- */
+function renderSpendRules() {
+  const box = document.getElementById("spendRows");
+  if (!box) return;
+  const list = state.cfg.spendRules || [];
+  box.innerHTML = list.length ? list.map((r, i) => `
+    <div class="xrow">
+      <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-s="name" data-i="${i}" value="${(r.name || "").replace(/"/g, "&quot;")}" placeholder="예: 자녀 독립 후"></label>
+      <label class="f"><span class="t">시작</span><input type="number" data-s="from" data-i="${i}" value="${r.from}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-s="to" data-i="${i}" value="${r.to}"></label>
+      <label class="f"><span class="t">단위</span>
+        <select data-s="unit" data-i="${i}">
+          <option value="month"${r.unit === "month" ? " selected" : ""}>월</option>
+          <option value="year"${r.unit === "year" ? " selected" : ""}>연</option>
+        </select></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="10" data-s="amt" data-i="${i}" value="${r.amt}"></label>
+      <label class="f"><span class="t" title="켜면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불립니다">금액 기준</span>
+        <select data-s="real" data-i="${i}"><option value="0"${r.real ? "" : " selected"}>명목 고정</option><option value="1"${r.real ? " selected" : ""}>물가 연동</option></select></label>
+      <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-sdel="${i}">삭제</button></label>
+    </div>`).join("")
+    : `<p class="hint" style="margin:0">구간이 없습니다 — 목표 생활비가 물가만 타고 끝까지 갑니다.</p>`;
+
+  box.querySelectorAll("[data-s]").forEach(n => n.addEventListener("input", () => {
+    const r = state.cfg.spendRules[+n.dataset.i], k = n.dataset.s;
+    r[k] = (k === "name" || k === "unit") ? n.value : (k === "from" || k === "to") ? num(n.value) : clamp0(num(n.value));
+    save(); renderSpendPreview(); refreshGame();
+  }));
+  box.querySelectorAll("[data-sdel]").forEach(n => n.addEventListener("click", () => {
+    state.cfg.spendRules.splice(+n.dataset.sdel, 1);
+    renderSpendRules(); renderSpendPreview(); save(); refreshGame();
+  }));
+  renderSpendPreview();
+}
+
+/** 생활비가 실제로 어떻게 움직이는지 5년 간격으로 보여준다 — 구간을 넣고도 결과를 못 보면 소용없다 */
+function renderSpendPreview() {
+  const el = document.getElementById("spendPreview");
+  if (!el) return;
+  const cfg = state.cfg;
+  const cells = [];
+  for (let y = cfg.startYear; y <= cfg.endYear; y += 5) {
+    const lv = livingOf(cfg, y);
+    cells.push(`<div class="gline"><span>${y} <span style="color:var(--muted)">만 ${y - cfg.birthYear}세${lv.name ? " · " + lv.name : ""}</span></span><span>${fmt(lv.amt)}</span></div>`);
+  }
+  el.innerHTML = `<div class="gcard" style="margin-top:10px"><h4>생활비 미리보기 (5년 간격 · 명목)</h4>${cells.join("")}</div>`;
+}
+
+/** 은퇴 후 생활비는 대개 U자를 그린다 — 활동기에 많이 쓰다 줄고, 후기 고령에 의료·간병으로 다시 오른다. */
+function spendCurve() {
+  const cfg = state.cfg, base = clamp0(cfg.gameSpend);
+  const age = a => cfg.birthYear + a;
+  const kidsOut = Math.max(cfg.startYear, cfg.retireYear + 5);   // 대략 막내 독립 시점
+  const rows = [
+    { name: "자녀 양육기", from: cfg.startYear, to: kidsOut - 1, amt: Math.round(base), real: 1 },
+    { name: "자녀 독립 후 · 활동기", from: kidsOut, to: age(74), amt: Math.round(base * 0.8), real: 1 },
+    { name: "안정기 (75~84세)", from: age(75), to: age(84), amt: Math.round(base * 0.7), real: 1 },
+    { name: "후기 · 의료·간병 (85세~)", from: age(85), to: cfg.endYear, amt: Math.round(base * 0.85), real: 1 },
+  ];
+  return rows.filter(r => r.to >= r.from && r.from <= cfg.endYear)
+    .map(r => ({ ...r, from: Math.max(r.from, cfg.startYear), to: Math.min(r.to, cfg.endYear), unit: "year" }));
+}
+
+/* ---- 인생 일정 편집기 ---- */
+function renderEvents() {
+  const box = document.getElementById("evtRows");
+  const list = state.cfg.events;
+  if (!list.length) { box.innerHTML = `<p class="hint" style="margin:0">등록된 일정이 없습니다.</p>`; return; }
+  box.innerHTML = list.map((e, i) => `
+    <div class="xrow">
+      <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-e="name" data-i="${i}" value="${(e.name || "").replace(/"/g, "&quot;")}"></label>
+      <label class="f"><span class="t">종류</span>
+        <select data-e="kind" data-i="${i}">
+          ${Object.entries(EVENT_KINDS).map(([k, v]) => `<option value="${k}"${e.kind === k ? " selected" : ""}>${v.name}</option>`).join("")}
+        </select></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="50" data-e="amt" data-i="${i}" value="${e.amt}"></label>
+      <label class="f"><span class="t">시작</span><input type="number" data-e="year" data-i="${i}" value="${e.year}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-e="until" data-i="${i}" value="${e.until || e.year}"></label>
+      <label class="f"><span class="t">주기</span><input type="number" min="1" data-e="every" data-i="${i}" value="${e.every || 1}"></label>
+      <label class="f"><span class="t" title="켜면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불립니다">금액 기준</span>
+        <select data-e="real" data-i="${i}"><option value="0"${e.real ? "" : " selected"}>명목 고정</option><option value="1"${e.real ? " selected" : ""}>물가 연동</option></select></label>
+      <label class="f"><span class="t" title="시드에 따라 실제 연도가 ±이 범위에서 앞뒤로 움직입니다">±공차(년)</span><input type="number" min="0" data-e="jitter" data-i="${i}" value="${e.jitter || 0}"></label>
+      <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-edel="${i}">삭제</button></label>
+    </div>`).join("");
+  box.querySelectorAll("[data-e]").forEach(n => n.addEventListener("input", () => {
+    const e = state.cfg.events[+n.dataset.i], k = n.dataset.e;
+    e[k] = (k === "name" || k === "kind") ? n.value : clamp0(num(n.value));
+    save(); refreshGame();
+  }));
+  box.querySelectorAll("[data-edel]").forEach(n => n.addEventListener("click", () => {
+    state.cfg.events.splice(+n.dataset.edel, 1); renderEvents(); save(); refreshGame();
+  }));
+}
+
 /* ---- 인출 규칙 편집기 ---- */
 function renderWdRules() {
   const box = document.getElementById("wdRows");
@@ -1882,9 +3027,12 @@ function renderXfers() {
 
 const CFG_FIELDS = ["birthYear", "startYear", "retireYear", "endYear", "inflation", "salaryTier", "isaType",
   "timing", "realView", "sevRate", "compRate", "npsAmount", "npsAge", "npsRate",
-  "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap", "pensionTotalCap"];
+  "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap", "pensionTotalCap",
+  "gameSpend", "gameMean", "gameVol", "gameSeed", "gameDeathAge",
+  "preset", "riskFrom", "lateFrom", "crashCount", "crashPick", "retMode",
+  "cAccum", "cAccumSd", "cRisk", "cRiskSd", "cLate", "cLateSd"];
 /** 값을 문자열 그대로 보관하는 필드 — 나머지는 숫자로 변환한다 */
-const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStrategy"]);
+const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStrategy", "preset", "crashPick", "retMode"]);
 
 function syncCfgInputs() {
   CFG_FIELDS.forEach(k => {
@@ -1898,6 +3046,9 @@ function syncCfgInputs() {
   });
   const sb = document.getElementById("cfg_showBuckets");
   if (sb) sb.checked = !!state.cfg.showBuckets;
+  syncPresetInfo();
+  syncRetMode();
+  syncLoan();
   syncOpening();
 }
 
@@ -1907,6 +3058,8 @@ function bindCfg() {
     if (!n) return;
     n.addEventListener("input", () => {
       state.cfg[k] = STR_FIELDS.has(k) ? n.value : num(n.value);
+      if (k === "preset") syncPresetInfo();
+      if (k === "retMode") syncRetMode();
       if (["startYear", "endYear", "retireYear"].includes(k)) {
         const c = state.cfg;
         if (c.endYear < c.startYear || c.endYear - c.startYear > 90) return; // 입력 중간값 무시
@@ -1993,7 +3146,8 @@ function doPlan() {
     for (const r of rules) for (let y = r.from; y <= r.to; y++) touched.add(y);
     for (const y of touched) AID.forEach(id => { row(y)[id].out = 0; });
 
-    const sim = simulate({ plan: true });
+    // 게임 중이면 그 판의 실제 수익률 위에서 계획을 짜야 잔액이 맞는다
+    const sim = simulate({ plan: true, ...(game ? { returns: game.returns } : {}) });
     for (const y in sim.planDraws) AID.forEach(id => { row(+y)[id].out = sim.planDraws[y][id]; });
 
     btn.textContent = "규칙대로 인출 채우기"; btn.disabled = false;
@@ -2024,9 +3178,19 @@ function migrateOpening(cfg, raw) {
   cfg.opening = { ...d.opening, ...(cfg.opening || {}) };
   cfg.openYears = { ...d.openYears, ...(cfg.openYears || {}) };
   cfg.priority = { ...d.priority, ...(cfg.priority || {}) };
+  // 납입 순서·인출 전략의 기본값이 바뀌었다. 손대지 않은 저장본만 새 기본값으로 옮기고,
+  // 직접 고친 순서는 그대로 둔다 (사용자가 정한 것을 덮어쓰면 안 된다).
+  const OLDPRIO = { psDed: 1, irpInv: 2, isa: 3, psFree: 4, taxable: 5, irpSev: 0 };
+  if (AID.every(id => clamp0(cfg.priority[id]) === OLDPRIO[id])) {
+    for (const a of ACC) cfg.priority[a.id] = a.prio;
+  }
+  if (raw.wdStrategy === "pensionFirst") cfg.wdStrategy = "ratio";
   for (const a of ACC) cfg.opening[a.id] = { free: 0, ded: 0, sev: 0, gain: 0, ...(cfg.opening[a.id] || {}) };
   // 예전 저장본의 계좌별 고정 금액을 계좌별 규칙으로 옮긴다
   if (!Array.isArray(cfg.wdRules)) cfg.wdRules = [];
+  if (!Array.isArray(cfg.events)) cfg.events = [];
+  if (!Array.isArray(cfg.spendRules)) cfg.spendRules = [];
+  cfg.loan = { ...d.loan, ...(cfg.loan || {}) };
   // 예전 저장본의 단발성 목표 생활비 설정을 인출 규칙으로 옮긴다
   if (!Array.isArray(raw.wdRules) && raw.planTarget && raw.planTarget.target > 0) {
     const pt = raw.planTarget;
@@ -2097,15 +3261,35 @@ let lastSim = null;
 function render(rebuild, syncInputs) {
   if (rebuild) { buildTable(); syncCfgInputs(); }
   syncOpening(); // 기초 잔액 합계는 매 입력마다 갱신되어야 한다
-  const sim = simulate();
+  // 게임을 돌리는 중이면 아래 표도 그 판에서 실제로 나온 수익률로 계산한다.
+  // 게임의 납입·인출만 표에 반영되고 잔액은 계좌별 고정 수익률로 굴러가면 두 화면이 어긋난다.
+  const sim = simulate(game ? { returns: game.returns } : {});
   lastSim = sim;
+  renderGameLink();
+  renderSpendPreview();   // 목표 생활비·물가·연도를 고치면 곡선도 같이 움직여야 한다
   renderKpis(sim);
   renderWarnings(sim);
   paintTable(sim, !!syncInputs);
   renderMatrix(sim);
   renderChart1(sim);
   renderChart2(sim);
+  refreshGame();
   save();
+}
+
+/** 게임이 진행 중이면 아래 표가 무엇을 보고 있는지 알려 준다.
+    게임의 납입·인출은 이 표에 그대로 쓰이지만, 잔액은 수익률이 같아야 맞아떨어진다. */
+function renderGameLink() {
+  const el = document.getElementById("gameLink");
+  if (!el) return;
+  const ys = game ? Object.keys(game.returns || {}).map(Number) : [];
+  if (!ys.length) { el.innerHTML = ""; return; }
+  const last = Math.max(...ys);
+  el.innerHTML = `<p class="hint" style="margin:0 0 8px">
+    🎮 <strong>인생 시뮬과 연결되어 있습니다.</strong>
+    ${state.cfg.startYear}~${last}년은 그 판에서 실제로 나온 시장 수익률로,
+    ${last + 1}년부터는 계좌 설정의 고정 수익률로 계산한 잔액입니다.
+    표를 직접 고치면 게임 쪽 배분도 같이 바뀝니다.</p>`;
 }
 
 /* ========================================================================
@@ -2121,6 +3305,8 @@ function seedExample() {
   row(c.retireYear).irpSev.in = 15000;
 }
 
+buildPresetUI();
+bindLoan();
 buildAccCfg();
 buildOpening();
 bindCfg();
@@ -2129,7 +3315,69 @@ syncCfgInputs();
 renderFillRules();
 renderWdRules();
 renderXfers();
+renderEvents();
+renderSpendRules();
+loadGame();
 render(true, true);
+
+function setMode(g) {
+  document.getElementById("gamePanel").hidden = !g;
+  document.getElementById("tabGame").classList.toggle("on", g);
+  document.getElementById("tabPlan").classList.toggle("on", !g);
+  if (g) renderGame();
+}
+document.getElementById("tabGame").onclick = () => setMode(true);
+document.getElementById("tabPlan").onclick = () => setMode(false);
+document.getElementById("btnGameNew").onclick = () => {
+  if (game && !game.over && !confirm("진행 중인 게임을 버리고 새로 시작할까요?")) return;
+  const c = state.cfg;
+  const total = ACC.reduce((s, a) => s + accBuckets(a).reduce((t, k) => t + clamp0((c.opening[a.id] || {})[k]), 0), 0);
+  if (total <= 0 && !confirm("기초 잔액이 0입니다. 지금 들고 있는 자산 없이 0원부터 시작할까요?\n\n(취소하면 기초 잔액 입력 칸으로 이동합니다)")) {
+    setMode(true); renderStart(document.getElementById("gameBody"));
+    document.getElementById("btnGoOpening").click();
+    return;
+  }
+  gameStart(); render(true, true);
+};
+document.getElementById("btnGameUndo").onclick = () => {
+  if (!game || !game.log.length) return;
+  const last = game.log.pop();
+  delete game.returns[last.year];
+  AID.forEach(id => { row(last.year)[id].in = 0; row(last.year)[id].out = 0; });
+  game.year = last.year; game.over = null; game.pending = null;
+  saveGame(); render(true, true);
+};
+document.getElementById("btnAddEvt").onclick = () => {
+  const c = state.cfg;
+  c.events.push({ name: "새 일정", kind: "expense", amt: 1000, year: c.startYear, until: c.startYear, every: 1 });
+  renderEvents(); save(); refreshGame();
+};
+document.getElementById("btnEvtSample").onclick = () => {
+  const c = state.cfg;
+  if (c.events.length && !confirm("기존 일정을 지우고 기본 계획을 넣을까요?")) return;
+  c.events = [
+    // ── 확정 일정 ────────────────────────────────────────────
+    { name: "근로소득 (세후)",          kind: "salary",    amt: 7200,  year: 2026, until: 2040, every: 1,  real: 1, jitter: 0 },
+    { name: "첫째 학자금",              kind: "expense",   amt: 827,   year: 2034, until: 2037, every: 1,  real: 0, jitter: 0 },
+    { name: "🏛️ 상속재산",              kind: "income",    amt: 60000, year: 2035, until: 2035, every: 1,  real: 0, jitter: 0 },
+    { name: "💎 비과세연금 (명목 고정)",  kind: "salary",    amt: 1000,  year: 2035, until: 2075, every: 1,  real: 0, jitter: 0 },
+    { name: "둘째 학자금",              kind: "expense",   amt: 827,   year: 2036, until: 2039, every: 1,  real: 0, jitter: 0 },
+    { name: "💼 퇴직금 → IRP",          kind: "severance", amt: 35000, year: 2040, until: 2040, every: 1,  real: 0, jitter: 0 },
+    { name: "KB 종신보험 수령",          kind: "salary",    amt: 240,   year: 2041, until: 2053, every: 1,  real: 0, jitter: 0 },
+    { name: "본인 국민연금 (월 163만)",   kind: "salary",    amt: 1956,  year: 2045, until: 2075, every: 1,  real: 1, jitter: 0 },
+    { name: "배우자 국민연금 (월 31만)",  kind: "salary",    amt: 372,   year: 2050, until: 2075, every: 1,  real: 1, jitter: 0 },
+    // ── 시점이 유동적인 일정 (±공차) ──────────────────────────
+    { name: "첫째 결혼자금",            kind: "expense",   amt: 20000, year: 2042, until: 2042, every: 1,  real: 1, jitter: 2 },
+    { name: "둘째 결혼자금",            kind: "expense",   amt: 20000, year: 2044, until: 2044, every: 1,  real: 1, jitter: 2 },
+    // ── 추천: 흔히 빠뜨리는 항목 (필요 없으면 삭제) ────────────
+    { name: "💡 건강보험료 (지역가입 전환)", kind: "expense", amt: 420,  year: 2041, until: 2075, every: 1,  real: 1, jitter: 0 },
+    { name: "💡 의료·간병비 (75세~)",     kind: "expense",   amt: 600,   year: 2055, until: 2075, every: 1,  real: 1, jitter: 0 },
+    { name: "💡 자동차 교체",            kind: "expense",   amt: 3000,  year: 2030, until: 2060, every: 10, real: 1, jitter: 1 },
+    { name: "💡 주택 수선",              kind: "expense",   amt: 2000,  year: 2038, until: 2068, every: 15, real: 1, jitter: 2 },
+  ];
+  document.getElementById("evtPanel").open = true;
+  renderEvents(); save(); refreshGame();
+};
 
 document.getElementById("btnAddXfer").onclick = () => {
   const c = state.cfg;
@@ -2181,6 +3429,22 @@ document.getElementById("btnRuleStep").onclick = () => {
     { from: mid, to: Math.max(mid, c.retireYear - 1), unit: "month", amt: 250, growth: 0, target: "priority" });
   renderFillRules(); save();
 };
+document.getElementById("btnAddSpend").onclick = () => {
+  const c = state.cfg, list = c.spendRules;
+  // 마지막 구간 다음부터 이어 붙인다 — 구간을 쌓는 게 이 목록의 쓰임새다
+  const from = list.length ? Math.min(c.endYear, Math.max(...list.map(r => r.to)) + 1) : c.retireYear;
+  list.push({ name: "", from, to: c.endYear, unit: "month",
+              amt: Math.round(clamp0(c.gameSpend) / 12), real: 1 });
+  renderSpendRules(); save(); refreshGame();
+  document.getElementById("spendResult").textContent = "";
+};
+document.getElementById("btnSpendCurve").onclick = () => {
+  const rows = spendCurve();
+  state.cfg.spendRules = rows;
+  renderSpendRules(); save(); refreshGame();
+  document.getElementById("spendResult").textContent =
+    `${rows.length}개 구간을 채웠습니다 (기존 구간은 대체됨). 금액은 직접 고치세요.`;
+};
 document.getElementById("btnPlan").onclick = doPlan;
 document.getElementById("btnAddWdPlan").onclick = () => {
   const c = state.cfg;
@@ -2211,7 +3475,7 @@ document.getElementById("btnImport").onclick = () => {
         if (!s.cfg) throw new Error("형식 오류");
         state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {} };
         migrateOpening(state.cfg, s.cfg); migrateTransfers(state.cfg);
-        builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); render(true, true);
+        builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); renderEvents(); render(true, true);
       } catch (e) { alert("불러오기 실패: " + e.message); }
     };
     rd.readAsText(f);
@@ -2222,7 +3486,7 @@ document.getElementById("btnReset").onclick = () => {
   if (!confirm("모든 입력을 초기화할까요?")) return;
   localStorage.removeItem(LS_KEY);
   state = defaultState(); seedExample();
-  builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); render(true, true);
+  builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); renderEvents(); render(true, true);
 };
 document.getElementById("btnTheme").onclick = () => {
   const cur = document.documentElement.getAttribute("data-theme");
