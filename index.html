@@ -320,6 +320,10 @@
   .brief .bbody { margin: 0 0 6px; font-size: 13px; line-height: 1.65; color: var(--text-secondary); }
   .brief .btag { margin: 0 0 6px; font-size: 12px; color: var(--critical); }
   .brief .bfoot { margin: 9px 0 0; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .quote { margin-top: 20px; padding: 14px 16px; border-radius: 10px; background: var(--surface-2, var(--surface-1));
+    border: 1px solid var(--border); }
+  .quote p { margin: 0; font-size: 13.5px; line-height: 1.7; color: var(--text-secondary); font-style: italic; }
+  .quote .by { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); font-style: normal; }
   .brief .pos { color: var(--good); }
   .brief .neg { color: var(--critical); }
   .allocgrid { display: grid; grid-template-columns: max-content 110px 1fr; gap: 7px 14px; align-items: center; font-size: 13px; }
@@ -1238,6 +1242,59 @@ function marketStory(cfg, year, ret, crash) {
     body: first ? c.info : fill(pick[1]),
     tag: c ? (first ? `${crash.len}년에 걸친 시나리오` : `${c.name} 여파 ${crash.step + 1}년차 / ${crash.len}년`) : "",
   };
+}
+
+/* 투자·노후에 관한 말들. 출처가 분명한 것만 이름을 붙이고,
+   널리 쓰이지만 누가 처음 했는지 불분명한 것은 이름 없이 원칙으로 적는다. */
+const QUOTES = [
+  ["가격은 당신이 지불하는 것이고, 가치는 당신이 얻는 것이다.", "워런 버핏"],
+  ["남들이 탐욕스러울 때 두려워하고, 남들이 두려워할 때 탐욕스러워져라.", "워런 버핏"],
+  ["규칙 1. 돈을 잃지 마라. 규칙 2. 규칙 1을 잊지 마라.", "워런 버핏"],
+  ["오늘 누군가 그늘에 앉아 쉴 수 있는 건, 오래전에 누군가 나무를 심었기 때문이다.", "워런 버핏"],
+  ["위험은 자신이 무엇을 하는지 모르는 데서 온다.", "워런 버핏"],
+  ["평범한 기업을 훌륭한 가격에 사는 것보다, 훌륭한 기업을 적당한 가격에 사는 편이 훨씬 낫다.", "워런 버핏"],
+  ["우리가 가장 좋아하는 보유 기간은 영원히다.", "워런 버핏"],
+  ["복리의 첫 번째 규칙 — 불필요하게 중단하지 마라.", "찰리 멍거"],
+  ["큰돈은 사고파는 데서 나오지 않는다. 기다리는 데서 나온다.", "찰리 멍거"],
+  ["단순한 아이디어를 골라 그것을 진지하게 밀고 나가라.", "찰리 멍거"],
+  ["건초더미에서 바늘을 찾지 마라. 건초더미를 통째로 사라.", "존 보글"],
+  ["시간은 당신의 친구이고, 충동은 당신의 적이다.", "존 보글"],
+  ["투자자의 가장 큰 문제, 그리고 최악의 적은 아마 자기 자신일 것이다.", "벤저민 그레이엄"],
+  ["단기적으로 시장은 인기투표기지만, 장기적으로는 저울이다.", "벤저민 그레이엄"],
+  ["자기가 무엇을 갖고 있는지, 왜 갖고 있는지를 알아라.", "피터 린치"],
+  ["조정을 대비하다 잃은 돈이, 조정 자체로 잃은 돈보다 훨씬 많다.", "피터 린치"],
+  ["투자에서 가장 위험한 네 단어는 '이번엔 다르다'이다.", "존 템플턴"],
+  ["예측할 수는 없다. 대비할 수는 있다.", "하워드 막스"],
+  ["돈을 잘 다루는 것은 얼마나 똑똑한가보다 어떻게 행동하는가에 달려 있다.", "모건 하우절"],
+  ["부는 눈에 보이지 않는다. 쓰지 않은 돈이 곧 부다.", "모건 하우절"],
+  ["은퇴 자금에서 가장 무서운 것은 폭락 자체가 아니라, 폭락이 인출을 시작한 직후에 오는 것이다.", ""],
+  ["세금은 수익률보다 확실하다. 확실한 것부터 관리하는 편이 낫다.", ""],
+  ["계좌를 나누는 이유는 수익을 늘리려는 게 아니라, 뺄 때 고를 수 있게 하려는 것이다.", ""],
+  ["은퇴 계획에서 가장 흔한 실수는 너무 짧게 사는 것으로 가정하는 것이다.", ""],
+  ["오래 사는 것은 축복이지만, 준비 없이 오래 사는 것은 위험이다.", ""],
+  ["시장에 머문 시간이 시장의 타이밍을 이긴다.", ""],
+  ["인출 순서를 정하는 일은 수익률 1%를 더 얻는 일보다 쉽고, 때로는 더 값지다.", ""],
+  ["생활비를 아는 것이 자산을 아는 것보다 먼저다.", ""],
+  ["최고의 포트폴리오는 수익이 가장 높은 것이 아니라, 폭락장에서 끝까지 들고 갈 수 있는 것이다.", ""],
+  ["계획은 틀린다. 계획을 세우는 습관은 틀리지 않는다.", ""],
+];
+/**
+ * 턴마다 하나. 연도에 묶어 두지 않으면 입력할 때마다 문구가 바뀌어 거슬린다.
+ * 매번 새로 뽑으면 금방 같은 게 또 나오므로, 시드로 정한 출발점에서
+ * 목록 길이와 서로소인 보폭으로 도는 순열을 쓴다 — 한 바퀴 돌 때까지 중복이 없다.
+ */
+function quoteOf(cfg, y) {
+  const n = QUOTES.length;
+  const r = mulberry32((clamp0(cfg.gameSeed) | 0) ^ 0x51A7E);
+  const coprime = [];
+  for (let k = 2; k < n; k++) { let a = k, b = n; while (b) { [a, b] = [b, a % b]; } if (a === 1) coprime.push(k); }
+  const step = coprime.length ? coprime[Math.floor(r() * coprime.length)] : 1;
+  const start = Math.floor(r() * n);
+  return QUOTES[((start + (y - cfg.startYear) * step) % n + n) % n];
+}
+function quoteBox(cfg, y) {
+  const [text, by] = quoteOf(cfg, y);
+  return `<div class="quote"><p>“${text}”${by ? `<span class="by">— ${by}</span>` : `<span class="by">— 투자 격언</span>`}</p></div>`;
 }
 
 const EVENT_KINDS = {
@@ -2624,10 +2681,11 @@ function renderGame() {
         <div>
           <div class="allocgrid" id="allocGrid"></div>
         </div>
-        ${(() => {
+        <div>${(() => {
           const pd = game.pending;
           if (!pd) return `<div class="brief"><h5>📰 시장 브리핑</h5>
-            <p class="hint" style="margin:0">첫 해입니다. 결정을 마치고 넘기면 그해 시장이 공개되고, 왜 그랬는지 여기에 기사로 붙습니다.</p></div>`;
+            <p class="hint" style="margin:0">첫 해입니다. 결정을 마치고 넘기면 그해 시장이 공개되고, 왜 그랬는지 여기에 기사로 붙습니다.</p>
+            </div>${quoteBox(cfg, y)}`;
           const st = marketStory(cfg, pd.year, pd.ret, pd.crash);
           const sign = pd.ret >= 0 ? "pos" : "neg";
           return `<div class="brief">
@@ -2638,8 +2696,8 @@ function renderGame() {
             <p class="bfoot">그래서 그해 내 포트폴리오는
               <strong class="${sign}">${pd.ret >= 0 ? "+" : ""}${pd.ret.toFixed(1)}%</strong>,
               운용손익 <strong class="${pd.pnl >= 0 ? "pos" : "neg"}">${pd.pnl >= 0 ? "+" : "−"}${fmt(Math.abs(pd.pnl))}만원</strong>이었습니다.</p>
-          </div>`;
-        })()}
+          </div>${quoteBox(cfg, y)}`;
+        })()}</div>
       </div>
       ${!isIn && bal && bal.taxable.bal > 0.5 ? `<p class="hint" style="margin:9px 0 0">
         일반계좌는 지금 <strong>${TAXTYPE_NAME[cfg.taxType] || cfg.taxType}</strong>로 계산합니다 —
@@ -2677,7 +2735,7 @@ function renderGame() {
     const v = bal ? bal[a.id].bal : 0;
     return `<label>${a.name}</label>
       <input type="number" step="50" data-g="${a.id}" value="${clamp0(row(y)[a.id][isIn ? "in" : "out"]) || ""}">
-      <span class="bal">${isIn ? "" : `잔액 ${fmt(v)}${srcLine(a, bal && bal[a.id].buckets)}`}</span>`;
+      <span class="bal">잔액 ${fmt(v)}${srcLine(a, bal && bal[a.id].buckets)}</span>`;
   }).join("");
   grid.querySelectorAll("[data-g]").forEach(n => n.addEventListener("input", () => {
     row(y)[n.dataset.g][isIn ? "in" : "out"] = clamp0(num(n.value));
