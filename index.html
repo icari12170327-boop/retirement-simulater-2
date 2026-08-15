@@ -3139,6 +3139,7 @@ function renderGame() {
   grid.querySelectorAll("[data-g]").forEach(n => n.addEventListener("input", () => {
     row(y)[n.dataset.g][isIn ? "in" : "out"] = clamp0(num(n.value)) + autoOf(n.dataset.g);
     updateAllocMsg(spare, isIn, y, sevIn);
+    save();   // 턴을 넘기기 전에 닫아도 배분이 남아 있어야 한다
   }));
   updateAllocMsg(spare, isIn, y, sevIn);
 
@@ -3156,6 +3157,7 @@ function renderGame() {
         AID.forEach(id => { row(y)[id].out = Math.round(d[id]); });
       }
     }
+    save();   // 턴을 넘기기 전에 닫아도 배분이 남아 있어야 한다
     renderGame();
   };
   document.getElementById("btnTurnGo").onclick = turnAdvance;
@@ -3656,8 +3658,10 @@ function renderOptUndo() {
 /** 탐색 결과를 설정에 적용 (optimize 안에서 쓰던 손잡이를 그대로 재현한다) */
 function optimizeApply(r) {
   const c = state.cfg, base = JSON.parse(JSON.stringify(c));
-  // 적용은 설정을 실제로 바꾸고 저장한다 — 되돌아갈 자리를 먼저 남긴다
-  state.optUndo = {
+  // 적용은 설정을 실제로 바꾸고 저장한다 — 되돌아갈 자리를 먼저 남긴다.
+  // 두 번, 세 번 적용해도 되돌아갈 곳은 '최적화를 쓰기 전'이어야 하므로
+  // 이미 남겨 둔 자리가 있으면 덮어쓰지 않는다 (되돌리면 그 자리는 비워진다).
+  if (!state.optUndo) state.optUndo = {
     at: new Date().toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }) + " 적용",
     what: r.changes.filter(x => !x.same).map(x => x.name).join(" · ") || "변경 없음",
     cfg: Object.fromEntries(OPT_KEYS.map(k => [k, JSON.parse(JSON.stringify(base[k]))])),
@@ -4143,9 +4147,10 @@ function bindCfg() {
   // 플래너·게임 양쪽에 같은 설정 칸을 둘 때 쓰는 사본 (id 중복 없이 붙인다)
   document.querySelectorAll("[data-cfg]").forEach(n => {
     const k = n.dataset.cfg;
+    // render(true) 안에서 syncCfgInputs 가 반대편 칸까지 다시 채운다
     n.addEventListener("input", () => {
       state.cfg[k] = STR_FIELDS.has(k) ? n.value : num(n.value);
-      syncCfgInputs(); refreshGame(); render(true);
+      render(true);
     });
   });
   CFG_FIELDS.forEach(k => {
