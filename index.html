@@ -586,6 +586,35 @@
         </div>
       </div>
     </details>
+    <details class="grp">
+      <summary>🎛️ 자동 배분 규칙 — 「자동 배분」 버튼이 따르는 순서</summary>
+      <div class="body">
+        <div class="fgrid">
+          <label class="f" style="grid-column:span 2"><span class="t">인출 자동배분 전략</span>
+            <select data-cfg="wdStrategy">
+              <option value="ratio">저율구간 + 잔액 비례 — 1,500만 안에서 세액공제분 먼저, 나머지는 잔액 비율대로</option>
+              <option value="pensionFirst">연금계좌 먼저 — 절세계좌를 앞에서 소진</option>
+              <option value="taxmin">그해 세금 최소 — 매년 세금이 가장 적게 나오는 조합</option>
+            </select></label>
+        </div>
+        <div class="tablebox" style="max-height:none;margin-top:10px">
+          <table class="opentbl">
+            <thead><tr>
+              <th class="rowhd">계좌</th>
+              <th title="자동 배분의 상한. 0 = 무제한">연 납입한도</th>
+              <th title="낮을수록 먼저 채워집니다. 0이면 자동 배분에서 제외">적립 우선순위</th>
+            </tr></thead>
+            <tbody id="accCfgGame"></tbody>
+          </table>
+        </div>
+        <p class="hint">
+          우선순위는 <strong>작은 수가 먼저</strong>이고 <strong>0이면 자동 배분에서 빠집니다</strong>
+          (IRP·퇴직금 수령이 0인 이유 — 퇴직금이 직행하는 계좌라 내 돈으로 채우는 곳이 아닙니다).
+          여기서 고친 값은 플래너의 「적립 우선순위」와 같은 설정이라 양쪽이 함께 바뀝니다.
+        </p>
+        <div id="optUndoBox"></div>
+      </div>
+    </details>
     <div id="gameBody"></div>
   </section>
 
@@ -1093,7 +1122,7 @@ function defaultState() {
     cfg.opening[a.id] = { free: 0, ded: 0, sev: 0, gain: 0 };
     cfg.openYears[a.id] = 0;
   });
-  return { cfg, rows: {} };
+  return { cfg, rows: {}, optUndo: null };
 }
 let state = defaultState();
 
@@ -3594,9 +3623,45 @@ function renderEnding(box) {
   };
 }
 
+/* 최적화가 실제로 건드리는 설정 — 되돌리기는 딱 이만큼만 복원한다 */
+const OPT_KEYS = ["gameSpend", "spendRules", "wdStrategy", "priority", "reverse"];
+
+/** 최적화 직전 설정으로 되돌린다. 한 번 적용하면 새 판에도 계속 따라붙어
+    "왜 내가 고른 적 없는 배분으로 굴러가지?" 가 되기 때문에 반드시 퇴로가 있어야 한다. */
+function optimizeUndo() {
+  const u = state.optUndo;
+  if (!u) return;
+  OPT_KEYS.forEach(k => { state.cfg[k] = JSON.parse(JSON.stringify(u.cfg[k])); });
+  state.optUndo = null;
+  gameStart();
+  syncCfgInputs(); renderSpendRules(); renderOptUndo(); render(true, true);
+}
+
+/** 되돌리기 단추 — 최적화를 적용한 적이 있을 때만 나온다 */
+function renderOptUndo() {
+  const box = document.getElementById("optUndoBox");
+  if (!box) return;
+  const u = state.optUndo;
+  if (!u) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="gline" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+      <span><strong>최적 조합이 적용된 상태</strong>
+        <span style="color:var(--muted);font-size:12px">${u.at} · ${u.what}</span></span>
+      <button type="button" id="btnOptUndo">↩︎ 적용 전 설정으로</button>
+    </div>
+    <p class="hint" style="margin:6px 0 0">최적화는 인출 전략·납입 순서·생활비·주택연금을 <strong>실제 설정에 저장</strong>합니다.
+      그래서 새 판을 시작해도 계속 따라붙습니다. 되돌리면 적용 직전 값으로 돌아가고 새 판이 열립니다.</p>`;
+  document.getElementById("btnOptUndo").onclick = optimizeUndo;
+}
+
 /** 탐색 결과를 설정에 적용 (optimize 안에서 쓰던 손잡이를 그대로 재현한다) */
 function optimizeApply(r) {
   const c = state.cfg, base = JSON.parse(JSON.stringify(c));
+  // 적용은 설정을 실제로 바꾸고 저장한다 — 되돌아갈 자리를 먼저 남긴다
+  state.optUndo = {
+    at: new Date().toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }) + " 적용",
+    what: r.changes.filter(x => !x.same).map(x => x.name).join(" · ") || "변경 없음",
+    cfg: Object.fromEntries(OPT_KEYS.map(k => [k, JSON.parse(JSON.stringify(base[k]))])),
+  };
   const at = n => { const i = r.knobsName.indexOf(n); return i < 0 ? null : r.pick[i]; };
   const spendV = at("생활비"), curveV = at("생활비 곡선"), wdV = at("인출 전략"),
         prioV = at("납입 순서"), revV = at("주택연금");
@@ -3610,7 +3675,7 @@ function optimizeApply(r) {
   if (prioV != null) c.priority = PRIO_SETS[prioV].get(base);
   if (r.hasHome && revV != null) c.reverse = { ...base.reverse, on: revV ? 1 : 0, startAge: revV || 70 };
   gameStart();
-  syncCfgInputs(); renderSpendRules(); render(true, true);
+  syncCfgInputs(); renderSpendRules(); renderOptUndo(); render(true, true);
 }
 
 /* ========================================================================
@@ -3758,6 +3823,9 @@ function syncPresetInfo() {
   if (c) c.hidden = !P.custom;
 }
 
+/* 한도·우선순위는 플래너와 게임 화면 양쪽에 둔다 — 자동 배분을 누르는 자리에서
+   바로 손볼 수 없으면 "파라미터를 못 건드리겠다"가 된다. 같은 설정을 가리키므로
+   한쪽을 고치면 다른 쪽도 따라 바뀐다(syncCfgInputs 가 모든 칸을 다시 채운다). */
 function buildAccCfg() {
   const wrap = document.getElementById("accCfg");
   wrap.innerHTML = ACC.map(a => `<tr>
@@ -3766,9 +3834,24 @@ function buildAccCfg() {
       <td><input type="number" step="50" data-limit="${a.id}"></td>
       <td><input type="number" step="1" min="0" data-prio="${a.id}"></td>
     </tr>`).join("");
-  wrap.querySelectorAll("[data-rate]").forEach(i => i.addEventListener("input", () => { state.cfg.rates[i.dataset.rate] = num(i.value); render(false); }));
-  wrap.querySelectorAll("[data-limit]").forEach(i => i.addEventListener("input", () => { state.cfg.limits[i.dataset.limit] = num(i.value); render(false); }));
-  wrap.querySelectorAll("[data-prio]").forEach(i => i.addEventListener("input", () => { state.cfg.priority[i.dataset.prio] = num(i.value); save(); }));
+  const game = document.getElementById("accCfgGame");
+  if (game) game.innerHTML = ACC.map(a => `<tr>
+      <th class="rowhd"><span class="dot" style="background:${css(a.color)}"></span>${a.name}</th>
+      <td><input type="number" step="50" data-limit="${a.id}"></td>
+      <td><input type="number" step="1" min="0" data-prio="${a.id}"></td>
+    </tr>`).join("");
+  document.querySelectorAll("[data-rate]").forEach(i => i.addEventListener("input", () => { state.cfg.rates[i.dataset.rate] = num(i.value); render(false); }));
+  document.querySelectorAll("[data-limit]").forEach(i => i.addEventListener("input", () => {
+    state.cfg.limits[i.dataset.limit] = num(i.value); syncAccCfg(i); refreshGame(); render(false);
+  }));
+  document.querySelectorAll("[data-prio]").forEach(i => i.addEventListener("input", () => {
+    state.cfg.priority[i.dataset.prio] = num(i.value); syncAccCfg(i); save(); refreshGame();
+  }));
+}
+/** 같은 설정을 가리키는 반대편 칸에 값을 옮긴다 (입력 중인 칸은 건드리지 않는다) */
+function syncAccCfg(from) {
+  const sel = from.dataset.limit ? `[data-limit="${from.dataset.limit}"]` : `[data-prio="${from.dataset.prio}"]`;
+  document.querySelectorAll(sel).forEach(n => { if (n !== from) n.value = from.value; });
 }
 
 /* ---- 기초 잔액 편집기 — 이미 굴리고 있는 계좌를 자금 성격별로 심는다 ---- */
@@ -4036,10 +4119,14 @@ function syncCfgInputs() {
     const n = document.getElementById("cfg_" + k);
     if (n) n.value = state.cfg[k];
   });
+  // 같은 설정 칸이 플래너·게임 양쪽에 있으므로 전부 채운다 (입력 중인 칸은 건드리지 않는다)
+  document.querySelectorAll("[data-cfg]").forEach(n => {
+    if (n !== document.activeElement) n.value = state.cfg[n.dataset.cfg];
+  });
   ACC.forEach(a => {
-    const r = document.querySelector(`[data-rate="${a.id}"]`); if (r) r.value = state.cfg.rates[a.id];
-    const l = document.querySelector(`[data-limit="${a.id}"]`); if (l) l.value = state.cfg.limits[a.id];
-    const pr = document.querySelector(`[data-prio="${a.id}"]`); if (pr) pr.value = clamp0(state.cfg.priority[a.id]);
+    document.querySelectorAll(`[data-rate="${a.id}"]`).forEach(r => { if (r !== document.activeElement) r.value = state.cfg.rates[a.id]; });
+    document.querySelectorAll(`[data-limit="${a.id}"]`).forEach(l => { if (l !== document.activeElement) l.value = state.cfg.limits[a.id]; });
+    document.querySelectorAll(`[data-prio="${a.id}"]`).forEach(p => { if (p !== document.activeElement) p.value = clamp0(state.cfg.priority[a.id]); });
   });
   const sb = document.getElementById("cfg_showBuckets");
   if (sb) sb.checked = !!state.cfg.showBuckets;
@@ -4053,6 +4140,14 @@ function syncCfgInputs() {
 }
 
 function bindCfg() {
+  // 플래너·게임 양쪽에 같은 설정 칸을 둘 때 쓰는 사본 (id 중복 없이 붙인다)
+  document.querySelectorAll("[data-cfg]").forEach(n => {
+    const k = n.dataset.cfg;
+    n.addEventListener("input", () => {
+      state.cfg[k] = STR_FIELDS.has(k) ? n.value : num(n.value);
+      syncCfgInputs(); refreshGame(); render(true);
+    });
+  });
   CFG_FIELDS.forEach(k => {
     const n = document.getElementById("cfg_" + k);
     if (!n) return;
@@ -4252,7 +4347,7 @@ function load() {
     if (!raw) return false;
     const s = JSON.parse(raw);
     if (!s || !s.cfg) return false;
-    state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {} };
+    state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {}, optUndo: s.optUndo || null };
     state.cfg.rates = { ...defaultState().cfg.rates, ...(s.cfg.rates || {}) };
     state.cfg.limits = { ...defaultState().cfg.limits, ...(s.cfg.limits || {}) };
     state.cfg.fillAmts = { ...defaultState().cfg.fillAmts, ...(s.cfg.fillAmts || {}) };
@@ -4347,6 +4442,7 @@ renderWdRules();
 renderXfers();
 renderEvents();
 renderSpendRules();
+renderOptUndo();
 loadGame();
 render(true, true);
 
@@ -4529,7 +4625,7 @@ document.getElementById("btnImport").onclick = () => {
       try {
         const s = JSON.parse(rd.result);
         if (!s.cfg) throw new Error("형식 오류");
-        state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {} };
+        state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {}, optUndo: s.optUndo || null };
         migrateOpening(state.cfg, s.cfg); migrateTransfers(state.cfg);
         builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); renderEvents(); render(true, true);
       } catch (e) { alert("불러오기 실패: " + e.message); }
