@@ -1893,6 +1893,7 @@ function simulate(opts = {}) {
   const warnings = [];
   const shortYears = [];
   let cumIn = 0, cumCredit = 0, cumNet = 0, cumTax = 0, depleted = null;
+  let autoNeed = 0, autoMiss = 0;   // auto 모드에서 '부족분을 못 채운 해'
   let cumWdTax = 0, cumOtherTax = 0;
 
   for (let y = y0; y <= y1; y++) {
@@ -2133,6 +2134,10 @@ function simulate(opts = {}) {
       if (res.net < want - Math.max(1, want * .01)) shortYears.push({ y, want, got: res.net });
     }
 
+    if (opts.auto && autoSpare < -0.5) {
+      autoNeed++;
+      if (res.net < -autoSpare - Math.max(1, -autoSpare * 0.02)) autoMiss++;
+    }
     cumNet += res.net; cumTax += rec.tax; cumWdTax += rec.wdTax; cumOtherTax += rec.otherTax;
     if (depleted === null && y >= cfg.retireYear && total < 1 && rec.gross > 0) depleted = y;
     years.push(rec);
@@ -2171,6 +2176,10 @@ function simulate(opts = {}) {
       + `연 환산 약 ${fmt(tot)}만원입니다. 「목표 생활비」에 이미 포함시켰다면 <strong>같은 돈을 두 번 빼고 있습니다.</strong> `
       + `둘 중 한쪽만 남기세요.`);
   }
+  if ((cfg.reverse || {}).on && (cfg.loan || {}).on && clamp0(cfg.loan.balance) > 0) {
+    warnings.push(`주택연금과 주택담보대출이 동시에 켜져 있습니다 — 실제로는 <strong>선순위 근저당이 있으면 주택연금 가입이 제한</strong>됩니다. `
+      + `대출을 먼저 갚거나(주택연금 대출상환방식 이용), 개시 나이를 상환 완료 이후로 미루세요. 이 계산기는 둘을 그대로 더합니다.`);
+  }
   if ((cfg.loan || {}).on && dupHits.some(x => x.label === "대출 상환")) {
     warnings.push(`주택담보대출 모듈이 켜져 있는데 지출 일정에도 대출 관련 항목이 있습니다 — 상환액이 두 번 빠지고 있는지 확인하세요.`);
   }
@@ -2185,7 +2194,7 @@ function simulate(opts = {}) {
   return {
     years, warnings, planDraws,
     sum: {
-      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal,
+      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal, autoNeed, autoMiss,
       atRetire: retireRec ? retireRec.total : 0,
       peak: years.reduce((m, r) => Math.max(m, r.total), 0),
       final: years.length ? years[years.length - 1].total : 0,
@@ -3134,8 +3143,9 @@ function safeSpend(onDone) {
   const die = clamp0(cfg.gameDeathAge) || 95;
   const seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(i => (clamp0(cfg.gameSeed) | 0) + i * 7717);
   const keep = JSON.parse(JSON.stringify(cfg));
+  let ownOk = false, missSum = 0, missN = 0;
   const survives = spend => {
-    let ok = 0;
+    let ok = 0; ownOk = false; missSum = 0; missN = 0;
     for (const sd of seeds) {
       state.cfg.gameSpend = spend;
       state.cfg.gameSeed = sd;
@@ -3143,18 +3153,40 @@ function safeSpend(onDone) {
       const rp = returnPath(state.cfg);
       const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
       const d = sim.sum.depleted;
-      if (!d || d - cfg.birthYear >= die) ok++;
+      // 자산이 안 말랐어도 생활비를 못 채운 해가 많으면 '버텼다'고 할 수 없다.
+      // 연금수령한도에 묶여 못 뽑는 경우가 여기 걸린다.
+      const mr = sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0;
+      missSum += mr; missN++;
+      const starved = mr > 0.05;
+      const good = (!d || d - cfg.birthYear >= die) && !starved;
+      if (good) ok++;
+      if (sd === seeds[0]) ownOk = good;   // 사용자가 실제로 플레이할 시드
     }
     return ok / seeds.length;
   };
-  let lo = 0, hi = Math.max(20000, clamp0(keep.gameSpend) * 3), best = 0, pct = 0;
+  let lo = 0, hi = Math.max(20000, clamp0(keep.gameSpend) * 3), best = 0, pct = 0, own = false, miss = 0;
   for (let i = 0; i < 13; i++) {
     const mid = (lo + hi) / 2;
     const p = survives(mid);
-    if (p >= 0.9) { best = mid; pct = p; lo = mid; } else hi = mid;
+    if (p >= 0.9) { best = mid; pct = p; own = ownOk; miss = missN ? missSum / missN : 0; lo = mid; } else hi = mid;
+  }
+  // 답이 0에 가까우면 '왜 못 버티는가'를 짚어 준다. 숫자만 0으로 던지면 쓸모가 없다.
+  let why = "";
+  if (best <= 1) {
+    state.cfg.gameSpend = Math.max(120, clamp0(keep.gameSpend) * 0.3);
+    state.cfg.gameSeed = seeds[0];
+    const rp = returnPath(state.cfg);
+    const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
+    const mr = sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0;
+    why = mr > 0.05
+      ? `아주 낮은 생활비로도 <strong>필요한 만큼 못 뽑은 해가 ${Math.round(mr * 100)}%</strong>입니다 — `
+        + `연금수령한도·만 55세 요건에 묶였거나 뺄 수 있는 계좌가 비었습니다. 자산 총액보다 <strong>일반계좌·ISA 비중</strong>이 문제입니다.`
+      : `아주 낮은 생활비에도 자산이 ${sim.sum.depleted || "?"}년에 바닥납니다 — 순수하게 자산이 모자랍니다.`;
+  } else if (miss > 0.02) {
+    why = `평균적으로 <strong>${Math.round(miss * 100)}%의 해</strong>는 필요한 만큼 못 뽑았습니다(한도에 걸려). 그만큼은 덜 쓰고 산다는 뜻입니다.`;
   }
   state.cfg = keep;
-  onDone({ spend: Math.round(best / 10) * 10, pct, die, n: seeds.length });
+  onDone({ spend: Math.round(best / 10) * 10, pct, own, die, n: seeds.length, why });
 }
 
 function renderEnding(box) {
@@ -3320,7 +3352,10 @@ function syncRev() {
   const m = reverseMonthly(state.cfg);
   const capped = clamp0(R.homeValue) > REV_CAP;
   const span = R.kind === "fixed10" ? "10년간" : R.kind === "fixed20" ? "20년간" : "종신";
-  info.innerHTML = `만 ${clamp0(R.startAge)}세 개시 → <strong>월 ${fmt(Math.round(m))}만원</strong> · 연 ${fmt(Math.round(m * 12))}만원 · ${span}`
+  const age = Math.max(55, Math.min(85, clamp0(R.startAge) || 55));   // 계산에 실제로 쓰이는 나이
+  const clamped = age !== clamp0(R.startAge);
+  info.innerHTML = `만 ${age}세 개시${clamped ? ` <span style="color:var(--critical)">(55~85세만 가능해 조정됨)</span>` : ""}`
+    + ` → <strong>월 ${fmt(Math.round(m))}만원</strong> · 연 ${fmt(Math.round(m * 12))}만원 · ${span}`
     + (capped ? ` <span style="color:var(--critical)">(공시가격 12억 한도로 잘림)</span>` : "")
     + `<br><span style="color:var(--muted)">1억원당 월지급금 근사표 기준. 실제 금액은 공시가격·금리·상품유형에 따라 다릅니다.</span>`;
 }
@@ -4042,7 +4077,11 @@ document.getElementById("btnSafe").onclick = () => {
     out.innerHTML = `만 ${r.die}세까지 <strong>${(r.pct * 100).toFixed(0)}%</strong>가 버티는 생활비 = `
       + `<strong style="font-size:15px">연 ${fmt(r.spend)}만원</strong> (월 ${fmt(Math.round(r.spend / 12))}만)`
       + ` <span style="color:${diff >= 0 ? "var(--good)" : "var(--critical)"}">· 지금 설정 ${fmt(cur)} 대비 ${diff >= 0 ? "+" : "−"}${fmt(Math.abs(diff))}</span>`
-      + `<br><span style="color:var(--muted)">시작연도 기준 금액입니다(물가 연동). 생활비 구간을 쓰고 있으면 같은 비율로 함께 조정됩니다.</span>`;
+      + `<br><span style="color:var(--muted)">시작연도 기준 금액입니다(물가 연동). 생활비 구간을 쓰고 있으면 같은 비율로 함께 조정됩니다. `
+      + `자산이 남아도 <strong>생활비를 못 채운 해가 5%를 넘으면 '버텼다'로 치지 않습니다.</strong></span>`
+      + `<br><span style="color:${r.own ? "var(--good)" : "var(--critical)"}">지금 시드(${state.cfg.gameSeed})로는 `
+      + `${r.own ? "이 금액으로 끝까지 버팁니다" : "<strong>이 금액이어도 버티지 못합니다</strong> — 지금 시드가 불운한 쪽입니다. 시드를 바꾸거나 금액을 더 낮추세요"}.</span>`
+      + (r.why ? `<br><span style="color:var(--critical)">${r.why}</span>` : "");
     document.getElementById("btnSafeApply").hidden = false;
     btn.disabled = false; btn.textContent = "다시 계산";
   }), 30);
