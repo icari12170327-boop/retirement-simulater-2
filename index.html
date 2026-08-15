@@ -1062,6 +1062,7 @@ function crashPlan(cfg) {
  * 그해 수익률 한 번 추첨.
  *  arith — 프리셋 숫자를 산술평균으로 본다. 복리로 굴리면 실현 CAGR은 이보다 σ²/2쯤 낮다.
  *  geo   — 프리셋 숫자를 장기 목표 CAGR로 본다. 로그수익을 정규로 두면 기간이 길수록 그 값에 수렴한다.
+ *          단 위기를 켜면 그해 추첨이 시나리오로 덮여 보정이 없으므로, 목표보다 낮게 끝난다.
  */
 function drawReturn(cfg, y) {
   const { mean, sd } = phaseParams(cfg, y);
@@ -1101,6 +1102,24 @@ function targetCagr(cfg, upto) {
   let lg = 0, n = 0;
   for (let y = cfg.startYear; y <= (upto || cfg.endYear); y++) { lg += Math.log(1 + phaseParams(cfg, y).mean / 100); n++; }
   return n ? (Math.exp(lg / n) - 1) * 100 : 0;
+}
+
+/**
+ * 위기 설정까지 반영한 '실제로 기대되는' CAGR — 시드 여러 개를 돌려 평균낸다.
+ * 「장기 목표 CAGR」·「산술평균」 모드에서는 위기가 추첨 결과를 덮어쓰기만 하고
+ * 보정이 없어, 목표보다 낮게 끝난다. 목표만 크게 띄워두면 그 차이가 보이지 않는다.
+ * 「장기 수익률 고정」은 비위기 연도로 되돌려 담으므로 목표와 같다.
+ */
+function expectedCagr(cfg, samples = 24) {
+  if (!clamp0(cfg.crashCount) || cfg.retMode === "exact") return null;
+  let lg = 0, n = 0;
+  for (let i = 0; i < samples; i++) {
+    const { path } = returnPath({ ...cfg, gameSeed: (clamp0(cfg.gameSeed) | 0) + i * 7717 });
+    let s = 0, k = 0;
+    for (const y in path) { s += Math.log(1 + path[y] / 100); k++; }
+    if (k) { lg += s / k; n++; }
+  }
+  return n ? (Math.exp(lg / n) - 1) * 100 : null;
 }
 
 const EVENT_KINDS = {
@@ -2358,6 +2377,16 @@ function renderStart(box) {
         <div class="gline"><span>위기</span><span>${clamp0(cfg.crashCount) ? `${clamp0(cfg.crashCount)}회 · ${cfg.crashPick && CRASHES[cfg.crashPick] ? CRASHES[cfg.crashPick].name : "랜덤"}` : "없음"}</span></div>
         <div class="gline"><span>시드</span><span>${cfg.gameSeed}</span></div>
         <div class="gline tot"><span>목표 장기 CAGR</span><span>${cfg.retMode === "arith" ? "—" : targetCagr(cfg).toFixed(1) + "%"}</span></div>
+        ${(() => {
+          const ex = expectedCagr(cfg);
+          if (ex == null) return "";
+          const gap = ex - targetCagr(cfg);
+          return `<div class="gline"><span>위기 반영 후 기대 CAGR</span><span class="neg">${ex.toFixed(1)}% (${gap.toFixed(1)}%p)</span></div>
+            <p class="hint" style="margin:8px 0 0">프리셋 수익률은 이미 과거의 위기가 녹아든 장기 평균입니다.
+              여기에 위기를 또 얹으면 <strong>평균까지 그만큼 깎입니다</strong>.
+              위기의 <em>타이밍</em>만 시험하고 장기 평균은 지키려면 수익률 해석을
+              <strong>「장기 수익률 고정」</strong>으로 바꾸세요.</p>`;
+        })()}
         <p class="hint" style="margin:8px 0 0">${P.info}</p>
         <p class="hint" style="margin:6px 0 0">${returnSourceNote(cfg)}</p>
       </div>
@@ -2668,7 +2697,9 @@ function renderEnding(box) {
           const st = returnStats(cfg, game.returns);
           if (!st) return "";
           const tg = cfg.retMode === "arith" ? null : targetCagr(cfg);
+          const ex = expectedCagr(cfg);
           return `${tg != null ? `<div class="gline"><span>목표 CAGR</span><span>${tg.toFixed(1)}%</span></div>` : ""}
+            ${ex != null ? `<div class="gline"><span style="color:var(--muted)">위기 반영 후 기대</span><span style="color:var(--muted)">${ex.toFixed(1)}%</span></div>` : ""}
             <div class="gline"><span>산술평균</span><span>${st.arith.toFixed(1)}%</span></div>
             <div class="gline"><span><strong>실현 CAGR</strong></span><span><strong>${st.cagr.toFixed(1)}%</strong></span></div>
             <div class="gline"><span style="color:var(--muted)">변동성 침식</span><span style="color:var(--muted)">−${st.drag.toFixed(1)}%p</span></div>
@@ -2724,7 +2755,7 @@ function buildPresetUI() {
   }
 }
 const RET_MODE_INFO = {
-  geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다 — 가장 현실에 가깝습니다.",
+  geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다. 다만 <strong>위기를 켜면 그만큼 평균도 내려갑니다</strong>(위기 1회당 약 0.6~0.9%p) — 프리셋 수익률에 이미 과거 위기가 반영돼 있다면 이중 차감입니다.",
   exact: "매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 총수익이 고정되므로 <strong>순서위험만 따로</strong> 볼 수 있습니다. 위기도 총수익이 아니라 '언제 맞느냐'만 바꿉니다. 포트폴리오 비교용.",
   arith: "프리셋 숫자를 <strong>산술평균</strong>으로 씁니다. 복리로 굴리면 실현 CAGR은 그보다 낮아지며, 변동성이 클수록 차이가 큽니다(나스닥 2x는 5%p 이상).",
 };
