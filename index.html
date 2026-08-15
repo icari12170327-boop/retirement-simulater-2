@@ -510,6 +510,22 @@
         </div>
         <div id="spendPreview"></div>
 
+        <h3 style="margin-top:16px">🏥 건강보험료 (자동 계산)</h3>
+        <p class="hint" style="margin:0 0 8px">
+          은퇴 후 지역가입 전환은 <strong>고정비가 아니라 자산·소득에 붙습니다.</strong>
+          고정 금액으로 두면 자산이 많을수록 유리하게 계산되어 결과가 낙관 쪽으로 틀어집니다.
+          켜면 <strong>💡 건강보험료 지출 일정은 지우세요</strong> — 두 번 빠집니다.
+        </p>
+        <div class="fgrid">
+          <label class="f"><span class="t">사용</span>
+            <select id="hlt_on"><option value="0">안 씀 (지출 일정으로 직접)</option><option value="1">자동 계산</option></select></label>
+          <label class="f"><span class="t">재산과표 (만원 · 공시가격 등)</span><input type="number" step="1000" id="hlt_propBase"></label>
+          <label class="f"><span class="t">피부양자 등재 시도</span>
+            <select id="hlt_dependent"><option value="0">안 함</option><option value="1">요건 되면 0원</option></select></label>
+          <label class="f" style="grid-column:span 3"><span class="t">&nbsp;</span>
+            <span class="hint" id="hltInfo" style="margin:0"></span></label>
+        </div>
+
         <h3 style="margin-top:16px">🏡 주택연금 (역모기지)</h3>
         <p class="hint" style="margin:0 0 8px">
           집을 담보로 <strong>죽을 때까지</strong> 매달 받습니다. 금융자산이 마르는 시점의 마지막 보루라,
@@ -1047,6 +1063,7 @@ function defaultState() {
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260101, gameSpend: 3600, gameDeathAge: 95,
     preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "geo",
     reverse: { on: 0, homeValue: 60000, startAge: 70, kind: "life" },
+    health: { on: 0, propBase: 30000, dependent: 0 },
     loan: { on: 0, balance: 10000, rate: 4.0, endYear: 2045, endMonth: 12,
             type: "amort", rateMode: "float", rateVol: 0.8, rateMin: 1.5, rateMax: 12 },
     cAccum: 9.0, cAccumSd: 13.5, cRisk: 8.0, cRiskSd: 9.9, cLate: 7.5, cLateSd: 9.0,
@@ -1445,6 +1462,41 @@ function eventAmount(cfg, e, y) {
   const base = clamp0(e.amt);
   return e.real ? base * Math.pow(1 + clamp0(cfg.inflation) / 100, y - cfg.startYear) : base;
 }
+/* ------------------------------------------------------------------
+   건강보험료 — 은퇴 후 지역가입 전환은 고정비가 아니라 자산·소득에 붙는다.
+   고정 금액으로 두면 자산이 많을수록 유리하게 계산되어 결과가 낙관 쪽으로 틀어진다.
+   2024년 기준 구조를 단순화한 근사이며 실제 고지액과는 다르다.
+   ------------------------------------------------------------------ */
+const LTC_MULT = 1.1295;          // 장기요양보험료(건보료의 12.95%)를 포함한 배수
+const HEALTH_RATE = 0.0709;       // 보수·소득 보험료율
+const HEALTH_SELF = 0.5;          // 직장가입자는 절반을 회사가 낸다
+// 재산과표(만원) → 월 재산보험료(만원) 근사. 1억원까지는 공제되어 0.
+const PROP_TABLE = [[0, 0], [10000, 0], [20000, 4.5], [30000, 8.0], [50000, 12.0],
+                    [70000, 15.5], [100000, 20.0], [150000, 25.0], [300000, 30.0]];
+function propPremium(base) {
+  const v = clamp0(base);
+  for (let i = 0; i < PROP_TABLE.length - 1; i++) {
+    const [x0, y0] = PROP_TABLE[i], [x1, y1] = PROP_TABLE[i + 1];
+    if (v >= x0 && v <= x1) return y0 + (y1 - y0) * (v - x0) / Math.max(1, x1 - x0);
+  }
+  return PROP_TABLE[PROP_TABLE.length - 1][1];
+}
+/**
+ * 그해 건강보험료 (연 단위, 만원).
+ * 은퇴 전 = 직장가입자(보수 기준), 은퇴 후 = 지역가입자(소득 + 재산).
+ * 공적연금은 소득의 50%만 잡히고, 연금계좌에서 뺀 사적연금 분리과세분은
+ * 애초에 부과 대상이 아니다 — 절세계좌의 큰 장점이라 여기서도 빼지 않는다.
+ */
+function healthPremium(cfg, y, pensionIncome) {
+  const H = cfg.health || {};
+  if (!H.on) return 0;
+  const inc = clamp0(pensionIncome);
+  if (y < cfg.retireYear) return inc * HEALTH_RATE * HEALTH_SELF * LTC_MULT;
+  const prop = clamp0(H.propBase);
+  if (H.dependent && inc <= 2000 && prop <= 54000) return 0;   // 피부양자 등재 요건
+  return (inc * 0.5 * HEALTH_RATE + propPremium(prop) * 12) * LTC_MULT;
+}
+
 /* ------------------------------------------------------------------
    주택연금 (역모기지) — 집을 담보로 죽을 때까지 매달 받는다.
    금융자산이 마르면 실제로는 이게 마지막 보루인데, 시뮬에 없으면
@@ -2176,6 +2228,9 @@ function simulate(opts = {}) {
       + `연 환산 약 ${fmt(tot)}만원입니다. 「목표 생활비」에 이미 포함시켰다면 <strong>같은 돈을 두 번 빼고 있습니다.</strong> `
       + `둘 중 한쪽만 남기세요.`);
   }
+  if ((cfg.health || {}).on && dupHits.some(x => x.label === "건강보험료")) {
+    warnings.push(`건강보험료를 <strong>자동 계산으로 켜 둔 채</strong> 지출 일정에도 건강보험료가 있습니다 — 두 번 빠지고 있습니다. 지출 일정 쪽을 지우세요.`);
+  }
   if ((cfg.reverse || {}).on && (cfg.loan || {}).on && clamp0(cfg.loan.balance) > 0) {
     warnings.push(`주택연금과 주택담보대출이 동시에 켜져 있습니다 — 실제로는 <strong>선순위 근저당이 있으면 주택연금 가입이 제한</strong>됩니다. `
       + `대출을 먼저 갚거나(주택연금 대출상환방식 이용), 개시 나이를 상환 완료 이후로 미루세요. 이 계산기는 둘을 그대로 더합니다.`);
@@ -2687,8 +2742,10 @@ function cashOf(cfg, y, loan) {
   const ln = loan && loan[y];
   const lv = livingOf(cfg, y);
   const rev = reverseOf(cfg, y);        // 주택연금 — 명목 고정, 종신
-  return { list, salary: salary + rev, lump, spend, sev, loan: ln,
-           living: lv.amt, livingName: lv.name, rev };
+  // 주택연금은 대출이라 건보료 소득에 잡히지 않는다
+  const health = healthPremium(cfg, y, salary);
+  return { list, salary: salary + rev, lump, spend: spend + health, sev, loan: ln,
+           living: lv.amt, livingName: lv.name, rev, health };
 }
 
 /** 시작 화면 — 어떤 조건으로 출발하는지 한눈에 보여준다.
@@ -2844,7 +2901,8 @@ function renderGame() {
         ${c.rev > 0 ? `<div class="gline"><span>🏡 주택연금 <span style="font-size:10.5px;color:var(--muted)">명목 고정</span></span><span class="pos">+${fmt(c.rev)}</span></div>` : ""}
         ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
         <div class="gline"><span>생활비 <span style="font-size:10.5px;color:var(--muted)">${c.livingName || (y > cfg.startYear ? `물가연동 · ${cfg.startYear}년 ${fmt(cfg.gameSpend)} 기준` : "물가연동")}</span></span><span class="neg">−${fmt(c.living)}</span></div>
-        ${c.spend > 0 ? `<div class="gline"><span>예정 지출</span><span class="neg">−${fmt(c.spend)}</span></div>` : ""}
+        ${c.spend - clamp0(c.health) > 0.5 ? `<div class="gline"><span>예정 지출</span><span class="neg">−${fmt(c.spend - clamp0(c.health))}</span></div>` : ""}
+        ${c.health > 0.5 ? `<div class="gline"><span>🏥 건강보험료 <span style="font-size:10.5px;color:var(--muted)">${y < cfg.retireYear ? "직장가입" : "지역가입"}</span></span><span class="neg">−${fmt(c.health)}</span></div>` : ""}
         ${loanPay > 0 ? `<div class="gline"><span>🏠 주담대 상환 <span style="font-size:10.5px;color:var(--muted)">금리 ${c.loan.rate.toFixed(2)}%</span></span><span class="neg">−${fmt(loanPay)}</span></div>` : ""}
         ${c.sev > 0 ? `<div class="gline"><span style="color:var(--muted)">퇴직금 → IRP (자동)</span><span style="color:var(--muted)">${fmt(c.sev)}</span></div>` : ""}
         <div class="gline tot"><span>${spare >= 0 ? "투자 여력" : "부족"}</span>
@@ -3189,6 +3247,95 @@ function safeSpend(onDone) {
   onDone({ spend: Math.round(best / 10) * 10, pct, own, die, n: seeds.length, why });
 }
 
+/* ------------------------------------------------------------------
+   최적 운영 탐색 — "어떻게 했으면 나았나"를 좌표하강법으로 찾는다.
+   50년 × 6계좌 전체 최적해는 계산 불가능하지만, 실제로 사람이 돌릴 수 있는
+   손잡이는 몇 개뿐이라 한 개씩 훑어 고정하는 것으로 충분히 좋은 답이 나온다.
+   시장 가정(수익률 해석·위기 횟수)은 손잡이에 넣지 않는다 — 그건 내가 고를 수
+   있는 게 아니라 주어지는 것이라, 넣으면 '운이 좋았으면 됐다'는 공허한 답이 된다.
+   ------------------------------------------------------------------ */
+const PRIO_SETS = [
+  { name: "지금 순서", get: c => ({ ...c.priority }) },
+  { name: "연금 먼저 (세액공제 우선)", get: () => ({ psDed: 1, irpInv: 2, psFree: 3, isa: 4, taxable: 5, irpSev: 0 }) },
+  { name: "ISA 먼저 (유동성 우선)",   get: () => ({ isa: 1, irpInv: 2, psDed: 3, psFree: 4, taxable: 5, irpSev: 0 }) },
+  { name: "일반계좌 먼저 (55세 전 대비)", get: () => ({ taxable: 1, isa: 2, irpInv: 3, psDed: 4, psFree: 5, irpSev: 0 }) },
+];
+
+function optimize(onDone) {
+  const base = JSON.parse(JSON.stringify(state.cfg));
+  const die = base.birthYear + (clamp0(base.gameDeathAge) || 95);
+  const seeds = [0, 1, 2, 3, 4].map(i => (clamp0(base.gameSeed) | 0) + i * 7717);
+
+  const score = () => {
+    let bust = 0, miss = 0, net = 0, tax = 0;
+    for (const sd of seeds) {
+      state.cfg.gameSeed = sd;
+      const rp = returnPath(state.cfg);
+      const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
+      const d = sim.sum.depleted;
+      if (d && d < die) bust++;
+      miss += sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0;
+      net += sim.sum.cumNet; tax += sim.sum.cumTax;
+    }
+    const n = seeds.length;
+    state.cfg.gameSeed = base.gameSeed;
+    return { bust: bust / n, miss: miss / n, net: net / n, tax: tax / n };
+  };
+  // 사전식 비교 — 살아남는 게 먼저, 그다음 굶지 않는 것, 그다음 많이 쓰는 것
+  const better = (a, b) => !b ? true
+    : Math.abs(a.bust - b.bust) > 1e-9 ? a.bust < b.bust
+    : Math.abs(a.miss - b.miss) > 0.01 ? a.miss < b.miss
+    : a.net > b.net + 1;
+
+  const hasHome = clamp0((base.reverse || {}).homeValue) > 0;
+  // 손잡이 순서 = 아프지 않은 것부터. 좌표하강법은 앞에서 목표를 달성하면
+  // 뒤를 안 보므로, 생활비 삭감(가장 아픈 수단)을 마지막에 둬야
+  // "공짜 손잡이부터 다 써 보고 그래도 안 되면 줄여라"가 된다.
+  const knobs = [
+    { name: "인출 전략", vals: ["ratio", "pensionFirst", "taxmin"],
+      show: v => ({ ratio: "저율구간 + 잔액 비례", pensionFirst: "연금 저율구간 우선", taxmin: "그해 세금 최소" })[v],
+      set: v => { state.cfg.wdStrategy = v; } },
+    { name: "납입 순서", vals: PRIO_SETS.map((_, i) => i),
+      show: v => PRIO_SETS[v].name,
+      set: v => { state.cfg.priority = PRIO_SETS[v].get(base); } },
+    { name: "생활비 곡선", vals: ["keep", "curve"],
+      show: v => v === "keep" ? "지금 그대로" : "표준 U자 곡선",
+      set: v => { if (v === "curve") state.cfg.spendRules = spendCurve(); } },
+    ...(hasHome ? [{ name: "주택연금", vals: [0, 60, 65, 70, 75],
+      show: v => v === 0 ? "가입 안 함" : `만 ${v}세 개시`,
+      set: v => { state.cfg.reverse = { ...base.reverse, on: v ? 1 : 0, startAge: v || 70 }; } }] : []),
+    { name: "생활비", vals: [1, .95, .9, .85, .8, .75, .7, .6, .5],
+      show: v => v === 1 ? "지금 그대로" : `${Math.round(v * 100)}% (연 ${fmt(Math.round(clamp0(base.gameSpend) * v))})`,
+      set: v => { state.cfg.gameSpend = Math.round(clamp0(base.gameSpend) * v);
+        (state.cfg.spendRules || []).forEach(r => { r.amt = Math.round(clamp0(r.amt) * v); }); } },
+  ];
+
+  // 현재 조합에서 출발해 손잡이를 하나씩 훑는다 (2바퀴면 대개 수렴한다)
+  const pick = knobs.map(k => k.vals[0]);
+  const applyAll = () => {
+    state.cfg = JSON.parse(JSON.stringify(base));
+    knobs.forEach((k, i) => k.set(pick[i]));
+  };
+  applyAll();
+  let cur = score(), runs = 1;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < knobs.length; i++) {
+      let bestV = pick[i], bestS = cur;
+      for (const v of knobs[i].vals) {
+        if (v === pick[i]) continue;
+        const save = pick[i]; pick[i] = v; applyAll();
+        const sc = score(); runs++;
+        if (better(sc, bestS)) { bestS = sc; bestV = v; } else pick[i] = save;
+        pick[i] = save;
+      }
+      pick[i] = bestV; cur = bestS; applyAll();
+    }
+  }
+  const changes = knobs.map((k, i) => ({ name: k.name, from: k.show(k.vals[0]), to: k.show(pick[i]), same: pick[i] === k.vals[0] }));
+  state.cfg = base;
+  onDone({ cur, changes, runs, seeds: seeds.length, die: clamp0(base.gameDeathAge) || 95, hasHome, pick, knobsName: knobs.map(k => k.name) });
+}
+
 function renderEnding(box) {
   const cfg = state.cfg, sim = gameSim();
   const yrs = sim.years.filter(r => r.year <= game.over.year);
@@ -3229,6 +3376,21 @@ function renderEnding(box) {
         }).join("") + tail;
       })()}
     </div>` : ""}
+    <div class="gcard opt" style="margin-top:14px">
+      <h4>🧭 어떻게 했으면 나았을까 — 최적 운영 탐색</h4>
+      <p class="hint" style="margin:0 0 10px">
+        생활비 · 생활비 곡선 · 인출 전략 · 납입 순서${clamp0((cfg.reverse||{}).homeValue) > 0 ? " · 주택연금 개시 나이" : ""}를
+        하나씩 바꿔 보며 <strong>가장 오래 · 가장 굶지 않고 버티는 조합</strong>을 찾습니다.
+        시장 가정(수익률 해석 · 위기 횟수)은 넣지 않습니다 — 내가 고르는 게 아니라 주어지는 것이라,
+        넣으면 "운이 좋았으면 됐다"는 공허한 답이 나옵니다.
+      </p>
+      <div class="btnrow">
+        <button type="button" class="primary" id="btnOpt">최적 조합 찾기</button>
+        <button type="button" id="btnOptApply" hidden>이 조합으로 다시 시작</button>
+        <span class="hint" id="optOut" style="margin:0"></span>
+      </div>
+      <div id="optRows"></div>
+    </div>
     <div class="gcols">
       <div class="gcard"><h4>결과</h4>
         <div class="gline"><span>최종 자산</span><span>${fmt(last ? last.total : 0)}</span></div>
@@ -3283,6 +3445,55 @@ function renderEnding(box) {
       </div>
     </div>
     <p class="hint">같은 시드(${cfg.gameSeed})로 다시 시작하면 <strong>똑같은 시장</strong>을 만납니다. 전략만 바꿔서 비교해 보세요. 아래 표에 이번 플레이가 그대로 기록돼 있습니다.</p>`;
+
+  // 종료 화면은 매번 다시 그려지므로 여기서 묶어 준다
+  let optPick = null;
+  const btn = document.getElementById("btnOpt"), out = document.getElementById("optOut"), rows = document.getElementById("optRows");
+  if (!btn) return;
+  btn.onclick = () => {
+    btn.disabled = true; btn.textContent = "탐색 중…"; out.textContent = "조합을 하나씩 바꿔 보는 중입니다…";
+    setTimeout(() => optimize(r => {
+      optPick = r;
+      const bustPct = Math.round(r.cur.bust * 100), missPct = Math.round(r.cur.miss * 100);
+      out.innerHTML = `시드 ${r.seeds}개 · ${r.runs}회 시뮬 · `
+        + `<strong style="color:${bustPct === 0 ? "var(--good)" : "var(--critical)"}">만 ${r.die}세까지 파산 ${bustPct}%</strong>`
+        + ` · 생활비 미달 ${missPct}% · 세후 수령 ${fmtBig(r.cur.net)}`;
+      const kept = r.changes.filter(c => c.same), moved = r.changes.filter(c => !c.same);
+      rows.innerHTML = `<div style="margin-top:12px">`
+        + (moved.length
+            ? `<div class="gline" style="border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:4px"><span style="color:var(--muted)">바꿔야 했던 것</span><span></span></div>`
+              + moved.map(c => `<div class="gline"><span>${c.name}</span><span><span style="color:var(--muted)">${c.from}</span> → <strong class="pos">${c.to}</strong></span></div>`).join("")
+            : `<p class="hint" style="margin:0">지금 조합이 이미 최선입니다 — 손잡이를 어떻게 돌려도 더 나아지지 않습니다.</p>`)
+        + (kept.length ? `<div class="gline" style="margin-top:8px"><span style="color:var(--muted)">그대로 둬도 됐던 것</span><span style="color:var(--muted)">${kept.map(c => c.name).join(" · ")}</span></div>` : "")
+        + `</div>`;
+      document.getElementById("btnOptApply").hidden = moved.length === 0;
+      btn.disabled = false; btn.textContent = "다시 탐색";
+    }), 30);
+  };
+  document.getElementById("btnOptApply").onclick = () => {
+    if (!optPick) return;
+    // 탐색이 고른 값을 실제 설정에 적용하고 같은 시드로 새 판을 연다
+    optimizeApply(optPick);
+  };
+}
+
+/** 탐색 결과를 설정에 적용 (optimize 안에서 쓰던 손잡이를 그대로 재현한다) */
+function optimizeApply(r) {
+  const c = state.cfg, base = JSON.parse(JSON.stringify(c));
+  const at = n => { const i = r.knobsName.indexOf(n); return i < 0 ? null : r.pick[i]; };
+  const spendV = at("생활비"), curveV = at("생활비 곡선"), wdV = at("인출 전략"),
+        prioV = at("납입 순서"), revV = at("주택연금");
+  // 탐색과 같은 순서로 적용해야 같은 결과가 나온다 — 곡선을 먼저 깔고 그 위에 배율.
+  if (curveV === "curve") c.spendRules = spendCurve();
+  if (spendV != null) {
+    c.gameSpend = Math.round(clamp0(base.gameSpend) * spendV);
+    (c.spendRules || []).forEach(x => { x.amt = Math.round(clamp0(x.amt) * spendV); });
+  }
+  if (wdV != null) c.wdStrategy = wdV;
+  if (prioV != null) c.priority = PRIO_SETS[prioV].get(base);
+  if (r.hasHome && revV != null) c.reverse = { ...base.reverse, on: revV ? 1 : 0, startAge: revV || 70 };
+  gameStart();
+  syncCfgInputs(); renderSpendRules(); render(true, true);
 }
 
 /* ========================================================================
@@ -3327,6 +3538,32 @@ function syncLoan() {
     const n = document.getElementById("loan_" + k);
     if (n && n !== document.activeElement) n.value = L[k];
   });
+}
+
+const HLT_FIELDS = ["on", "propBase", "dependent"];
+function bindHlt() {
+  HLT_FIELDS.forEach(k => {
+    const n = document.getElementById("hlt_" + k);
+    if (!n) return;
+    n.addEventListener("input", () => { state.cfg.health[k] = num(n.value); syncHlt(); render(false); });
+  });
+}
+function syncHlt() {
+  const H = state.cfg.health || {}, cfg = state.cfg;
+  HLT_FIELDS.forEach(k => {
+    const n = document.getElementById("hlt_" + k);
+    if (n && n !== document.activeElement) n.value = H[k];
+  });
+  const info = document.getElementById("hltInfo");
+  if (!info) return;
+  if (!H.on) { info.textContent = "자동 계산으로 바꾸면 예상 보험료가 여기 나옵니다."; return; }
+  const y1 = Math.max(cfg.startYear, cfg.retireYear - 1), y2 = cfg.retireYear + 5;
+  const s1 = cashOf(cfg, y1, null), s2 = cashOf(cfg, y2, null);
+  info.innerHTML = `은퇴 직전(${y1}) <strong>연 ${fmt(Math.round(s1.health))}만원</strong> (직장가입) · `
+    + `은퇴 후(${y2}) <strong>연 ${fmt(Math.round(s2.health))}만원</strong> (지역가입)`
+    + `<br><span style="color:var(--muted)">재산과표 ${fmt(clamp0(H.propBase))}만원이면 재산보험료만 월 ${fmt(Math.round(propPremium(H.propBase)))}만원. `
+    + `공적연금은 소득의 50%만 잡히고, <strong>연금계좌에서 뺀 사적연금은 부과 대상이 아닙니다</strong> — 절세계좌의 큰 장점입니다. `
+    + `2024년 구조를 단순화한 근사라 실제 고지액과는 다릅니다(금융소득 미반영).</span>`;
 }
 
 const REV_FIELDS = ["on", "homeValue", "startAge", "kind"];
@@ -3657,6 +3894,7 @@ function syncCfgInputs() {
   syncRetMode();
   syncLoan();
   syncRev();
+  syncHlt();
   syncOpening();
 }
 
@@ -3819,6 +4057,7 @@ function migrateOpening(cfg, raw) {
   if (!Array.isArray(cfg.spendRules)) cfg.spendRules = [];
   cfg.loan = { ...d.loan, ...(cfg.loan || {}) };
   cfg.reverse = { ...d.reverse, ...(cfg.reverse || {}) };
+  cfg.health = { ...d.health, ...(cfg.health || {}) };
   // 예전 저장본의 단발성 목표 생활비 설정을 인출 규칙으로 옮긴다
   if (!Array.isArray(raw.wdRules) && raw.planTarget && raw.planTarget.target > 0) {
     const pt = raw.planTarget;
@@ -3936,6 +4175,7 @@ function seedExample() {
 buildPresetUI();
 bindLoan();
 bindRev();
+bindHlt();
 buildAccCfg();
 buildOpening();
 bindCfg();
