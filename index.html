@@ -2956,7 +2956,10 @@ function renderGame() {
   const startAssets = prev ? prev.total : ACC.reduce((s, a) => s + accBuckets(a).reduce((t, k) => t + clamp0((cfg.opening[a.id] || {})[k]), 0), 0);
   const c = cashOf(cfg, y, game.loan, prev ? prev.finIncome : 0);
   // 퇴직금은 IRP(퇴직금 수령)로 직행한다. 현금으로 받아 배분하는 돈이 아니다.
-  row(y).irpSev.in = Math.round(c.sev);
+  // 셀에는 '퇴직금 + 내가 따로 넣은 돈'이 함께 담기므로, 다시 그릴 때 내 몫까지
+  // 덮어쓰지 않도록 이미 얹힌 퇴직금을 걷어낸 뒤 다시 얹는다 (몇 번을 불러도 같은 값).
+  const sevIn = Math.round(clamp0(c.sev));
+  row(y).irpSev.in = Math.max(0, clamp0(row(y).irpSev.in) - sevIn) + sevIn;
   const loanPay = c.loan ? c.loan.paid : 0;
   const spare = c.salary + c.lump - c.living - c.spend - loanPay;
   const total = cfg.endYear - cfg.startYear + 1;
@@ -3094,21 +3097,27 @@ function renderGame() {
     game.flip = { year: y, isIn: !isIn };
     saveGame(); render(false, true);
   };
+  // 퇴직금 자동 유입분은 내가 배분한 돈이 아니다 — 입력칸에도, 합계에도 넣지 않는다.
+  const autoOf = id => (isIn && id === "irpSev" ? sevIn : 0);
   grid.innerHTML = ACC.map(a => {
     const v = bal ? bal[a.id].bal : 0;
+    const auto = autoOf(a.id);
+    const mine = clamp0(row(y)[a.id][isIn ? "in" : "out"]) - auto;
     return `<label>${a.name}</label>
-      <input type="number" step="50" data-g="${a.id}" value="${clamp0(row(y)[a.id][isIn ? "in" : "out"]) || ""}">
-      <span class="bal">잔액 ${fmt(v)}${srcLine(a, bal && bal[a.id].buckets)}</span>`;
+      <input type="number" step="50" data-g="${a.id}" value="${mine > 0 ? mine : ""}">
+      <span class="bal">잔액 ${fmt(v)}${auto > 0 ? `<span class="src"><span class="sev">퇴직금 자동 +${fmt(auto)}</span></span>` : ""}${srcLine(a, bal && bal[a.id].buckets)}</span>`;
   }).join("");
   grid.querySelectorAll("[data-g]").forEach(n => n.addEventListener("input", () => {
-    row(y)[n.dataset.g][isIn ? "in" : "out"] = clamp0(num(n.value));
-    updateAllocMsg(spare, isIn, y);
+    row(y)[n.dataset.g][isIn ? "in" : "out"] = clamp0(num(n.value)) + autoOf(n.dataset.g);
+    updateAllocMsg(spare, isIn, y, sevIn);
   }));
-  updateAllocMsg(spare, isIn, y);
+  updateAllocMsg(spare, isIn, y, sevIn);
 
   document.getElementById("btnAuto").onclick = () => {
     AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
-    if (isIn) allocByPriority(y, Math.max(0, spare));
+    // 퇴직금은 배분 대상이 아니므로 우선순위 배분이 끝난 뒤에 얹는다.
+    // 먼저 넣어 두면 연금계좌 합산 한도를 퇴직금이 다 먹어 버린다.
+    if (isIn) { allocByPriority(y, Math.max(0, spare)); row(y).irpSev.in = clamp0(row(y).irpSev.in) + sevIn; }
     else {
       // 부족분은 세금이 가장 적게 나오도록 뽑는다 (플래너의 전략을 그대로 씀).
       // greedyDraws 의 목표는 세후 금액이라 세금만큼 더 뽑아 준다.
@@ -3123,8 +3132,11 @@ function renderGame() {
   document.getElementById("btnTurnGo").onclick = turnAdvance;
 }
 
-function updateAllocMsg(spare, isIn, y) {
-  const put = ACC.reduce((s, a) => s + clamp0(row(y)[a.id][isIn ? "in" : "out"]), 0);
+function updateAllocMsg(spare, isIn, y, sevIn = 0) {
+  // 퇴직금 자동 유입분은 투자 여력에서 나온 돈이 아니라 IRP로 직행한 돈이다.
+  // 여기 같이 세면 퇴직금 받는 해마다 "여력보다 N만원 많습니다"가 뜬다.
+  const put = ACC.reduce((s, a) =>
+    s + clamp0(row(y)[a.id][isIn ? "in" : "out"]) - (isIn && a.id === "irpSev" ? clamp0(sevIn) : 0), 0);
   const el = document.getElementById("allocMsg");
   if (!el) return;
   if (isIn) {
@@ -4087,7 +4099,11 @@ function allocPlan(cfg, annual) {
 function allocByPriority(y, annual) {
   const cfg = state.cfg, rw = row(y);
   let left = annual;
-  let pensionRoom = Math.max(0, clamp0(cfg.pensionTotalCap) - PENSION.reduce((s, id) => s + clamp0(rw[id].in), 0));
+  // 퇴직금을 IRP로 옮긴 몫은 '납입'이 아니라 이전이라 연금계좌 합산 한도(1,800만)와 무관하다.
+  // 빼지 않으면 퇴직금 받는 해에 한도가 다 차 버려 그해 납입이 통째로 막힌다.
+  const sevIn = Math.round(clamp0(cashOf(cfg, y, null, 0).sev));
+  let pensionRoom = Math.max(0, clamp0(cfg.pensionTotalCap)
+    - PENSION.reduce((s, id) => s + Math.max(0, clamp0(rw[id].in) - (id === "irpSev" ? sevIn : 0)), 0));
   const order = ACC.filter(a => clamp0(cfg.priority[a.id]) > 0)
     .sort((a, b) => cfg.priority[a.id] - cfg.priority[b.id]);
 
