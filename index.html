@@ -306,8 +306,14 @@
   .evt:last-child { border-bottom: none; }
   .evt .nm { display: flex; align-items: center; gap: 6px; }
 
-  .alloccols { display: grid; grid-template-columns: minmax(280px, 420px) 1fr; gap: 18px; align-items: start; }
-  @media (max-width: 760px) { .alloccols { grid-template-columns: 1fr; } }
+  .alloccols { display: grid; grid-template-columns: minmax(430px, 620px) 1fr; gap: 26px; align-items: start; }
+  @media (max-width: 980px) { .alloccols { grid-template-columns: 1fr; } }
+  .src { display: block; margin-top: 2px; font-size: 11px; letter-spacing: -.01em; }
+  .src b { font-weight: 500; }
+  .src .free { color: var(--good); }
+  .src .sev  { color: var(--accent); }
+  .src .tax  { color: var(--critical); }
+  .src .sep  { color: var(--muted); opacity: .55; margin: 0 4px; }
   .brief { border-left: 3px solid var(--accent); padding: 2px 0 2px 14px; }
   .brief h5 { margin: 0 0 8px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
   .brief .bhead { margin: 0 0 7px; font-size: 15px; font-weight: 600; line-height: 1.4; }
@@ -871,6 +877,34 @@ function accBuckets(a) {
   if (a.kind === "isa" || a.kind === "taxable") return ["free", "gain"];
   return a.sev ? ["sev", "free", "ded", "gain"] : ["free", "ded", "gain"];
 }
+/**
+ * 배분 칸의 잔액 밑에 붙는 재원 구성 한 줄.
+ * 인출은 얼마를 빼느냐보다 '어느 재원에서 빠지느냐'가 세금을 정한다 —
+ * 총액만 보고는 5.5%가 붙을지 0%가 붙을지 알 수 없다.
+ *   연금계좌  비과세(0%) · 퇴직(퇴직소득세 감면) · 과세(연금소득세)
+ *   ISA      납입원금(0%) · 순이익(한도 후 9.9%)
+ *   일반계좌  취득가 · 평가익 — 둘은 보유 비중대로 함께 빠져 따로 못 뺀다
+ */
+function srcLine(a, b) {
+  if (!b) return "";
+  const parts = [];
+  const add = (cls, name, v) => { if (v > 0.5) parts.push(`<span class="${cls}">${name} <b>${fmt(v)}</b></span>`); };
+  if (a.kind === "pension") {
+    add("free", "비과세", b.free);
+    add("sev", "퇴직", b.sev);
+    add("tax", "과세", b.ded + b.gain);
+  } else if (a.kind === "isa") {
+    add("free", "원금", b.free);
+    add("tax", "순이익", b.gain);
+  } else {
+    add("free", "취득가", b.free);
+    add("tax", "평가익", b.gain);
+  }
+  if (!parts.length) return "";
+  const tie = a.kind === "taxable" ? ' <span class="sep">·</span> <span style="color:var(--muted)">안분 실현</span>' : "";
+  return `<span class="src">${parts.join('<span class="sep">·</span>')}${tie}</span>`;
+}
+
 /** 계좌 성격에 맞는 버킷 이름 (ISA·일반계좌의 free는 '원금'이라 부르는 편이 자연스럽다) */
 function bucketLabel(a, key) {
   if (key === "free") {
@@ -2643,7 +2677,7 @@ function renderGame() {
     const v = bal ? bal[a.id].bal : 0;
     return `<label>${a.name}</label>
       <input type="number" step="50" data-g="${a.id}" value="${clamp0(row(y)[a.id][isIn ? "in" : "out"]) || ""}">
-      <span class="bal">${isIn ? "" : "잔액 " + fmt(v)}</span>`;
+      <span class="bal">${isIn ? "" : `잔액 ${fmt(v)}${srcLine(a, bal && bal[a.id].buckets)}`}</span>`;
   }).join("");
   grid.querySelectorAll("[data-g]").forEach(n => n.addEventListener("input", () => {
     row(y)[n.dataset.g][isIn ? "in" : "out"] = clamp0(num(n.value));
