@@ -3648,9 +3648,17 @@ function syncHlt() {
   const sch = loanSchedule(cfg, {});          // 주담대 잔액이 재산 공제에 쓰이므로 실제 상환표를 넘긴다
   const fin = y => { const r = (lastSim && lastSim.years || []).find(x => x.year === y - 1); return r ? r.finIncome : 0; };
   const s1 = cashOf(cfg, y1, sch, fin(y1)), s2 = cashOf(cfg, y2, sch, fin(y2));
+  // 재산보험료 설명은 실제 계산과 같은 값을 봐야 한다 — 부동산 모듈을 켰으면 그해 과표를,
+  // 껐으면 직접 입력값을. 기본공제 1억(과 주담대 공제)을 뺀 뒤가 실제 부과 기준이다.
+  const P = cfg.property || {};
+  const gross = propertyTaxBase(cfg, y2);
+  const cut = (P.on && P.deductLoan && sch[y2]) ? clamp0(sch[y2].balance) : 0;
+  const propNet = Math.max(0, gross - HEALTH_PROP_DEDUCT - cut);
   info.innerHTML = `은퇴 직전(${y1}) <strong>연 ${fmt(Math.round(s1.health))}만원</strong> (직장가입) · `
     + `은퇴 후(${y2}) <strong>연 ${fmt(Math.round(s2.health))}만원</strong> (지역가입)`
-    + `<br><span style="color:var(--muted)">재산과표 ${fmt(clamp0(H.propBase))}만원이면 재산보험료만 월 ${fmt(Math.round(propPremium(H.propBase)))}만원. `
+    + `<br><span style="color:var(--muted)">${y2}년 재산과표 ${fmt(Math.round(gross))}만원`
+    + `${cut > 0 ? ` − 주담대 ${fmt(Math.round(cut))}` : ""} − 기본공제 ${fmt(HEALTH_PROP_DEDUCT)} = `
+    + `<strong>${fmt(Math.round(propNet))}만원</strong> → 재산보험료만 월 ${fmt(Math.round(propPremium(propNet)))}만원. `
     + `공적연금은 소득의 50%만, <strong>금융소득은 연 1,000만원을 넘으면 전액</strong>이 잡힙니다. `
     + `<strong>연금계좌에서 뺀 사적연금은 부과 대상이 아닙니다</strong> — 절세계좌의 큰 장점입니다. `
     + `전년도 소득으로 부과되므로 직전 해 금융소득을 봅니다. 2024년 구조를 단순화한 근사입니다.</span>`;
