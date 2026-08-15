@@ -510,6 +510,23 @@
         </div>
         <div id="spendPreview"></div>
 
+        <h3 style="margin-top:16px">🏘️ 부동산 (건강보험료·주택연금 공통)</h3>
+        <p class="hint" style="margin:0 0 8px">
+          건강보험 재산보험료와 주택연금이 <strong>같은 집을 봅니다.</strong> 여기 한 번만 넣으면 둘 다 여기서 읽습니다.
+          <code>시세 → 공시가격(시세×공시비율) → 재산과표(공시가격×60%)</code> 순으로 환산합니다.
+        </p>
+        <div class="fgrid">
+          <label class="f"><span class="t">사용</span>
+            <select id="prp_on"><option value="0">안 씀</option><option value="1">보유</option></select></label>
+          <label class="f"><span class="t">현재 시세 (만원)</span><input type="number" step="1000" id="prp_value"></label>
+          <label class="f"><span class="t" title="공시가격 ÷ 시세. 아파트는 대개 65~75%">공시가격 비율 %</span><input type="number" step="1" id="prp_officialRatio"></label>
+          <label class="f"><span class="t">연 상승률 %</span><input type="number" step="0.5" id="prp_growth"></label>
+          <label class="f" style="grid-column:span 2"><span class="t" title="실거주 1주택의 주담대는 재산보험료에서 공제됩니다">주담대 재산 공제</span>
+            <select id="prp_deductLoan"><option value="0">공제 안 함</option><option value="1">실거주 1주택으로 공제</option></select></label>
+          <label class="f" style="grid-column:span 3"><span class="t">&nbsp;</span>
+            <span class="hint" id="prpInfo" style="margin:0"></span></label>
+        </div>
+
         <h3 style="margin-top:16px">🏥 건강보험료 (자동 계산)</h3>
         <p class="hint" style="margin:0 0 8px">
           은퇴 후 지역가입 전환은 <strong>고정비가 아니라 자산·소득에 붙습니다.</strong>
@@ -519,7 +536,7 @@
         <div class="fgrid">
           <label class="f"><span class="t">사용</span>
             <select id="hlt_on"><option value="0">안 씀 (지출 일정으로 직접)</option><option value="1">자동 계산</option></select></label>
-          <label class="f"><span class="t">재산과표 (만원 · 공시가격 등)</span><input type="number" step="1000" id="hlt_propBase"></label>
+          <label class="f"><span class="t">재산과표 (부동산 미사용 시)</span><input type="number" step="1000" id="hlt_propBase"></label>
           <label class="f"><span class="t">피부양자 등재 시도</span>
             <select id="hlt_dependent"><option value="0">안 함</option><option value="1">요건 되면 0원</option></select></label>
           <label class="f" style="grid-column:span 3"><span class="t">&nbsp;</span>
@@ -535,7 +552,7 @@
         <div class="fgrid">
           <label class="f"><span class="t">사용</span>
             <select id="rev_on"><option value="0">안 씀</option><option value="1">가입</option></select></label>
-          <label class="f"><span class="t">주택가격 (만원)</span><input type="number" step="1000" id="rev_homeValue"></label>
+          <label class="f"><span class="t">주택가격 (부동산 미사용 시)</span><input type="number" step="1000" id="rev_homeValue"></label>
           <label class="f"><span class="t">개시 나이 (55~85)</span><input type="number" min="55" max="85" id="rev_startAge"></label>
           <label class="f"><span class="t">지급 방식</span>
             <select id="rev_kind">
@@ -1062,6 +1079,7 @@ function defaultState() {
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [], spendRules: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260101, gameSpend: 3600, gameDeathAge: 95,
     preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "geo",
+    property: { on: 0, value: 60000, officialRatio: 70, growth: 2.0, deductLoan: 1 },
     reverse: { on: 0, homeValue: 60000, startAge: 70, kind: "life" },
     health: { on: 0, propBase: 30000, dependent: 0 },
     loan: { on: 0, balance: 10000, rate: 4.0, endYear: 2045, endMonth: 12,
@@ -1467,12 +1485,34 @@ function eventAmount(cfg, e, y) {
    고정 금액으로 두면 자산이 많을수록 유리하게 계산되어 결과가 낙관 쪽으로 틀어진다.
    2024년 기준 구조를 단순화한 근사이며 실제 고지액과는 다르다.
    ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   부동산 — 건강보험료(재산 기준)와 주택연금(담보 가치)이 같은 집을 본다.
+   따로 입력하면 두 값이 어긋나므로 여기 한 번만 넣고 둘 다 여기서 읽는다.
+   시세 → 공시가격(시세 × 공시비율) → 재산과표(공시가격 × 공정시장가액비율 60%)
+   ------------------------------------------------------------------ */
+const FAIR_RATIO = 0.6;            // 주택 공정시장가액비율
+const HEALTH_PROP_DEDUCT = 10000;  // 지역가입 재산보험료 기본공제 1억
+
+/** 그해 시세 (만원) — 부동산도 물가·시장을 따라 움직인다 */
+function propertyValueAt(cfg, y) {
+  const P = cfg.property || {};
+  if (!P.on) return 0;
+  return clamp0(P.value) * Math.pow(1 + clamp0(P.growth) / 100, y - cfg.startYear);
+}
+/** 그해 재산과표 (건강보험 재산보험료의 기준) */
+function propertyTaxBase(cfg, y) {
+  const P = cfg.property || {};
+  if (!P.on) return clamp0((cfg.health || {}).propBase);   // 부동산 미사용 시 직접 입력값
+  return propertyValueAt(cfg, y) * clamp0(P.officialRatio) / 100 * FAIR_RATIO;
+}
+
 const LTC_MULT = 1.1295;          // 장기요양보험료(건보료의 12.95%)를 포함한 배수
 const HEALTH_RATE = 0.0709;       // 보수·소득 보험료율
 const HEALTH_SELF = 0.5;          // 직장가입자는 절반을 회사가 낸다
 // 재산과표(만원) → 월 재산보험료(만원) 근사. 1억원까지는 공제되어 0.
-const PROP_TABLE = [[0, 0], [10000, 0], [20000, 4.5], [30000, 8.0], [50000, 12.0],
-                    [70000, 15.5], [100000, 20.0], [150000, 25.0], [300000, 30.0]];
+// 공제 후 재산과표(만원) → 월 재산보험료(만원) 근사
+const PROP_TABLE = [[0, 0], [10000, 4.5], [20000, 8.0], [40000, 12.0],
+                    [60000, 15.5], [90000, 20.0], [140000, 25.0], [290000, 30.0]];
 function propPremium(base) {
   const v = clamp0(base);
   for (let i = 0; i < PROP_TABLE.length - 1; i++) {
@@ -1487,13 +1527,18 @@ function propPremium(base) {
  * 공적연금은 소득의 50%만 잡히고, 연금계좌에서 뺀 사적연금 분리과세분은
  * 애초에 부과 대상이 아니다 — 절세계좌의 큰 장점이라 여기서도 빼지 않는다.
  */
-function healthPremium(cfg, y, pensionIncome) {
+function healthPremium(cfg, y, pensionIncome, loanLeft) {
   const H = cfg.health || {};
   if (!H.on) return 0;
   const inc = clamp0(pensionIncome);
   if (y < cfg.retireYear) return inc * HEALTH_RATE * HEALTH_SELF * LTC_MULT;
-  const prop = clamp0(H.propBase);
-  if (H.dependent && inc <= 2000 && prop <= 54000) return 0;   // 피부양자 등재 요건
+  // 재산은 총액 기준이라 대출을 빼지 않는 것이 원칙이지만,
+  // 실거주 1주택의 주담대는 공제 대상이라 옵션으로 둔다.
+  const P = cfg.property || {};
+  const gross = propertyTaxBase(cfg, y);
+  const cut = (P.on && P.deductLoan) ? clamp0(loanLeft) : 0;
+  const prop = Math.max(0, gross - HEALTH_PROP_DEDUCT - cut);
+  if (H.dependent && inc <= 2000 && gross <= 54000) return 0;   // 피부양자 등재 요건
   return (inc * 0.5 * HEALTH_RATE + propPremium(prop) * 12) * LTC_MULT;
 }
 
@@ -1512,9 +1557,11 @@ const REV_CAP = 120000;   // 공시가격 12억 한도
 function reverseMonthly(cfg) {
   const R = cfg.reverse || {};
   if (!R.on) return 0;
-  const home = Math.min(clamp0(R.homeValue), REV_CAP);
-  if (home <= 0) return 0;
   const a = Math.max(55, Math.min(85, clamp0(R.startAge) || 55));
+  // 부동산 설정을 켰으면 개시 시점의 시세를 쓴다 (오늘 시세가 아니다)
+  const raw = (cfg.property || {}).on ? propertyValueAt(cfg, cfg.birthYear + a) : clamp0(R.homeValue);
+  const home = Math.min(raw, REV_CAP);
+  if (home <= 0) return 0;
   let rate = REV_TABLE[REV_TABLE.length - 1][1];
   for (let i = 0; i < REV_TABLE.length - 1; i++) {
     const [a0, r0] = REV_TABLE[i], [a1, r1] = REV_TABLE[i + 1];
@@ -2743,7 +2790,7 @@ function cashOf(cfg, y, loan) {
   const lv = livingOf(cfg, y);
   const rev = reverseOf(cfg, y);        // 주택연금 — 명목 고정, 종신
   // 주택연금은 대출이라 건보료 소득에 잡히지 않는다
-  const health = healthPremium(cfg, y, salary);
+  const health = healthPremium(cfg, y, salary, ln ? ln.balance : 0);
   return { list, salary: salary + rev, lump, spend: spend + health, sev, loan: ln,
            living: lv.amt, livingName: lv.name, rev, health };
 }
@@ -3540,6 +3587,31 @@ function syncLoan() {
   });
 }
 
+const PRP_FIELDS = ["on", "value", "officialRatio", "growth", "deductLoan"];
+function bindPrp() {
+  PRP_FIELDS.forEach(k => {
+    const n = document.getElementById("prp_" + k);
+    if (!n) return;
+    n.addEventListener("input", () => { state.cfg.property[k] = num(n.value); syncPrp(); syncHlt(); syncRev(); render(false); });
+  });
+}
+function syncPrp() {
+  const P = state.cfg.property || {}, cfg = state.cfg;
+  PRP_FIELDS.forEach(k => {
+    const n = document.getElementById("prp_" + k);
+    if (n && n !== document.activeElement) n.value = P[k];
+  });
+  const info = document.getElementById("prpInfo");
+  if (!info) return;
+  if (!P.on) { info.textContent = "「보유」로 바꾸면 건강보험료·주택연금이 이 값을 함께 씁니다."; return; }
+  const y = cfg.retireYear;
+  info.innerHTML = `${y}년 시세 <strong>${fmt(Math.round(propertyValueAt(cfg, y)))}만원</strong>`
+    + ` → 공시가격 ${fmt(Math.round(propertyValueAt(cfg, y) * clamp0(P.officialRatio) / 100))}`
+    + ` → 재산과표 <strong>${fmt(Math.round(propertyTaxBase(cfg, y)))}만원</strong>`
+    + `<br><span style="color:var(--muted)">건강보험 재산보험료는 여기서 기본공제 1억${P.deductLoan ? "과 주담대 잔액" : ""}을 뺀 금액에 붙습니다. `
+    + `주택연금은 <strong>개시 시점 시세</strong>로 계산하므로 개시를 늦추면 집값이 오른 만큼 월 수령액도 커집니다.</span>`;
+}
+
 const HLT_FIELDS = ["on", "propBase", "dependent"];
 function bindHlt() {
   HLT_FIELDS.forEach(k => {
@@ -3558,7 +3630,8 @@ function syncHlt() {
   if (!info) return;
   if (!H.on) { info.textContent = "자동 계산으로 바꾸면 예상 보험료가 여기 나옵니다."; return; }
   const y1 = Math.max(cfg.startYear, cfg.retireYear - 1), y2 = cfg.retireYear + 5;
-  const s1 = cashOf(cfg, y1, null), s2 = cashOf(cfg, y2, null);
+  const sch = loanSchedule(cfg, {});          // 주담대 잔액이 재산 공제에 쓰이므로 실제 상환표를 넘긴다
+  const s1 = cashOf(cfg, y1, sch), s2 = cashOf(cfg, y2, sch);
   info.innerHTML = `은퇴 직전(${y1}) <strong>연 ${fmt(Math.round(s1.health))}만원</strong> (직장가입) · `
     + `은퇴 후(${y2}) <strong>연 ${fmt(Math.round(s2.health))}만원</strong> (지역가입)`
     + `<br><span style="color:var(--muted)">재산과표 ${fmt(clamp0(H.propBase))}만원이면 재산보험료만 월 ${fmt(Math.round(propPremium(H.propBase)))}만원. `
@@ -3895,6 +3968,7 @@ function syncCfgInputs() {
   syncLoan();
   syncRev();
   syncHlt();
+  syncPrp();
   syncOpening();
 }
 
@@ -4058,6 +4132,7 @@ function migrateOpening(cfg, raw) {
   cfg.loan = { ...d.loan, ...(cfg.loan || {}) };
   cfg.reverse = { ...d.reverse, ...(cfg.reverse || {}) };
   cfg.health = { ...d.health, ...(cfg.health || {}) };
+  cfg.property = { ...d.property, ...(cfg.property || {}) };
   // 예전 저장본의 단발성 목표 생활비 설정을 인출 규칙으로 옮긴다
   if (!Array.isArray(raw.wdRules) && raw.planTarget && raw.planTarget.target > 0) {
     const pt = raw.planTarget;
@@ -4176,6 +4251,7 @@ buildPresetUI();
 bindLoan();
 bindRev();
 bindHlt();
+bindPrp();
 buildAccCfg();
 buildOpening();
 bindCfg();
