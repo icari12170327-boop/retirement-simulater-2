@@ -1171,6 +1171,14 @@ function severanceEffRate(pay, years) {
 /** 연령별 연금소득세율(%) */
 function pensionRate(age) { return age >= 80 ? 3.3 : age >= 70 ? 4.4 : 5.5; }
 
+/** 설정에 적어 둔 국민연금의 그해 세후 수령액.
+    applyWithdrawals 가 이 금액을 실수령에 더해 주므로, 현금 계산과 인출 목표는
+    반드시 같은 기준으로 이 값을 다뤄야 한다 — 한쪽만 세면 딱 이만큼 어긋난다. */
+function npsNetOf(cfg, age) {
+  const amt = age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
+  return amt * (1 - clamp0(cfg.npsRate) / 100);
+}
+
 /* ------------------------------------------------------------------
    사적연금이 1,500만원을 넘으면 '무조건 16.5%'가 아니다.
    2023년부터 종합과세와 분리과세 중 **유리한 쪽을 고를 수 있다**.
@@ -2313,7 +2321,10 @@ function simulate(opts = {}) {
     // ---- 인출
     let draws;
     if (opts.auto) {
-      draws = autoSpare < -0.5 ? greedyDraws(st, ctx, -autoSpare, cfg.wdStrategy) : Object.fromEntries(AID.map(id => [id, 0]));
+      // 목표에 국민연금 세후를 얹는다 — applyWithdrawals 가 실수령에 그만큼 더해 주므로,
+      // 그냥 두면 계좌에서 딱 그만큼 덜 빼고 끝난다 (여력엔 이미 반영돼 있다).
+      const npsNet = npsNetOf(cfg, age);
+      draws = autoSpare < -0.5 ? greedyDraws(st, ctx, -autoSpare + npsNet, cfg.wdStrategy) : Object.fromEntries(AID.map(id => [id, 0]));
     } else if (opts.plan && wdActive(cfg, y)) {
       const fixed = wdFixedOf(cfg, y);
       const seed = Object.fromEntries(AID.map(id => [id, Math.round(clamp0(fixed[id]))]));
@@ -2406,6 +2417,13 @@ function simulate(opts = {}) {
     warnings.push(`지출 일정에 생활비와 겹칠 수 있는 항목 ${dupHits.length}건 (${dupHits.map(x => x.name).join(", ")}) — `
       + `연 환산 약 ${fmt(tot)}만원입니다. 「목표 생활비」에 이미 포함시켰다면 <strong>같은 돈을 두 번 빼고 있습니다.</strong> `
       + `둘 중 한쪽만 남기세요.`);
+  }
+  // 국민연금을 설정에도 적고 일정에도 적으면 두 번 들어온다.
+  // 설정 쪽은 현금 카드에 '🏛️ 국민연금'으로 뜨므로 눈으로도 비교된다.
+  if (clamp0(cfg.npsAmount) > 0) {
+    const evt = (cfg.events || []).filter(e => e && e.kind === "salary" && /국민연금|노령연금/.test(e.name || ""));
+    if (evt.length) warnings.push(`국민연금을 <strong>설정(연 ${fmt(clamp0(cfg.npsAmount))}만원)</strong>과 `
+      + `<strong>일정(${evt.map(e => e.name).join(", ")})</strong> 양쪽에 적어 두셨습니다 — <strong>두 번 들어옵니다.</strong> 한쪽만 남기세요.`);
   }
   if ((cfg.health || {}).on && dupHits.some(x => x.label === "건강보험료")) {
     warnings.push(`건강보험료를 <strong>자동 계산으로 켜 둔 채</strong> 지출 일정에도 건강보험료가 있습니다 — 두 번 빠지고 있습니다. 지출 일정 쪽을 지우세요.`);
@@ -2953,10 +2971,13 @@ function cashOf(cfg, y, loan, finPrev) {
   const ln = loan && loan[y];
   const lv = livingOf(cfg, y);
   const rev = reverseOf(cfg, y);        // 주택연금 — 명목 고정, 종신
-  // 주택연금은 대출이라 건보료 소득에 잡히지 않는다
-  const health = healthPremium(cfg, y, salary, ln ? ln.balance : 0, finPrev);
-  return { list, salary: salary + rev, lump, spend: spend + health, sev, loan: ln,
-           living: lv.amt, livingName: lv.name, rev, health };
+  // 설정에 적은 국민연금. 일정에 안 적어도 들어오는 돈이라 여기서 소득으로 잡는다 —
+  // 안 잡으면 화면의 '부족'이 그만큼 부풀고, 배분기만 몰래 이 돈을 세게 된다.
+  const nps = npsNetOf(cfg, y - cfg.birthYear);
+  // 주택연금은 대출이라 건보료 소득에 잡히지 않는다. 국민연금은 잡힌다.
+  const health = healthPremium(cfg, y, salary + nps, ln ? ln.balance : 0, finPrev);
+  return { list, salary: salary + rev + nps, lump, spend: spend + health, sev, loan: ln,
+           living: lv.amt, livingName: lv.name, rev, health, nps };
 }
 
 /** 시작 화면 — 어떤 조건으로 출발하는지 한눈에 보여준다.
@@ -3123,8 +3144,9 @@ function renderGame() {
     <div class="gcols">
       <div class="gcard">
         <h4>올해 현금</h4>
-        <div class="gline"><span>소득</span><span class="pos">+${fmt(c.salary - clamp0(c.rev))}</span></div>
+        <div class="gline"><span>소득</span><span class="pos">+${fmt(c.salary - clamp0(c.rev) - clamp0(c.nps))}</span></div>
         ${c.rev > 0 ? `<div class="gline"><span>🏡 주택연금 <span style="font-size:10.5px;color:var(--muted)">명목 고정</span></span><span class="pos">+${fmt(c.rev)}</span></div>` : ""}
+        ${c.nps > 0 ? `<div class="gline"><span>🏛️ 국민연금 <span style="font-size:10.5px;color:var(--muted)">설정에 적은 값 · 세후</span></span><span class="pos">+${fmt(c.nps)}</span></div>` : ""}
         ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
         <div class="gline"><span>생활비 <span style="font-size:10.5px;color:var(--muted)">${c.livingName || (y > cfg.startYear ? `물가연동 · ${cfg.startYear}년 ${fmt(cfg.gameSpend)} 기준` : "물가연동")}</span></span><span class="neg">−${fmt(c.living)}</span></div>
         ${c.spend - clamp0(c.health) > 0.5 ? `<div class="gline"><span>예정 지출</span><span class="neg">−${fmt(c.spend - clamp0(c.health))}</span></div>` : ""}
@@ -3258,7 +3280,9 @@ function renderGame() {
       // greedyDraws 의 목표는 세후 금액이라 세금만큼 더 뽑아 준다.
       const st = rebuildStateAt(gameSim(), y);
       if (st) {
-        const d = greedyDraws(st.st, st.ctx, Math.max(0, -spare), cfg.wdStrategy);
+        // 화면의 '세후'는 계좌 인출분만 센다. 배분기의 '세후'에는 국민연금이 섞이므로
+        // 그만큼 목표를 올려 잡아야 계좌에서 실제로 부족분만큼 나온다.
+        const d = greedyDraws(st.st, st.ctx, Math.max(0, -spare) + npsNetOf(cfg, age), cfg.wdStrategy);
         AID.forEach(id => { row(y)[id].out = Math.round(d[id]); });
       }
     }
@@ -3318,8 +3342,12 @@ function updateAllocMsg(spare, isIn, y, sevIn = 0) {
 /** 특정 연도 시작 시점의 잔액·문맥을 시뮬레이션에서 되살린다 (자동 인출 배분용) */
 function rebuildStateAt(sim, y) {
   const cfg = state.cfg, prev = sim.years.find(r => r.year === y - 1);
-  if (!prev) return null;
-  const st = { bal: Object.fromEntries(AID.map(id => [id, { ...prev.acc[id].buckets }])), isaUsed: 0 };
+  // 첫 해는 직전 연도가 없다 — 그때는 기초 잔액이 곧 출발 잔액이다.
+  // 예전에는 null 을 돌려줘서 첫 턴에 「자동 배분」이 아무것도 하지 않았다.
+  if (!prev && y !== cfg.startYear) return null;
+  const st = { bal: Object.fromEntries(AID.map(id => [id, prev
+    ? { ...prev.acc[id].buckets }
+    : Object.fromEntries(BUCKETS.map(bk => [bk.key, clamp0((cfg.opening[id] || {})[bk.key])])) ])), isaUsed: 0 };
   const age = y - cfg.birthYear;
   const eligible = {}, pLimit = {}, pYear = {};
   for (const id of PENSION) {
