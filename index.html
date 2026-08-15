@@ -456,8 +456,8 @@
         <div class="fgrid">
           <label class="f" style="grid-column:span 2"><span class="t">📐 프리셋 수익률을 무엇으로 볼지</span>
             <select id="cfg_retMode">
-              <option value="geo">장기 목표 CAGR — 오래 굴리면 그 값에 수렴 (권장)</option>
-              <option value="exact">장기 수익률 고정 — 반드시 그 CAGR로 끝남</option>
+              <option value="exact">장기 수익률 고정 — 반드시 그 CAGR로 끝남 (권장)</option>
+              <option value="geo">장기 목표 CAGR — 오래 굴리면 그 값에 수렴</option>
               <option value="arith">산술평균 그대로 — 실현 CAGR은 더 낮게 나옴</option>
             </select></label>
           <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
@@ -1107,7 +1107,7 @@ function defaultState() {
     pensionCap: 1500, wdStrategy: "ratio", showBuckets: 1,
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [], spendRules: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260101, gameSpend: 3600, gameDeathAge: 95,
-    preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "geo",
+    preset: "option-f", riskFrom: -5, lateFrom: 10, crashCount: 1, crashPick: "", retMode: "exact",
     property: { on: 0, value: 60000, officialRatio: 70, growth: 2.0, deductLoan: 1 },
     reverse: { on: 0, homeValue: 60000, startAge: 70, kind: "life" },
     health: { on: 0, propBase: 30000, dependent: 0 },
@@ -1170,6 +1170,37 @@ function severanceEffRate(pay, years) {
 }
 /** 연령별 연금소득세율(%) */
 function pensionRate(age) { return age >= 80 ? 3.3 : age >= 70 ? 4.4 : 5.5; }
+
+/* ------------------------------------------------------------------
+   사적연금이 1,500만원을 넘으면 '무조건 16.5%'가 아니다.
+   2023년부터 종합과세와 분리과세 중 **유리한 쪽을 고를 수 있다**.
+   국민연금 외 소득이 적은 은퇴자는 연금소득공제와 6% 최저세율 덕에
+   대개 종합과세가 싸다 — 무조건 16.5%로 계산하면 세금을 과다 계상한다.
+   인적공제는 본인 150만원만 잡은 단순화라 실제보다 조금 높게 나온다.
+   ------------------------------------------------------------------ */
+/** 연금소득공제 (총연금액 기준, 한도 900만원) */
+function pensionDeduction(total) {
+  const t = total > 0 ? total : 0;
+  if (t <= 350) return t;
+  if (t <= 700) return 350 + (t - 350) * 0.4;
+  if (t <= 1400) return 490 + (t - 700) * 0.2;
+  return Math.min(900, 630 + (t - 1400) * 0.1);
+}
+// 과세표준 상한 · 세율 · 누진공제 (만원) — 지방소득세 10%는 뒤에서 곱한다
+const TAX_BRACKETS = [[1400, .06, 0], [5000, .15, 126], [8800, .24, 576],
+                      [15000, .35, 1544], [30000, .38, 1994], [50000, .40, 2594],
+                      [100000, .42, 3594], [Infinity, .45, 6594]];
+/** 종합소득 과세표준 → 산출세액 (지방소득세 포함, 만원) */
+function comprehensiveTax(base) {
+  const b = base > 0 ? base : 0;
+  for (const [cap, rate, ded] of TAX_BRACKETS)
+    if (b <= cap) return Math.max(0, b * rate - ded) * 1.1;
+  return 0;
+}
+/** 연금 총액(공적 + 사적 과세대상)을 종합과세했을 때의 세액 */
+function pensionCompTax(total) {
+  return comprehensiveTax(Math.max(0, (total > 0 ? total : 0) - pensionDeduction(total) - 150));
+}
 
 const clamp0 = v => (isFinite(v) && v > 0 ? v : 0);
 const num = v => { const n = parseFloat(String(v).replace(/,/g, "")); return isFinite(n) ? n : 0; };
@@ -1790,8 +1821,19 @@ function applyWithdrawals(st, draws, ctx) {
   }
 
   // --- 2단계: 연간 합산 기준으로 세율 결정
+  // 문턱을 넘으면 '무조건 16.5%'가 아니다 — 종합과세와 분리과세 중 유리한 쪽을 고를 수 있다.
+  // 국민연금 말고 다른 소득이 적은 은퇴자는 대개 종합과세가 싸다.
   const over1500 = taxablePension > (clamp0(cfg.pensionCap) || Infinity);
-  const pRate = (over1500 ? cfg.compRate : pensionRate(ctx.age)) / 100;
+  const npsNow = ctx.age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
+  let pRate = pensionRate(ctx.age) / 100, compPicked = false, sepTax = 0, compTax = 0;
+  if (over1500) {
+    const other = npsNow + clamp0(ctx.otherComp);      // 같은 해 종합과세에 합산될 다른 소득
+    sepTax = taxablePension * clamp0(cfg.compRate) / 100;
+    // 사적연금 때문에 늘어난 몫만 떼어 비교한다 (공적연금분은 어차피 내는 세금)
+    compTax = pensionCompTax(other + taxablePension) - pensionCompTax(other);
+    compPicked = compTax < sepTax;
+    pRate = Math.min(sepTax, compTax) / Math.max(1e-9, taxablePension);
+  }
   const sevRate = cfg.sevRate / 100;
 
   let pensionTax = 0, sevTax = 0, etcTax = 0;
@@ -1822,7 +1864,7 @@ function applyWithdrawals(st, draws, ctx) {
   const tax = pensionTax + etcTax + sevTax + isaTax + npsTax + capTax;
   return {
     det, gross, tax, net: gross - tax + nps - npsTax,
-    nps, npsTax, taxablePension, otherIncome, over1500,
+    nps, npsTax, taxablePension, otherIncome, over1500, compPicked, sepTax, compTax,
     pRate: pRate * 100, taxFree, isaTax, pensionTax, sevTax, etcTax, isaGainTaxed,
     realizedGain, capTax,
   };
@@ -2060,7 +2102,7 @@ function simulate(opts = {}) {
   const warnings = [];
   const shortYears = [];
   let cumIn = 0, cumCredit = 0, cumNet = 0, cumTax = 0, depleted = null;
-  let autoNeed = 0, autoMiss = 0;   // auto 모드에서 '부족분을 못 채운 해'
+  let autoNeed = 0, autoMiss = 0;   // auto 모드에서 '필요했던 금액'과 '못 채운 금액'
   let cumWdTax = 0, cumOtherTax = 0;
 
   for (let y = y0; y <= y1; y++) {
@@ -2236,7 +2278,9 @@ function simulate(opts = {}) {
       const n = Math.min(pYearCount[id], 10);
       pLimit[id] = pYearCount[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - n) * 1.2;
     }
-    const ctx = { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft };
+    // 종합과세는 그해 다른 소득까지 합산해 세율이 정해진다 — 일정에 적은 소득을 같이 넘긴다
+    const otherComp = eventsOf(cfg, y).reduce((t, e) => t + (e.kind === "salary" ? clamp0(e.amt) : 0), 0);
+    const ctx = { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft, otherComp };
 
     // ---- 인출
     let draws;
@@ -2293,6 +2337,7 @@ function simulate(opts = {}) {
     if (finIncome > 2000) rec.flags.finTax = Math.round(finIncome);
     rec.nps = res.nps; rec.npsTax = res.npsTax;
     rec.taxablePension = res.taxablePension; rec.pRate = res.pRate;
+    rec.compPicked = res.compPicked; rec.sepTax = res.sepTax; rec.compTax = res.compTax;
     rec.total = total;
     rec.pool = pool; // 연금계좌 합산 재원 — 인출 순서와 세율이 갈리는 곳
     rec.deflator = Math.pow(1 + cfg.inflation / 100, y - cfg.startYear);
@@ -2304,9 +2349,12 @@ function simulate(opts = {}) {
       if (res.net < want - Math.max(1, want * .01)) shortYears.push({ y, want, got: res.net });
     }
 
+    // 미달은 '해의 수'가 아니라 '금액'으로 센다. 2% 모자란 해와 90% 모자란 해를
+    // 똑같이 한 건으로 세면, 살짝씩 모자란 계획이 통째로 실격 처리된다.
     if (opts.auto && autoSpare < -0.5) {
-      autoNeed++;
-      if (res.net < -autoSpare - Math.max(1, -autoSpare * 0.02)) autoMiss++;
+      const need = -autoSpare;
+      autoNeed += need;
+      autoMiss += Math.max(0, need - res.net);
     }
     cumNet += res.net; cumTax += rec.tax; cumWdTax += rec.wdTax; cumOtherTax += rec.otherTax;
     if (depleted === null && y >= cfg.retireYear && total < 1 && rec.gross > 0) depleted = y;
@@ -2324,22 +2372,7 @@ function simulate(opts = {}) {
   }
   // 생활비에 이미 들어 있을 법한 항목을 지출 일정으로 또 넣으면 두 번 빠진다.
   // 흔한 사고라 이름으로 훑어 알려 준다 (지우지는 않는다 — 판단은 사용자 몫).
-  const DUP = [
-    [/건강보험|건보/, "건강보험료"], [/의료|병원|간병|요양/, "의료·간병비"],
-    [/관리비|공과금|통신|보험료|생명보험|실손/, "고정 관리비·보험료"],
-    [/식비|생활비|용돈/, "생활비"], [/대출|상환|원리금|이자/, "대출 상환"],
-  ];
-  const dupHits = [];
-  for (const e of (cfg.events || [])) {
-    if (!e || e.kind !== "expense") continue;
-    for (const [re, label] of DUP) {
-      if (re.test(e.name || "")) {
-        const per = (e.every > 1 ? clamp0(e.amt) / e.every : clamp0(e.amt));
-        dupHits.push({ name: e.name, label, per });
-        break;
-      }
-    }
-  }
+  const dupHits = dupExpenses(cfg);
   if (dupHits.length) {
     const tot = Math.round(dupHits.reduce((a, x) => a + x.per, 0));
     warnings.push(`지출 일정에 생활비와 겹칠 수 있는 항목 ${dupHits.length}건 (${dupHits.map(x => x.name).join(", ")}) — `
@@ -2435,6 +2468,34 @@ function yearRanges(ys) {
   }
   return out.join(", ") + "년";
 }
+/* ------------------------------------------------------------------
+   생활비와 겹치기 쉬운 지출 일정을 골라낸다.
+   "생활비 7,000만원"이라고 적을 때 대개 병원비·자동차·집수리는 그 안에 넣고
+   생각하는데, 일정에 또 적어 두면 같은 돈이 두 번 빠진다. 실제로 이것만으로
+   안전 생활비가 10% 넘게 깎였다.
+   ------------------------------------------------------------------ */
+const DUP_KINDS = [
+  [/건강보험|건보/, "건강보험료"], [/의료|병원|간병|요양/, "의료·간병비"],
+  [/관리비|공과금|통신|보험료|생명보험|실손/, "고정 관리비·보험료"],
+  [/식비|생활비|용돈/, "생활비"], [/대출|상환|원리금|이자/, "대출 상환"],
+  // 주기적으로 돌아오는 목돈도 대개 '생활비'에 이미 넣어 두고 생각한다
+  [/자동차|차량|자가용/, "자동차 교체"], [/수선|수리|리모델링|인테리어/, "주택 수선"],
+];
+/** @returns [{name, label, per}] — per 는 연 환산 금액 */
+function dupExpenses(cfg) {
+  const out = [];
+  for (const e of (cfg.events || [])) {
+    if (!e || e.kind !== "expense") continue;
+    for (const [re, label] of DUP_KINDS) {
+      if (re.test(e.name || "")) {
+        out.push({ name: e.name, label, per: e.every > 1 ? clamp0(e.amt) / e.every : clamp0(e.amt) });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 function renderWarnings(sim) {
   const groups = new Map(); // 사유(숫자 제거) → { label, years[] }
   sim.years.forEach(r => {
@@ -2754,7 +2815,11 @@ function paintTable(sim, syncInputs) {
     ref.tax.textContent = rec.tax >= .5 ? fmt(deflate(rec.tax, rec)) : "–";
     ref.tax.classList.toggle("zero", rec.tax < .5);
     const tt = [];
-    if (rec.taxablePension > 0) tt.push(`사적연금 과세대상 ${fmt(rec.taxablePension)}만원 · 적용세율 ${rec.pRate.toFixed(1)}%${rec.flags.over1500 ? ` (${fmt(state.cfg.pensionCap)}만원 초과 분리과세)` : ""}`);
+    if (rec.taxablePension > 0) tt.push(`사적연금 과세대상 ${fmt(rec.taxablePension)}만원 · 적용세율 ${rec.pRate.toFixed(1)}%`
+      + (rec.flags.over1500
+          ? ` — ${fmt(state.cfg.pensionCap)}만원 초과라 분리과세(${fmt(Math.round(rec.sepTax))}만)와 종합과세(${fmt(Math.round(rec.compTax))}만) 중 `
+            + `${rec.compPicked ? "종합과세" : "분리과세"}를 골랐습니다`
+          : ""));
     if (rec.holdTax > 0) tt.push(`일반계좌 배당 원천징수 ${fmt(rec.holdTax)}만원 — 인출과 무관하게 매년 발생하며 계좌에서 바로 빠집니다`);
     if (rec.capTax > 0) tt.push(`일반계좌 양도세 ${fmt(rec.capTax)}만원 (실현이익 ${fmt(rec.realizedGain)}만원)`);
     ref.tax.title = tt.join("\n");
@@ -2903,6 +2968,18 @@ function renderStart(box) {
         ${(cfg.spendRules || []).length ? `<div class="gline"><span style="color:var(--muted)">생활비 구간</span><span style="color:var(--muted)">${cfg.spendRules.length}개 · ${fmt(livingOf(cfg, cfg.retireYear).amt)} → ${fmt(livingOf(cfg, cfg.endYear).amt)}</span></div>` : ""}
         <div class="gline"><span>인생 일정</span><span>${nEvt ? nEvt + "건" : "없음"}</span></div>
         ${nEvt ? "" : `<p class="hint" style="margin:6px 0 0">일정이 없으면 소득도 0입니다. 아래 <strong>「4. 자동 채우기 → 인생 일정」</strong>에서 「기본 계획 불러오기」를 눌러 보세요.</p>`}
+        ${(() => {
+          // 생활비와 겹치는 지출은 출발 전에 잡아야 한다 — 판을 다 돌린 뒤에 알면 늦다
+          const d = dupExpenses(cfg);
+          if (!d.length) return "";
+          const tot = Math.round(d.reduce((a, x) => a + x.per, 0));
+          const pct = clamp0(cfg.gameSpend) ? Math.round(tot / cfg.gameSpend * 100) : 0;
+          return `<p class="hint" style="margin:8px 0 0;color:var(--critical)">
+            ⚠️ 생활비와 <strong>겹칠 수 있는 지출</strong> ${d.length}건 · 연 환산 ${fmt(tot)}만원${pct ? ` (생활비의 ${pct}%)` : ""} —
+            ${d.map(x => x.name).join(", ")}.
+            목표 생활비 ${fmt(cfg.gameSpend)}만원에 이미 넣어 두셨다면 <strong>같은 돈이 두 번 빠집니다.</strong>
+            둘 중 한쪽만 남기세요.</p>`;
+        })()}
       </div>
 
       ${(() => {
@@ -3206,7 +3283,7 @@ function updateAllocMsg(spare, isIn, y, sevIn = 0) {
   const pen = PENSION.reduce((s, id) => s + clamp0(row(y)[id].out), 0);
   box.innerHTML = `<span style="color:${over ? "var(--critical)" : "var(--good)"}">
       사적연금 과세대상 <strong>${fmt(tp)}</strong> / ${fmt(cap)}만
-      ${over ? `— 문턱 초과, 전액 ${state.cfg.compRate}% 분리과세` : "— 문턱 안"}</span>
+      ${over ? `— 문턱 초과, ${gotRes.compPicked ? "종합과세가 더 싸서 종합과세" : `${state.cfg.compRate}% 분리과세`}` : "— 문턱 안"}</span>
     ${pen > tp + 1 ? `<span style="color:var(--muted)"> · 연금계좌 세전 ${fmt(pen)} 중 <strong>${fmt(pen - tp)}</strong>은 비과세 원금·퇴직 재원이라 문턱에 안 잡힙니다</span>` : ""}`;
 }
 
@@ -3222,7 +3299,8 @@ function rebuildStateAt(sim, y) {
     pYear[id] = Math.max(1, age - 54);
     pLimit[id] = pYear[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - Math.min(pYear[id], 10)) * 1.2;
   }
-  return { st, ctx: { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft: 250 } };
+  const otherComp = eventsOf(cfg, y).reduce((t, e) => t + (e.kind === "salary" ? clamp0(e.amt) : 0), 0);
+  return { st, ctx: { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft: 250, otherComp } };
 }
 
 /** 실현 수익률 요약. 산술평균만 보면 변동성 침식이 안 보이므로 CAGR을 나란히 둔다. */
@@ -3358,7 +3436,7 @@ function safeSpend(onDone) {
       const rp = returnPath(state.cfg);
       const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
       const d = sim.sum.depleted;
-      // 자산이 안 말랐어도 생활비를 못 채운 해가 많으면 '버텼다'고 할 수 없다.
+      // 자산이 안 말랐어도 필요한 돈을 못 채웠으면 '버텼다'고 할 수 없다.
       // 연금수령한도에 묶여 못 뽑는 경우가 여기 걸린다.
       const mr = sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0;
       missSum += mr; missN++;
@@ -3384,11 +3462,11 @@ function safeSpend(onDone) {
     const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
     const mr = sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0;
     why = mr > 0.05
-      ? `아주 낮은 생활비로도 <strong>필요한 만큼 못 뽑은 해가 ${Math.round(mr * 100)}%</strong>입니다 — `
+      ? `아주 낮은 생활비로도 <strong>필요한 금액의 ${Math.round(mr * 100)}%를 못 뽑았습니다</strong> — `
         + `연금수령한도·만 55세 요건에 묶였거나 뺄 수 있는 계좌가 비었습니다. 자산 총액보다 <strong>일반계좌·ISA 비중</strong>이 문제입니다.`
       : `아주 낮은 생활비에도 자산이 ${sim.sum.depleted || "?"}년에 바닥납니다 — 순수하게 자산이 모자랍니다.`;
   } else if (miss > 0.02) {
-    why = `평균적으로 <strong>${Math.round(miss * 100)}%의 해</strong>는 필요한 만큼 못 뽑았습니다(한도에 걸려). 그만큼은 덜 쓰고 산다는 뜻입니다.`;
+    why = `평균적으로 <strong>필요한 금액의 ${Math.round(miss * 100)}%</strong>를 못 뽑았습니다(한도에 걸려). 그만큼은 덜 쓰고 산다는 뜻입니다.`;
   }
   state.cfg = keep;
   onDone({ spend: Math.round(best / 10) * 10, pct, own, die, n: seeds.length, why });
@@ -3698,7 +3776,7 @@ function buildPresetUI() {
 }
 const RET_MODE_INFO = {
   geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다. 다만 <strong>위기를 켜면 그만큼 평균도 내려갑니다</strong> — 얼마나 내려가는지는 아래 '위기까지 반영한 기대 CAGR'에 실제로 계산해 둡니다. 프리셋 수익률에 이미 과거 위기가 반영돼 있다면 이중 차감입니다.",
-  exact: "매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 총수익이 고정되므로 <strong>순서위험만 따로</strong> 볼 수 있습니다. 위기도 총수익이 아니라 '언제 맞느냐'만 바꿉니다. 포트폴리오 비교용.",
+  exact: "<strong>기본값입니다.</strong> 매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 위기도 총수익이 아니라 '언제 맞느냐'만 바꿔서 <strong>순서위험만 따로</strong> 시험합니다. 프리셋 수익률은 이미 과거 위기가 녹아든 장기 평균이므로, 위기를 얹으면서 평균까지 깎으면 같은 위험을 두 번 빼게 됩니다 — 그걸 피하는 모드입니다.",
   arith: "프리셋 숫자를 <strong>산술평균</strong>으로 씁니다. 복리로 굴리면 실현 CAGR은 그보다 낮아지며, 변동성이 클수록 차이가 큽니다(나스닥 2x는 5%p 이상).",
 };
 function syncRetMode() {
@@ -4580,7 +4658,7 @@ document.getElementById("btnSafe").onclick = () => {
       + `<strong style="font-size:15px">연 ${fmt(r.spend)}만원</strong> (월 ${fmt(Math.round(r.spend / 12))}만)`
       + ` <span style="color:${diff >= 0 ? "var(--good)" : "var(--critical)"}">· 지금 설정 ${fmt(cur)} 대비 ${diff >= 0 ? "+" : "−"}${fmt(Math.abs(diff))}</span>`
       + `<br><span style="color:var(--muted)">시작연도 기준 금액입니다(물가 연동). 생활비 구간을 쓰고 있으면 같은 비율로 함께 조정됩니다. `
-      + `자산이 남아도 <strong>생활비를 못 채운 해가 5%를 넘으면 '버텼다'로 치지 않습니다.</strong></span>`
+      + `자산이 남아도 <strong>필요한 금액의 5%를 넘게 못 채우면 '버텼다'로 치지 않습니다.</strong></span>`
       + `<br><span style="color:${r.own ? "var(--good)" : "var(--critical)"}">지금 시드(${state.cfg.gameSeed})로는 `
       + `${r.own ? "이 금액으로 끝까지 버팁니다" : "<strong>이 금액이어도 버티지 못합니다</strong> — 지금 시드가 불운한 쪽입니다. 시드를 바꾸거나 금액을 더 낮추세요"}.</span>`
       + (r.why ? `<br><span style="color:var(--critical)">${r.why}</span>` : "");
