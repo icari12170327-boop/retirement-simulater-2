@@ -447,6 +447,7 @@
       <h2 id="gameTitle">인생 시뮬</h2>
       <div class="btnrow">
         <button type="button" id="btnGameNew" class="primary">새로 시작</button>
+        <button type="button" id="btnAutoAll">⏩ 끝까지 자동</button>
         <button type="button" id="btnGameUndo">한 턴 되돌리기</button>
       </div>
     </div>
@@ -3271,21 +3272,8 @@ function renderGame() {
   updateAllocMsg(spare, isIn, y, sevIn);
 
   document.getElementById("btnAuto").onclick = () => {
-    AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
-    // 퇴직금은 배분 대상이 아니므로 우선순위 배분이 끝난 뒤에 얹는다.
-    // 먼저 넣어 두면 연금계좌 합산 한도를 퇴직금이 다 먹어 버린다.
-    if (isIn) { allocByPriority(y, Math.max(0, spare)); row(y).irpSev.in = clamp0(row(y).irpSev.in) + sevIn; }
-    else {
-      // 부족분은 세금이 가장 적게 나오도록 뽑는다 (플래너의 전략을 그대로 씀).
-      // greedyDraws 의 목표는 세후 금액이라 세금만큼 더 뽑아 준다.
-      const st = rebuildStateAt(gameSim(), y);
-      if (st) {
-        // 화면의 '세후'는 계좌 인출분만 센다. 배분기의 '세후'에는 국민연금이 섞이므로
-        // 그만큼 목표를 올려 잡아야 계좌에서 실제로 부족분만큼 나온다.
-        const d = greedyDraws(st.st, st.ctx, Math.max(0, -spare) + npsNetOf(cfg, age), cfg.wdStrategy);
-        AID.forEach(id => { row(y)[id].out = Math.round(d[id]); });
-      }
-    }
+    // 「끝까지 자동」과 똑같은 계산을 쓴다 (한 곳에서만 정한다)
+    autoAllocateYear(y, isIn);
     save();   // 턴을 넘기기 전에 닫아도 배분이 남아 있어야 한다
     renderGame();
   };
@@ -3421,7 +3409,37 @@ function crashScaleLine(cfg, y, crash) {
     <strong>${mine >= 0 ? "+" : ""}${mine.toFixed(1)}%</strong>로 반영됩니다</div>`;
 }
 
-function turnAdvance() {
+/* ------------------------------------------------------------------
+   한 해치 자동 배분 — 「자동 배분」 버튼과 「끝까지 자동」이 똑같이 쓴다.
+   두 곳이 따로 계산하면 "자동으로 돌린 결과"와 "매 턴 자동을 누른 결과"가
+   달라져서, 리포트의 '자동 배분에 맡겼다면'과도 어긋난다.
+   ------------------------------------------------------------------ */
+function autoAllocateYear(y, isInOverride) {
+  const cfg = state.cfg, age = y - cfg.birthYear;
+  const prev = gameSim().years.find(r => r.year === y - 1);
+  const c = cashOf(cfg, y, game.loan, prev ? prev.finIncome : 0);
+  const sevIn = Math.round(clamp0(c.sev));
+  const spare = c.salary + c.lump - c.living - c.spend - (c.loan ? c.loan.paid : 0);
+
+  // 방향은 여력의 부호로 정하되, 플레이어가 뒤집었으면 그 뜻을 따른다
+  const isIn = isInOverride === undefined ? spare > 0 : !!isInOverride;
+  AID.forEach(id => { row(y)[id].in = 0; row(y)[id].out = 0; });
+  if (isIn) {
+    // 퇴직금은 배분 대상이 아니므로 우선순위 배분이 끝난 뒤에 얹는다
+    allocByPriority(y, Math.max(0, spare));
+    row(y).irpSev.in = clamp0(row(y).irpSev.in) + sevIn;
+  } else {
+    row(y).irpSev.in = sevIn;
+    const st = rebuildStateAt(gameSim(), y);
+    if (st) {
+      const d = greedyDraws(st.st, st.ctx, Math.max(0, -spare) + npsNetOf(cfg, age), cfg.wdStrategy);
+      AID.forEach(id => { row(y)[id].out = Math.round(d[id]); });
+    }
+  }
+}
+
+/** 한 턴 진행 — 화면은 그리지 않는다 (끝까지 자동 돌릴 때 55번 그리면 느리다) */
+function turnStep() {
   const cfg = state.cfg, y = game.year;
   const rp = returnPath(cfg);
   game.crash = rp.crash;
@@ -3442,7 +3460,23 @@ function turnAdvance() {
   if (bankrupt) game.over = { why: "bankrupt", year: y };
   else if (y >= Math.min(cfg.endYear, deathYear)) game.over = { why: "end", year: y };
   else game.year = y + 1;
+}
 
+function turnAdvance() {
+  turnStep();
+  saveGame(); render(true, true);
+}
+
+/** 남은 턴을 전부 자동 배분으로 진행한다. 중간에 시작해도 된다. */
+function autoPlay() {
+  if (!game) return;
+  let guard = 0;
+  const limit = clamp0(state.cfg.endYear) - clamp0(state.cfg.startYear) + 5;
+  while (!game.over && guard++ < Math.max(5, limit)) {
+    autoAllocateYear(game.year);
+    turnStep();
+  }
+  game.pending = null;          // 마지막 턴의 수익률 카드는 종료 화면에서 의미가 없다
   saveGame(); render(true, true);
 }
 
@@ -4714,6 +4748,21 @@ document.getElementById("btnGameNew").onclick = () => {
     return;
   }
   gameStart(); render(true, true);
+};
+/* 남은 턴을 전부 자동으로 — 매 턴 「자동 배분」을 누르는 것과 같은 결과가 나온다.
+   판을 여러 번 돌려 조건만 비교하고 싶을 때 한 턴씩 넘기는 건 품이 너무 든다. */
+document.getElementById("btnAutoAll").onclick = () => {
+  const c = state.cfg;
+  const fresh = !game || game.over;
+  if (fresh) {
+    if (game && !game.over && !confirm("진행 중인 게임을 버리고 새로 시작할까요?")) return;
+    const total = ACC.reduce((s, a) => s + accBuckets(a).reduce((t, k) => t + clamp0((c.opening[a.id] || {})[k]), 0), 0);
+    if (total <= 0 && !confirm("기초 잔액이 0입니다. 자산 없이 0원부터 돌릴까요?")) return;
+    gameStart();
+  } else if (!confirm(`${game.year}년부터 마지막 해까지 자동 배분으로 진행합니다. 계속할까요?`)) return;
+  const btn = document.getElementById("btnAutoAll");
+  btn.disabled = true; btn.textContent = "돌리는 중…";
+  setTimeout(() => { autoPlay(); btn.disabled = false; btn.textContent = "⏩ 끝까지 자동"; }, 20);
 };
 document.getElementById("btnGameUndo").onclick = () => {
   if (!game || !game.log.length) return;
