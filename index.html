@@ -3530,15 +3530,21 @@ function pctileOf(sorted, p) {
   const lo = Math.floor(i), hi = Math.ceil(i);
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
 }
-function monteCarlo(n, onDone) {
+/* batch — 몇 번째 표본이냐. 100판은 어디까지나 표본이라 다시 뽑으면 답이 흔들린다.
+   같은 100판만 재탕하면 "이 조건의 생존율은 정확히 78%"라고 믿게 되므로,
+   「다시 돌리기」는 batch 를 올려 새 100판을 뽑는다.
+   판 간격(i*7717, 최대 ~77만)보다 훨씬 큰 소수를 곱해 표본끼리 겹치지 않게 한다. */
+function monteCarlo(n, onDone, batch = 0) {
   const cfg = state.cfg;
   const die = clamp0(cfg.gameDeathAge) || 95;
   const keep = clamp0(cfg.gameSeed) | 0;
+  const shift = (batch | 0) * 2000003;
   const runs = [];
   let mine = null;
-  // 첫 시드는 내가 실제로 플레이한 시장 — 같은 장에서 자동 배분이 어땠는지 보려고 따로 둔다
+  // 첫 시드는 내가 실제로 플레이한 시장 — 같은 장에서 자동 배분이 어땠는지 보려고 따로 둔다.
+  // 표본을 다시 뽑아도 이 판만은 고정이라 '내 판과의 비교'는 계속 성립한다.
   for (let i = 0; i < n; i++) {
-    state.cfg.gameSeed = i === 0 ? keep : keep + i * 7717;
+    state.cfg.gameSeed = i === 0 ? keep : keep + i * 7717 + shift;
     const rp = returnPath(state.cfg);
     const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
     const dep = sim.sum.depleted;
@@ -3605,9 +3611,21 @@ function monteCarlo(n, onDone) {
   const crashRank = Object.entries(byCrash).map(([k, v]) => ({ key: k, ...v }))
     .filter(v => v.bust > 0).sort((a, b) => b.bust / b.n - a.bust / a.n);
 
+  // 생존율은 100판으로 낸 '추정치'다. 표본을 다시 뽑으면 몇 %p 는 움직인다.
+  // 오차를 안 적으면 78% 를 확정된 값으로 읽게 되므로 같이 내보낸다.
+  //
+  // 흔히 쓰는 √(p(1-p)/n) 은 100판 전부 생존(p=1)이면 오차를 0 으로 낸다 —
+  // "100판 돌려 다 살았으니 파산 확률은 정확히 0" 이라는 뜻이 되는데, 이건 거짓이다.
+  // 100판에서 안 나왔을 뿐 101번째가 파산일 수 있다. 끝값에서도 폭이 남는
+  // Wilson 점수구간을 쓴다.
+  const p = 1 - busts.length / runs.length;
+  const nn = runs.length, z = 1.96, z2 = z * z;
+  const moe = z / (1 + z2 / nn) * Math.sqrt(Math.max(0, p * (1 - p)) / nn + z2 / (4 * nn * nn));
+
   onDone({
-    n, die, seed: keep, retire: cfg.retireYear, birth: cfg.birthYear,
-    survive: 1 - busts.length / runs.length,
+    n, die, seed: keep, retire: cfg.retireYear, birth: cfg.birthYear, batch: batch | 0,
+    survive: p,
+    surviveMoe: moe,                  // ±%p (95% 신뢰구간 폭의 절반, Wilson)
     bustAges, finals, nets,
     missAvg: runs.reduce((a, r) => a + r.miss, 0) / runs.length,
     auto: mine,                       // 내 시장을 자동 배분으로 돌린 결과
@@ -3745,7 +3763,12 @@ function bustReport(r) {
 
       ${r.crashRank.length ? `<div class="gline" style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
         <span style="color:var(--muted)">파산을 부른 시나리오</span><span style="color:var(--muted)">파산 / 겪은 판</span></div>`
-        + r.crashRank.slice(0, 4).map(c => `<div class="gline"><span>${CRASHES[c.key] ? CRASHES[c.key].name : c.key}</span><span>${c.bust} / ${c.n}판</span></div>`).join("") : ""}
+        + r.crashRank.slice(0, 4).map(c => `<div class="gline"><span>${CRASHES[c.key] ? CRASHES[c.key].name : c.key}</span><span>${c.bust} / ${c.n}판</span></div>`).join("")
+        // 파산이 몇 판뿐이면 여기 뜨는 종류도 그만큼밖에 안 된다.
+        // 이 말이 없으면 "이 시나리오만 위험하다"로 읽힌다 — 실제로는 표시 한계다.
+        + (r.busts.length <= 5
+          ? `<p class="hint" style="margin:6px 0 0;color:var(--muted)">파산이 ${r.busts.length}판이라 여기 오를 수 있는 시나리오도 최대 ${r.busts.length}종입니다 —
+             <strong>다른 시나리오가 안전하다는 뜻이 아니라</strong>, 이번 표본에서 파산까지 간 판이 그것뿐이라는 뜻입니다.</p>` : "") : ""}
 
       <div class="tablebox" style="max-height:none;margin-top:12px">
         <table class="opentbl"><thead><tr>
@@ -4051,7 +4074,10 @@ function renderEnding(box) {
   };
 
   // ---- 100판 돌려보기
+  // 누를 때마다 새 100판을 뽑는다. 같은 표본을 재탕하면 몇 번을 눌러도 숫자가 똑같아
+  // 표본 오차가 없는 확정값처럼 보인다 — 실제로는 다시 뽑으면 몇 %p 씩 움직인다.
   const mcBtn = document.getElementById("btnMC"), mcOut = document.getElementById("mcOut"), mcRows = document.getElementById("mcRows");
+  let mcBatch = 0;
   if (mcBtn) mcBtn.onclick = () => {
     mcBtn.disabled = true; mcBtn.textContent = "돌리는 중…";
     mcOut.textContent = "시장만 바꿔 100번 다시 살아보는 중입니다…";
@@ -4072,8 +4098,12 @@ function renderEnding(box) {
         </div>`).join("");
       const busted = game.over.why === "bankrupt";
       const sv = Math.round(r.survive * 100);
+      // 100판은 표본이라 다시 뽑으면 이만큼 움직인다 — 확정값처럼 읽히지 않게 같이 적는다
+      const moe = Math.round(r.surviveMoe * 100);
       mcOut.innerHTML = `${r.n}판 중 <strong style="color:${sv >= 80 ? "var(--good)" : sv >= 50 ? "var(--accent)" : "var(--critical)"}">`
-        + `${sv}판이 만 ${r.die}세까지 버텼습니다</strong>`;
+        + `${sv}판이 만 ${r.die}세까지 버텼습니다</strong>`
+        + (moe > 0 ? ` <span style="color:var(--muted);font-size:12px">± ${moe}%p</span>` : "")
+        + (r.batch ? ` <span style="color:var(--muted);font-size:11px">· ${r.batch + 1}번째 표본</span>` : "");
       mcRows.innerHTML = `<div style="margin-top:12px">
           <div class="gline"><span style="color:var(--muted)">최종 자산 분포</span><span style="color:var(--muted)">하위 10% / 중앙값 / 상위 10%</span></div>
           <div class="gline"><span>남는 돈</span><span>${fmtBig(pctileOf(r.finals, .1))} · <strong>${fmtBig(pctileOf(r.finals, .5))}</strong> · ${fmtBig(pctileOf(r.finals, .9))}</span></div>
@@ -4097,9 +4127,15 @@ function renderEnding(box) {
             : `이번 판은 완주했지만 <strong>${100 - sv}%는 파산했습니다</strong> — ${sv >= 80 ? "조건이 웬만한 시장을 견딥니다." : "운이 따라 준 판일 수 있습니다."}`}
           100판은 모두 <strong>자동 배분</strong>으로 돌린 것이라, 내 결과와의 차이에는 <strong>배분 판단</strong>도 섞여 있습니다.
           위기 횟수·수익률 해석은 지금 설정 그대로입니다.
+        </p>
+        <p class="hint" style="margin:8px 0 0;color:var(--muted)">
+          ${sv}%는 <strong>100판을 뽑아 낸 추정치</strong>입니다 — 다른 100판을 뽑으면 대략 <strong>${Math.max(0, sv - moe)}~${Math.min(100, sv + moe)}%</strong> 사이에서 움직입니다.
+          <strong>「다시 돌리기」를 누르면 새 100판</strong>을 뽑으니, 몇 번 눌러 보면 이 조건이 실제로 얼마나 안정적인지 보입니다.
+          숫자가 크게 흔들린다면 아직 <strong>운에 기대고 있는 조건</strong>입니다.
         </p>`;
-      mcBtn.disabled = false; mcBtn.textContent = "다시 돌리기";
-    }), 30);
+      mcBatch++;
+      mcBtn.disabled = false; mcBtn.textContent = "새 100판 돌리기";
+    }, mcBatch), 30);
   };
 }
 
