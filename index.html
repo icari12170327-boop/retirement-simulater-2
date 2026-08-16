@@ -942,6 +942,20 @@
         </p>
       </div>
     </details>
+
+    <details>
+      <summary>🧪 자체 진단 — 계산이 스스로 맞는지 검사</summary>
+      <div class="pad">
+        <p class="hint" style="margin:0 0 8px">
+          국민연금 중복 집계, 위기 구간 중첩, 시드 재현성, 저장본 마이그레이션, NaN·음수 세금 등
+          <strong>계산이 스스로 무너지지 않았는지</strong> 확인합니다. 브라우저 콘솔에서 <code>__selfTest()</code> 로도 실행할 수 있습니다.
+        </p>
+        <div class="btnrow" style="margin-bottom:8px">
+          <button id="btnSelfTest" type="button">🧪 자체 진단 실행</button>
+        </div>
+        <div id="selfTestOut"></div>
+      </div>
+    </details>
   </section>
 
   <footer>
@@ -1098,8 +1112,14 @@ function bucketLabel(a, key) {
 /* ========================================================================
    상태
    ======================================================================== */
+/* 저장본 스키마 버전.
+   1 — schemaVersion 이 없던 최초 형태 (isaMoveYear/isaMoveAmt 시절 포함)
+   2 — 중첩 객체 deep merge + 검증 도입 */
+const SCHEMA_VERSION = 2;
+
 function defaultState() {
   const cfg = {
+    schemaVersion: SCHEMA_VERSION,
     birthYear: 1985, startYear: 2026, retireYear: 2050, endYear: 2080,
     inflation: 2.0, salaryTier: "low", isaType: "general",
     timing: "end", realView: 0,
@@ -1181,6 +1201,85 @@ function pensionRate(age) { return age >= 80 ? 3.3 : age >= 70 ? 4.4 : 5.5; }
 function npsNetOf(cfg, age) {
   const amt = age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
   return amt * (1 - clamp0(cfg.npsRate) / 100);
+}
+/** 국민연금 세전 — 세후와 짝을 이뤄야 gross/net 기준이 흔들리지 않는다 */
+function npsGrossOf(cfg, age) {
+  return age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
+}
+
+/* ==================================================================
+   [현금흐름 단일 진실 공급원]  Cashflow — single source of truth
+
+   고친 문제
+   ─────────
+   국민연금이 두 곳에서 동시에 잡히고 있었다.
+     ① cashOf() 가 salary 에 nps 를 더해 autoSpare(여력)에 반영
+     ② applyWithdrawals() 가 net 에 (nps - npsTax) 를 또 더함
+   그래서 simulate() 는 `greedyDraws(-autoSpare + npsNet)` 처럼
+   목표에 npsNet 을 되얹어 상쇄하는 우회를 하고 있었는데, 이 보정이
+   자동 진행 경로에만 있어서 안전 생활비·몬테카를로·종료 평가 등
+   다른 경로에서는 국민연금이 두 번 세어졌다. 결과가 실제보다
+   낙관적으로 나온 원인이다.
+
+   해결
+   ────
+   현금흐름 항목을 아래 이름으로 명시 분리하고, 국민연금은
+   totalCashAvailable 에 "정확히 한 번만" 들어가게 한다.
+   모든 모드가 buildCashflow() / spendingShortfallOf() 하나만 쓴다.
+
+     earnedIncome            근로·사업·기타 외부소득 (세후 취급)
+     publicPensionGross      국민연금 세전
+     publicPensionNet        국민연금 세후
+     portfolioWithdrawalGross 금융자산 총인출
+     portfolioWithdrawalNet   금융자산 세후인출 (국민연금 제외)
+     housingPension          주택연금 (대출이라 비과세·건보 미부과)
+     otherCash               기타 사용 가능 현금
+     requiredSpending        필요한 생활비 (생활비+지출+대출상환+건보료)
+     totalCashAvailable      그해 실제 사용 가능 현금
+     spendingShortfall       max(0, 필요 - 가용)
+     spendingSurplus         max(0, 가용 - 필요)
+   ================================================================== */
+
+/** 그해 현금흐름을 항목별로 분해한다. DOM 을 만지지 않는 순수 함수. */
+function buildCashflow(parts) {
+  const earnedIncome            = clamp0(parts.earnedIncome);
+  const publicPensionGross      = clamp0(parts.publicPensionGross);
+  const publicPensionNet        = clamp0(parts.publicPensionNet);
+  const portfolioWithdrawalGross= clamp0(parts.portfolioWithdrawalGross);
+  const portfolioWithdrawalNet  = clamp0(parts.portfolioWithdrawalNet);
+  const housingPension          = clamp0(parts.housingPension);
+  const otherCash               = clamp0(parts.otherCash);
+  const requiredSpending        = clamp0(parts.requiredSpending);
+
+  // 국민연금은 여기 단 한 번. portfolioWithdrawalNet 에는 절대 포함되지 않는다.
+  const totalCashAvailable = earnedIncome + publicPensionNet
+    + portfolioWithdrawalNet + housingPension + otherCash;
+
+  const spendingShortfall = Math.max(0, requiredSpending - totalCashAvailable);
+  const spendingSurplus   = Math.max(0, totalCashAvailable - requiredSpending);
+
+  return { earnedIncome, publicPensionGross, publicPensionNet,
+           portfolioWithdrawalGross, portfolioWithdrawalNet,
+           housingPension, otherCash, requiredSpending,
+           totalCashAvailable, spendingShortfall, spendingSurplus };
+}
+
+/** 미달액 — 모든 모드(1년 진행/자동/안전생활비/몬테카를로/최적화/종료평가/파산분석)가 이 함수만 쓴다 */
+function spendingShortfallOf(parts) { return buildCashflow(parts).spendingShortfall; }
+
+/** cashOf() 결과 + 그해 인출결과(rec)를 합쳐 최종 현금흐름을 만든다.
+    rec 를 생략하면 '인출 전' 상태(= 얼마가 모자라 인출이 필요한가)를 준다.
+    화면·게임·종료평가가 전부 이 함수 하나만 쓰게 해서 판정식이 갈라지지 않게 한다. */
+function cashflowOf(c, rec) {
+  return buildCashflow({
+    earnedIncome: c.earnedIncome + c.lump,
+    publicPensionGross: c.npsGross,
+    publicPensionNet: c.npsNet,
+    portfolioWithdrawalGross: rec ? clamp0(rec.gross) : 0,
+    portfolioWithdrawalNet: rec ? clamp0(rec.net) : 0,   // rec.net 은 국민연금 불포함
+    housingPension: c.rev,
+    requiredSpending: c.requiredSpending,
+  });
 }
 
 /* ------------------------------------------------------------------
@@ -1302,25 +1401,46 @@ function phaseParams(cfg, y) {
 }
 
 /** 이번 판에 터질 위기 — 종류와 시작 연도를 시드로 정한다. 투자 시작 후에만 온다. */
+/* [위기 중복 배치 수정]
+   예전에는 시작연도를 40번 무작위로 뽑아 보고, 그래도 겹치면 겹친 자리를
+   그냥 썼다. 그러면 한 해에 두 시나리오가 덮여 뒤에 쓴 쪽만 남고,
+   "위기 3회"라고 해 놓고 실제로는 2회만 겪는 판이 조용히 생긴다.
+
+   이제는
+     · 가능한 모든 시작 연도를 먼저 계산하고
+     · 기존 구간과 겹치지 않는 후보만 남긴 뒤 그중에서 고른다
+     · 후보가 없으면 배치를 멈추고 위기 수를 자동 축소한다
+     · 시나리오가 endYear 를 넘으면 애초에 후보에서 제외한다
+   같은 시드는 항상 같은 배치가 나온다 (뽑는 순서를 바꾸지 않았다).
+   결과 맵에는 __meta 로 요청/실제 배치 수를 실어 UI 가 경고할 수 있게 한다. */
 function crashPlan(cfg) {
-  const n = Math.max(0, Math.min(3, +cfg.crashCount || 0));
-  if (!n) return {};
+  const want = Math.max(0, Math.min(3, +cfg.crashCount || 0));
+  const meta = { requested: want, placed: 0, truncated: false };
+  if (!want) return Object.defineProperty({}, "__meta", { value: meta, enumerable: false });
+
   const keys = Object.keys(CRASHES);
   const r = mulberry32((clamp0(cfg.gameSeed) | 0) ^ 0xC0FFEE);
   const first = cfg.startYear + 3, last = cfg.endYear;
   const map = {}, used = [];
-  for (let i = 0; i < n; i++) {
+
+  for (let i = 0; i < want; i++) {
     const key = cfg.crashPick && CRASHES[cfg.crashPick] ? cfg.crashPick : keys[Math.floor(r() * keys.length)];
     const pat = CRASHES[key].pattern;
-    let start = 0;
-    for (let tries = 0; tries < 40; tries++) {          // 이미 터진 위기와 겹치지 않게
-      start = first + Math.floor(r() * Math.max(1, last - first - pat.length));
-      if (!used.some(u => start < u.end && start + pat.length > u.start)) break;
+
+    // 시나리오 전체가 기간 안에 들어가는 시작연도만 후보로 삼는다
+    const cand = [];
+    for (let s = first; s + pat.length - 1 <= last; s++) {
+      if (!used.some(u => s < u.end && s + pat.length > u.start)) cand.push(s);
     }
+    if (!cand.length) { meta.truncated = true; break; }   // 자리가 없으면 위기 수를 줄인다
+
+    const start = cand[Math.floor(r() * cand.length)];
     used.push({ start, end: start + pat.length });
     pat.forEach((v, k) => { map[start + k] = { key, ret: v * 100, step: k, len: pat.length }; });
+    meta.placed++;
   }
-  return map;
+  // __meta 는 열거되지 않게 둔다 — 연도 키만 도는 기존 반복문이 깨지면 안 된다
+  return Object.defineProperty(map, "__meta", { value: meta, enumerable: false });
 }
 
 /**
@@ -1875,10 +1995,22 @@ function applyWithdrawals(st, draws, ctx) {
   const nps = ctx.age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
   const npsTax = nps * cfg.npsRate / 100;
 
+  /* [국민연금 이중 집계 수정]
+     예전에는  net = gross - tax + nps - npsTax  였는데 tax 안에 이미 npsTax 가
+     들어 있어 국민연금 세금을 두 번 뺐다. 게다가 net 에 nps 를 얹는 바람에
+     cashOf() 의 salary(=nps 포함)와 합쳐지면 국민연금이 두 번 세어졌다.
+
+     이제 net 은 '금융자산 세후인출'만 뜻한다 (국민연금 불포함).
+     국민연금은 npsNet 으로 따로 내보내고, 합산은 buildCashflow() 가
+     totalCashAvailable 에서 딱 한 번만 한다. */
+  const withdrawalTax = pensionTax + etcTax + sevTax + isaTax + capTax; // 금융자산 인출분 세금
+  const tax = withdrawalTax + npsTax;                                   // 신고 기준 총세액 (표시용)
+
   const gross = AID.reduce((s, id) => s + det[id].gross, 0);
-  const tax = pensionTax + etcTax + sevTax + isaTax + npsTax + capTax;
   return {
-    det, gross, tax, net: gross - tax + nps - npsTax,
+    det, gross, tax, withdrawalTax,
+    net: gross - withdrawalTax,       // 금융자산 세후인출 — 국민연금 제외
+    npsNet: nps - npsTax,             // 국민연금 세후 — 합산은 buildCashflow 에서 한 번만
     nps, npsTax, taxablePension, otherIncome, over1500, compPicked, sepTax, compTax,
     pRate: pRate * 100, taxFree, isaTax, pensionTax, sevTax, etcTax, isaGainTaxed,
     realizedGain, capTax,
@@ -2151,10 +2283,17 @@ function simulate(opts = {}) {
     // auto 모드 — 저장된 셀 대신 게임과 같은 방식(현금 부족분만큼 인출 / 남으면 우선순위 배분)으로
     // 그해 납입·인출을 그 자리에서 정한다. 역산·진단은 설정을 바꿔 가며 돌려야 하므로
     // 이미 채워진 셀을 읽는 방식으로는 답이 안 나온다.
-    let autoSpare = 0;
+    let autoSpare = 0, autoCash = null;
     if (opts.auto) {
       const c = cashOf(cfg, y, opts.auto.loan, years.length ? years[years.length - 1].finIncome : 0);
-      autoSpare = c.salary + c.lump - c.living - c.spend - (c.loan ? c.loan.paid : 0);
+      // 인출 전 현금흐름 — 국민연금은 여기서 딱 한 번 잡힌다 (c.earnedIncome 에는 없다)
+      autoCash = buildCashflow({
+        earnedIncome: c.earnedIncome + c.lump,
+        publicPensionGross: c.npsGross, publicPensionNet: c.npsNet,
+        housingPension: c.rev,
+        requiredSpending: c.requiredSpending,
+      });
+      autoSpare = autoCash.spendingSurplus - autoCash.spendingShortfall;
       const ins = autoSpare > 0 ? allocPlan(cfg, autoSpare) : Object.fromEntries(AID.map(id => [id, 0]));
       ins.irpSev = clamp0(ins.irpSev) + Math.round(clamp0(c.sev));
       r = Object.fromEntries(AID.map(id => [id, { in: ins[id] || 0, out: 0 }]));
@@ -2325,17 +2464,18 @@ function simulate(opts = {}) {
     // ---- 인출
     let draws;
     if (opts.auto) {
-      // 목표에 국민연금 세후를 얹는다 — applyWithdrawals 가 실수령에 그만큼 더해 주므로,
-      // 그냥 두면 계좌에서 딱 그만큼 덜 빼고 끝난다 (여력엔 이미 반영돼 있다).
-      const npsNet = npsNetOf(cfg, age);
-      draws = autoSpare < -0.5 ? greedyDraws(st, ctx, -autoSpare + npsNet, cfg.wdStrategy) : Object.fromEntries(AID.map(id => [id, 0]));
+      // [수정] 예전에는 목표에 npsNet 을 되얹어 이중 집계를 상쇄했다.
+      // 이제 net 이 금융자산분만 뜻하고 국민연금은 autoCash 에서 이미 한 번 잡혔으므로,
+      // 모자란 만큼(spendingShortfall)만 그대로 인출 목표로 준다.
+      const needNet = autoCash ? autoCash.spendingShortfall : 0;
+      draws = needNet > 0.5 ? greedyDraws(st, ctx, needNet, cfg.wdStrategy) : Object.fromEntries(AID.map(id => [id, 0]));
     } else if (opts.plan && wdActive(cfg, y)) {
       const fixed = wdFixedOf(cfg, y);
       const seed = Object.fromEntries(AID.map(id => [id, Math.round(clamp0(fixed[id]))]));
       const want = wdTargetOf(cfg, y);
       if (want > 0) {
-        const nps = age >= cfg.npsAge ? clamp0(cfg.npsAmount) * (1 - cfg.npsRate / 100) : 0;
-        draws = greedyDraws(st, ctx, Math.max(0, want - nps), cfg.wdStrategy, seed);
+        // 목표는 '총 실수령'이므로 국민연금 세후를 뺀 나머지만 계좌에서 뽑는다
+        draws = greedyDraws(st, ctx, Math.max(0, want - npsNetOf(cfg, age)), cfg.wdStrategy, seed);
       } else {
         draws = seed;
       }
@@ -2378,26 +2518,43 @@ function simulate(opts = {}) {
     const finIncome = divIncome + (cfg.taxType === "etf" ? res.realizedGain : 0);
     rec.finIncome = finIncome;
     if (finIncome > 2000) rec.flags.finTax = Math.round(finIncome);
-    rec.nps = res.nps; rec.npsTax = res.npsTax;
+    rec.nps = res.nps; rec.npsTax = res.npsTax; rec.npsNet = res.npsNet;
     rec.taxablePension = res.taxablePension; rec.pRate = res.pRate;
     rec.compPicked = res.compPicked; rec.sepTax = res.sepTax; rec.compTax = res.compTax;
     rec.total = total;
     rec.pool = pool; // 연금계좌 합산 재원 — 인출 순서와 세율이 갈리는 곳
     rec.deflator = Math.pow(1 + cfg.inflation / 100, y - cfg.startYear);
 
-    // 목표 생활비 규칙 대비 미달 여부
+    // 목표 생활비 규칙 대비 미달 여부 — 목표는 '총 실수령'이므로 국민연금을 포함해 견준다.
+    // (rec.net 은 금융자산분만이라 그것만으로 재면 국민연금 받는 해가 부당하게 미달로 찍힌다)
     const want = wdTargetOf(cfg, y);
     if (want > 0) {
       rec.target = want;
-      if (res.net < want - Math.max(1, want * .01)) shortYears.push({ y, want, got: res.net });
+      const gotAll = res.net + res.npsNet;
+      if (gotAll < want - Math.max(1, want * .01)) shortYears.push({ y, want, got: gotAll });
     }
 
     // 미달은 '해의 수'가 아니라 '금액'으로 센다. 2% 모자란 해와 90% 모자란 해를
     // 똑같이 한 건으로 세면, 살짝씩 모자란 계획이 통째로 실격 처리된다.
-    if (opts.auto && autoSpare < -0.5) {
-      const need = -autoSpare;
-      autoNeed += need;
-      autoMiss += Math.max(0, need - res.net);
+    //
+    // [단일 판정] 인출 후 최종 현금흐름을 buildCashflow 로 다시 세운다.
+    // 국민연금은 autoCash 단계에서 이미 한 번 잡혔고, 여기서는 금융자산
+    // 세후인출(res.net)만 더한다 — 두 번 세지 않는다.
+    if (opts.auto && autoCash) {
+      const finalCash = buildCashflow({
+        earnedIncome: autoCash.earnedIncome,
+        publicPensionGross: autoCash.publicPensionGross,
+        publicPensionNet: autoCash.publicPensionNet,
+        portfolioWithdrawalGross: res.gross,
+        portfolioWithdrawalNet: res.net,
+        housingPension: autoCash.housingPension,
+        requiredSpending: autoCash.requiredSpending,
+      });
+      rec.cash = finalCash;
+      if (autoCash.spendingShortfall > 0.5) {
+        autoNeed += autoCash.spendingShortfall;
+        autoMiss += finalCash.spendingShortfall;
+      }
     }
     cumNet += res.net; cumTax += rec.tax; cumWdTax += rec.wdTax; cumOtherTax += rec.otherTax;
     if (depleted === null && y >= cfg.retireYear && total < 1 && rec.gross > 0) depleted = y;
@@ -2975,13 +3132,26 @@ function cashOf(cfg, y, loan, finPrev) {
   const ln = loan && loan[y];
   const lv = livingOf(cfg, y);
   const rev = reverseOf(cfg, y);        // 주택연금 — 명목 고정, 종신
-  // 설정에 적은 국민연금. 일정에 안 적어도 들어오는 돈이라 여기서 소득으로 잡는다 —
-  // 안 잡으면 화면의 '부족'이 그만큼 부풀고, 배분기만 몰래 이 돈을 세게 된다.
-  const nps = npsNetOf(cfg, y - cfg.birthYear);
-  // 주택연금은 대출이라 건보료 소득에 잡히지 않는다. 국민연금은 잡힌다.
-  const health = healthPremium(cfg, y, salary + nps, ln ? ln.balance : 0, finPrev);
-  return { list, salary: salary + rev + nps, lump, spend: spend + health, sev, loan: ln,
-           living: lv.amt, livingName: lv.name, rev, health, nps };
+  const age = y - cfg.birthYear;
+  // 설정에 적은 국민연금. 일정에 안 적어도 들어오는 돈이라 여기서 소득으로 잡는다.
+  const npsGross = npsGrossOf(cfg, age), npsNet = npsNetOf(cfg, age);
+  // 주택연금은 대출이라 건보료 소득에 잡히지 않는다. 국민연금은 잡힌다(세전 기준).
+  const health = healthPremium(cfg, y, salary + npsGross, ln ? ln.balance : 0, finPrev);
+
+  /* [현금흐름 명시 분리]
+     earnedIncome 에는 국민연금·주택연금을 넣지 않는다. 예전에는 salary 가
+     이 셋을 뭉뚱그려 담았고, applyWithdrawals 의 net 도 국민연금을 또 더해
+     이중 집계가 났다. 이제 항목을 나눠 두고 합산은 buildCashflow 만 한다.
+     salary(구 필드)는 기존 화면·CSV 호환을 위해 남긴다. */
+  const earnedIncome = salary;
+  const requiredSpending = lv.amt + spend + health + (ln ? ln.paid : 0);
+
+  return { list, lump, sev, loan: ln,
+           living: lv.amt, livingName: lv.name, rev, health,
+           earnedIncome, npsGross, npsNet, requiredSpending,
+           salary: salary + rev + npsNet,   // 구 필드 — 화면 호환용 (계산에는 쓰지 말 것)
+           nps: npsNet,                     // 구 필드 — 세후 국민연금
+           spend: spend + health };
 }
 
 /** 시작 화면 — 어떤 조건으로 출발하는지 한눈에 보여준다.
@@ -3120,7 +3290,9 @@ function renderGame() {
   const sevIn = Math.round(clamp0(c.sev));
   row(y).irpSev.in = Math.max(0, clamp0(row(y).irpSev.in) - sevIn) + sevIn;
   const loanPay = c.loan ? c.loan.paid : 0;
-  const spare = c.salary + c.lump - c.living - c.spend - loanPay;
+  // 인출 전 여력 — 공통 현금흐름 함수로 계산 (국민연금 1회 집계)
+  const cfPre = cashflowOf(c, null);
+  const spare = cfPre.spendingSurplus - cfPre.spendingShortfall;
   const total = cfg.endYear - cfg.startYear + 1;
   const turn = y - cfg.startYear + 1;
   // 여력 부호가 방향을 정하지만, 플레이어가 뒤집을 수 있다 (여윳돈이 남는 해에도
@@ -3148,7 +3320,7 @@ function renderGame() {
     <div class="gcols">
       <div class="gcard">
         <h4>올해 현금</h4>
-        <div class="gline"><span>소득</span><span class="pos">+${fmt(c.salary - clamp0(c.rev) - clamp0(c.nps))}</span></div>
+        <div class="gline"><span>소득</span><span class="pos">+${fmt(c.earnedIncome)}</span></div>
         ${c.rev > 0 ? `<div class="gline"><span>🏡 주택연금 <span style="font-size:10.5px;color:var(--muted)">명목 고정</span></span><span class="pos">+${fmt(c.rev)}</span></div>` : ""}
         ${c.nps > 0 ? `<div class="gline"><span>🏛️ 국민연금 <span style="font-size:10.5px;color:var(--muted)">설정에 적은 값 · 세후</span></span><span class="pos">+${fmt(c.nps)}</span></div>` : ""}
         ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
@@ -3418,11 +3590,12 @@ function crashScaleLine(cfg, y, crash) {
    달라져서, 리포트의 '자동 배분에 맡겼다면'과도 어긋난다.
    ------------------------------------------------------------------ */
 function autoAllocateYear(y, isInOverride) {
-  const cfg = state.cfg, age = y - cfg.birthYear;
+  const cfg = state.cfg;
   const prev = gameSim().years.find(r => r.year === y - 1);
   const c = cashOf(cfg, y, game.loan, prev ? prev.finIncome : 0);
   const sevIn = Math.round(clamp0(c.sev));
-  const spare = c.salary + c.lump - c.living - c.spend - (c.loan ? c.loan.paid : 0);
+  const cfPre = cashflowOf(c, null);
+  const spare = cfPre.spendingSurplus - cfPre.spendingShortfall;
 
   // 방향은 여력의 부호로 정하되, 플레이어가 뒤집었으면 그 뜻을 따른다
   const isIn = isInOverride === undefined ? spare > 0 : !!isInOverride;
@@ -3435,7 +3608,9 @@ function autoAllocateYear(y, isInOverride) {
     row(y).irpSev.in = sevIn;
     const st = rebuildStateAt(gameSim(), y);
     if (st) {
-      const d = greedyDraws(st.st, st.ctx, Math.max(0, -spare) + npsNetOf(cfg, age), cfg.wdStrategy);
+      // [수정] 예전엔 목표에 npsNet 을 되얹어 이중 집계를 상쇄했다.
+      // 이제 국민연금은 cfPre 에서 이미 한 번 잡혔으므로 부족분만 뽑는다.
+      const d = greedyDraws(st.st, st.ctx, cfPre.spendingShortfall, cfg.wdStrategy);
       AID.forEach(id => { row(y)[id].out = Math.round(d[id]); });
     }
   }
@@ -3456,7 +3631,11 @@ function turnStep() {
 
   const cPrev = after.years.find(r => r.year === y - 1);
   const c = cashOf(cfg, y, game.loan, cPrev ? cPrev.finIncome : 0);
-  game.log.push({ year: y, ret: game.returns[y], total: rec ? rec.total : 0, spend: c.living + c.spend + (c.loan ? c.loan.paid : 0), salary: c.salary });
+  // 로그도 공통 현금흐름 기준 — requiredSpending 은 생활비+지출+건보료+대출상환을 이미 합친 값
+  const cfLog = cashflowOf(c, rec);
+  game.log.push({ year: y, ret: game.returns[y], total: rec ? rec.total : 0,
+                  spend: cfLog.requiredSpending, salary: cfLog.totalCashAvailable,
+                  shortfall: cfLog.spendingShortfall });
 
   const bankrupt = rec && rec.total < 1 && y > cfg.startYear;
   const deathYear = cfg.birthYear + clamp0(cfg.gameDeathAge);
@@ -3932,10 +4111,13 @@ function renderEnding(box) {
   const yrs = sim.years.filter(r => r.year <= game.over.year);
   const retireYear = cfg.retireYear;
   const post = yrs.filter(r => r.year >= retireYear);
+  // [단일 판정] 예전에는 r.net(국민연금 포함) + c.salary(국민연금 포함)로 재서
+  // 국민연금을 두 번 셌다. 이제 공통 cashflowOf() 하나로 판정한다.
   const met = post.filter(r => {
     const pv = yrs.find(x => x.year === r.year - 1);
     const c = cashOf(cfg, r.year, game.loan, pv ? pv.finIncome : 0);
-    return r.net + c.salary >= (c.living + c.spend + (c.loan ? c.loan.paid : 0)) * 0.98;
+    const cf = cashflowOf(c, r);
+    return cf.totalCashAvailable >= cf.requiredSpending * 0.98;
   }).length;
   const pct = post.length ? met / post.length * 100 : 0;
   const last = yrs[yrs.length - 1];
@@ -4860,6 +5042,159 @@ function migrateTransfers(cfg) {
   delete cfg.isaMoveYear; delete cfg.isaMoveAmt;
 }
 
+/* ==================================================================
+   저장 데이터 마이그레이션
+   ──────────────────────────────────────────────────────────────────
+   예전 load() 는 최상위 cfg 만 얕게 병합하고 rates/limits/fillAmts
+   세 개만 따로 챙겼다. 그래서 property·reverse·health·loan·priority·
+   opening·openYears 같은 중첩 객체는 저장본에 필드가 하나라도 빠져
+   있으면 undefined 인 채로 남아 NaN 을 만들었다.
+
+   원칙
+     · 기존 데이터는 절대 조용히 지우지 않는다
+     · 누락 필드는 기본값으로 보완 (deep merge)
+     · 잘못된 값(NaN·범위 밖)은 기본값으로 되돌리고 경고 목록에 남긴다
+     · 배열은 용도별 정책: 규칙/일정 배열은 replace(사용자 입력 보존),
+       계좌 사전은 migrate(키 단위 보완)
+     · schemaVersion 을 붙여 순차 마이그레이션
+   ================================================================== */
+const MIGRATION_WARNINGS = [];
+
+/** 숫자 필드 안전 복구 — NaN·Infinity·범위 밖이면 기본값 */
+function safeNum(v, def, lo, hi, label) {
+  const n = typeof v === "number" ? v : parseFloat(v);
+  if (!isFinite(n)) {
+    if (v !== undefined && v !== null && v !== "") MIGRATION_WARNINGS.push(`${label}: 숫자가 아니어서 기본값 ${def} 으로 되돌렸습니다 (원래 값 ${JSON.stringify(v)})`);
+    return def;
+  }
+  if (lo !== undefined && n < lo) { MIGRATION_WARNINGS.push(`${label}: ${n} 은 허용 범위(${lo}~${hi}) 미만이라 ${lo} 으로 보정했습니다`); return lo; }
+  if (hi !== undefined && n > hi) { MIGRATION_WARNINGS.push(`${label}: ${n} 은 허용 범위(${lo}~${hi}) 초과라 ${hi} 으로 보정했습니다`); return hi; }
+  return n;
+}
+
+/** 중첩 객체 deep merge — 기본값 형태를 기준으로 저장본을 얹는다.
+    배열은 통째로 교체(사용자가 만든 규칙 목록을 섞으면 안 되므로). */
+function deepMerge(base, over, path) {
+  if (over === undefined || over === null) return base;
+  if (Array.isArray(base)) return Array.isArray(over) ? over.slice() : base;
+  if (typeof base !== "object" || typeof over !== "object") {
+    if (typeof base === "number" && typeof over !== "number") {
+      const n = parseFloat(over);
+      if (!isFinite(n)) { MIGRATION_WARNINGS.push(`${path}: 숫자가 아니어서 기본값 ${base} 유지`); return base; }
+      return n;
+    }
+    return over;
+  }
+  const out = Array.isArray(base) ? base.slice() : { ...base };
+  for (const k of Object.keys(over)) {
+    out[k] = (k in base) ? deepMerge(base[k], over[k], path ? `${path}.${k}` : k) : over[k];
+  }
+  return out;
+}
+
+/** v1 → v2. 구 필드 정리와 중첩 객체 보완. */
+function migrateV1toV2(cfg) {
+  migrateTransfers(cfg);              // isaMoveYear/isaMoveAmt → transfers
+  cfg.schemaVersion = 2;
+  return cfg;
+}
+
+/** 저장본(localStorage 또는 JSON 파일) 하나를 현재 스키마로 올린다.
+    실패해도 예외를 던지지 않고 기본값으로 채운 state 를 돌려준다. */
+function migrateState(raw) {
+  MIGRATION_WARNINGS.length = 0;
+  const def = defaultState();
+  if (!raw || typeof raw !== "object" || !raw.cfg || typeof raw.cfg !== "object") {
+    return { cfg: def.cfg, rows: {}, optUndo: null, warnings: [] };
+  }
+  const src = JSON.parse(JSON.stringify(raw.cfg));
+  const from = safeNum(src.schemaVersion, 1, 1, SCHEMA_VERSION, "schemaVersion");
+
+  // 1) 기본값 위에 저장본을 깊게 얹는다 — 중첩 객체의 누락 필드가 여기서 메워진다
+  let cfg = deepMerge(def.cfg, src, "");
+
+  // 2) 계좌 사전은 키 단위로 보완 (계좌가 추가돼도 옛 저장본이 깨지지 않게)
+  for (const key of ["rates", "limits", "fillAmts", "priority", "openYears"]) {
+    cfg[key] = { ...def.cfg[key], ...(src[key] || {}) };
+  }
+  cfg.opening = cfg.opening && typeof cfg.opening === "object" ? cfg.opening : {};
+  for (const a of ACC) {
+    const d = def.cfg.opening[a.id];
+    const o = (src.opening || {})[a.id];
+    cfg.opening[a.id] = (o && typeof o === "object") ? { ...d, ...o } : { ...d };
+    for (const k of Object.keys(cfg.opening[a.id])) {
+      cfg.opening[a.id][k] = safeNum(cfg.opening[a.id][k], 0, 0, undefined, `기초잔액.${a.id}.${k}`);
+    }
+  }
+
+  // 3) 순차 버전 마이그레이션
+  if (from < 2) cfg = migrateV1toV2(cfg);
+  cfg.schemaVersion = SCHEMA_VERSION;
+
+  // 4) 값 검증 — 잘못된 값은 기본값으로 복구하고 경고로 남긴다
+  cfg.birthYear  = Math.round(safeNum(cfg.birthYear, def.cfg.birthYear, 1900, 2200, "출생연도"));
+  cfg.startYear  = Math.round(safeNum(cfg.startYear, def.cfg.startYear, 1900, 2200, "시작연도"));
+  cfg.retireYear = Math.round(safeNum(cfg.retireYear, def.cfg.retireYear, 1900, 2200, "은퇴연도"));
+  cfg.endYear    = Math.round(safeNum(cfg.endYear, def.cfg.endYear, 1900, 2200, "종료연도"));
+  if (cfg.retireYear < cfg.startYear) {
+    MIGRATION_WARNINGS.push(`은퇴연도(${cfg.retireYear})가 시작연도(${cfg.startYear})보다 빨라 시작연도로 맞췄습니다`);
+    cfg.retireYear = cfg.startYear;
+  }
+  if (cfg.endYear < cfg.retireYear) {
+    MIGRATION_WARNINGS.push(`종료연도(${cfg.endYear})가 은퇴연도(${cfg.retireYear})보다 빨라 은퇴연도로 맞췄습니다`);
+    cfg.endYear = cfg.retireYear;
+  }
+  if (cfg.endYear - cfg.startYear > 120) {
+    MIGRATION_WARNINGS.push(`시뮬레이션 기간이 ${cfg.endYear - cfg.startYear}년이라 120년으로 제한했습니다`);
+    cfg.endYear = cfg.startYear + 120;
+  }
+  cfg.inflation   = safeNum(cfg.inflation, def.cfg.inflation, -10, 50, "물가상승률");
+  cfg.gameMean    = safeNum(cfg.gameMean, def.cfg.gameMean, -50, 100, "기대수익률");
+  cfg.gameVol     = safeNum(cfg.gameVol, def.cfg.gameVol, 0, 200, "변동성");
+  cfg.gameSpend   = safeNum(cfg.gameSpend, def.cfg.gameSpend, 0, 1e9, "목표 생활비");
+  cfg.gameSeed    = Math.round(safeNum(cfg.gameSeed, def.cfg.gameSeed, 0, 4294967295, "시드"));
+  cfg.gameDeathAge= Math.round(safeNum(cfg.gameDeathAge, def.cfg.gameDeathAge, 1, 130, "기대수명"));
+  cfg.crashCount  = Math.round(safeNum(cfg.crashCount, def.cfg.crashCount, 0, 3, "위기 횟수"));
+  cfg.npsAmount   = safeNum(cfg.npsAmount, 0, 0, 1e9, "국민연금 수령액");
+  cfg.npsAge      = Math.round(safeNum(cfg.npsAge, def.cfg.npsAge, 1, 130, "국민연금 개시나이"));
+  cfg.npsRate     = safeNum(cfg.npsRate, def.cfg.npsRate, 0, 100, "국민연금 세율");
+  cfg.sevRate     = safeNum(cfg.sevRate, def.cfg.sevRate, 0, 100, "퇴직소득 실효세율");
+  cfg.compRate    = safeNum(cfg.compRate, def.cfg.compRate, 0, 100, "분리과세율");
+  cfg.divRate     = safeNum(cfg.divRate, def.cfg.divRate, 0, 100, "배당률");
+  for (const a of ACC) {
+    cfg.rates[a.id]  = safeNum(cfg.rates[a.id], a.rate, -50, 100, `수익률.${a.id}`);
+    cfg.limits[a.id] = safeNum(cfg.limits[a.id], a.limit, 0, 1e9, `납입한도.${a.id}`);
+  }
+  if (cfg.loan) {
+    cfg.loan.balance = safeNum(cfg.loan.balance, def.cfg.loan.balance, 0, 1e9, "대출 잔액");
+    cfg.loan.rate    = safeNum(cfg.loan.rate, def.cfg.loan.rate, 0, 50, "대출 금리");
+    cfg.loan.rateMin = safeNum(cfg.loan.rateMin, def.cfg.loan.rateMin, 0, 50, "대출 금리 하한");
+    cfg.loan.rateMax = safeNum(cfg.loan.rateMax, def.cfg.loan.rateMax, 0, 50, "대출 금리 상한");
+    if (cfg.loan.rateMin > cfg.loan.rateMax) {
+      MIGRATION_WARNINGS.push(`대출 금리 하한(${cfg.loan.rateMin})이 상한(${cfg.loan.rateMax})보다 커서 서로 바꿨습니다`);
+      const t = cfg.loan.rateMin; cfg.loan.rateMin = cfg.loan.rateMax; cfg.loan.rateMax = t;
+    }
+  }
+  if (cfg.property) {
+    cfg.property.value  = safeNum(cfg.property.value, def.cfg.property.value, 0, 1e9, "주택 시가");
+    cfg.property.growth = safeNum(cfg.property.growth, def.cfg.property.growth, -50, 50, "주택가격 상승률");
+  }
+  if (cfg.reverse) {
+    cfg.reverse.homeValue = safeNum(cfg.reverse.homeValue, def.cfg.reverse.homeValue, 0, 1e9, "주택연금 주택가격");
+    cfg.reverse.startAge  = Math.round(safeNum(cfg.reverse.startAge, def.cfg.reverse.startAge, 1, 130, "주택연금 개시나이"));
+  }
+  // 배열 필드는 반드시 배열이어야 한다 (아니면 렌더러가 터진다)
+  for (const k of ["transfers", "fillRules", "wdRules", "events", "spendRules"]) {
+    if (!Array.isArray(cfg[k])) {
+      if (cfg[k] !== undefined) MIGRATION_WARNINGS.push(`${k}: 목록 형식이 아니어서 비웠습니다`);
+      cfg[k] = [];
+    }
+  }
+
+  const rows = (raw.rows && typeof raw.rows === "object" && !Array.isArray(raw.rows)) ? raw.rows : {};
+  return { cfg, rows, optUndo: raw.optUndo || null, warnings: MIGRATION_WARNINGS.slice() };
+}
+
 function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
 function load() {
   try {
@@ -4867,14 +5202,15 @@ function load() {
     if (!raw) return false;
     const s = JSON.parse(raw);
     if (!s || !s.cfg) return false;
-    state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {}, optUndo: s.optUndo || null };
-    state.cfg.rates = { ...defaultState().cfg.rates, ...(s.cfg.rates || {}) };
-    state.cfg.limits = { ...defaultState().cfg.limits, ...(s.cfg.limits || {}) };
-    state.cfg.fillAmts = { ...defaultState().cfg.fillAmts, ...(s.cfg.fillAmts || {}) };
+    const m = migrateState(s);
+    state = { cfg: m.cfg, rows: m.rows, optUndo: m.optUndo };
     migrateOpening(state.cfg, s.cfg);
-    migrateTransfers(state.cfg);
+    if (m.warnings.length) state.loadWarnings = m.warnings;
     return true;
-  } catch (e) { return false; }
+  } catch (e) {
+    if (console && console.error) console.error("저장본 불러오기 실패 — 기본값으로 시작합니다", e);
+    return false;
+  }
 }
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -5161,9 +5497,14 @@ document.getElementById("btnImport").onclick = () => {
       try {
         const s = JSON.parse(rd.result);
         if (!s.cfg) throw new Error("형식 오류");
-        state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {}, optUndo: s.optUndo || null };
-        migrateOpening(state.cfg, s.cfg); migrateTransfers(state.cfg);
+        const m = migrateState(s);
+        state = { cfg: m.cfg, rows: m.rows, optUndo: m.optUndo };
+        migrateOpening(state.cfg, s.cfg);
         builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); renderEvents(); render(true, true);
+        if (m.warnings.length) {
+          alert("불러왔습니다. 다만 아래 값은 보정했습니다:\n\n· " + m.warnings.slice(0, 10).join("\n· ")
+            + (m.warnings.length > 10 ? `\n… 외 ${m.warnings.length - 10}건` : ""));
+        }
       } catch (e) { alert("불러오기 실패: " + e.message); }
     };
     rd.readAsText(f);
@@ -5198,5 +5539,217 @@ document.getElementById("btnSevApply").onclick = () => {
   render(false);
 };
 window.addEventListener("resize", () => { if (lastSim) { renderChart1(lastSim); renderChart2(lastSim); } });
+
+/* ========================================================================
+   자체 진단 (self-test)
+   외부 테스트 프레임워크 없이 브라우저에서 바로 돌린다.
+   콘솔에서  __selfTest()  또는 설정 맨 아래 「🧪 자체 진단」 버튼.
+   실패하면 테스트 이름 / 기대값 / 실제값을 함께 출력한다.
+   ======================================================================== */
+function runSelfTests() {
+  const results = [];
+  const saved = JSON.parse(JSON.stringify(state.cfg));
+  const savedRows = JSON.parse(JSON.stringify(state.rows));
+  const savedGame = game ? JSON.parse(JSON.stringify(game)) : null;
+
+  const ok = (name, pass, expect, actual) =>
+    results.push({ name, pass: !!pass, expect, actual });
+  const near = (a, b, tol) => Math.abs(a - b) <= tol;
+  const finite = v => typeof v === "number" && isFinite(v);
+
+  const reset = () => {
+    const d = defaultState();
+    state.cfg = d.cfg; state.rows = {};
+    state.cfg.startYear = 2026; state.cfg.retireYear = 2040;
+    state.cfg.endYear = 2070; state.cfg.birthYear = 1985;
+    state.cfg.gameSpend = 3600; state.cfg.crashCount = 0;
+    state.cfg.opening.taxable = { free: 50000, ded: 0, sev: 0, gain: 0 };
+  };
+
+  try {
+    /* --- 1) 같은 seed 는 같은 결과 --- */
+    reset();
+    state.cfg.gameSeed = 12345;
+    const p1 = returnPath(state.cfg), p2 = returnPath(state.cfg);
+    ok("1. 같은 seed 재현성", JSON.stringify(p1.path) === JSON.stringify(p2.path),
+       "동일한 수익률 경로", JSON.stringify(p1.path) === JSON.stringify(p2.path) ? "동일" : "상이");
+
+    /* --- 2) 다른 seed 는 일반적으로 다른 결과 --- */
+    state.cfg.gameSeed = 999;
+    const p3 = returnPath(state.cfg);
+    ok("2. 다른 seed 는 다른 결과", JSON.stringify(p1.path) !== JSON.stringify(p3.path),
+       "상이한 경로", JSON.stringify(p1.path) !== JSON.stringify(p3.path) ? "상이" : "동일(충돌)");
+
+    /* --- 3) 국민연금은 한 번만 집계 --- */
+    reset();
+    state.cfg.npsAmount = 1200; state.cfg.npsAge = 60; state.cfg.npsRate = 3;
+    const npsNet = npsNetOf(state.cfg, 65);
+    const cfA = buildCashflow({ earnedIncome: 0, publicPensionNet: npsNet,
+      portfolioWithdrawalNet: 0, requiredSpending: 0 });
+    ok("3. 국민연금 1회 집계", near(cfA.totalCashAvailable, npsNet, 0.01),
+       `가용현금 = ${npsNet.toFixed(1)}`, cfA.totalCashAvailable.toFixed(1));
+
+    /* --- 3b) applyWithdrawals 의 net 에 국민연금이 섞이지 않는가 --- */
+    reset();
+    state.cfg.npsAmount = 1200; state.cfg.npsAge = 60;
+    const stT = { bal: Object.fromEntries(AID.map(id => [id, emptyBuckets()])), isaUsed: 0 };
+    stT.bal.taxable.free = 10000;
+    const ctxT = { year: 2050, age: 65, eligible: {}, pLimit: {}, pYear: {},
+                   cfg: state.cfg, capDeductLeft: 250, otherComp: 0, openYear: {} };
+    const resT = applyWithdrawals(stT, Object.fromEntries(AID.map(id => [id, 0])), ctxT);
+    ok("3b. net 에 국민연금 불포함", near(resT.net, 0, 0.01),
+       "인출 0 이면 net = 0", resT.net.toFixed(2));
+    ok("3c. npsTax 이중차감 없음",
+       near(resT.npsNet, 1200 * (1 - state.cfg.npsRate / 100), 0.01),
+       (1200 * (1 - state.cfg.npsRate / 100)).toFixed(1), resT.npsNet.toFixed(1));
+
+    /* --- 4) 소득 0, 인출 0 이면 생활비 전액 미달 --- */
+    const cfB = buildCashflow({ earnedIncome: 0, publicPensionNet: 0,
+      portfolioWithdrawalNet: 0, requiredSpending: 3600 });
+    ok("4. 소득·인출 0 → 전액 미달", near(cfB.spendingShortfall, 3600, 0.01),
+       "3600", cfB.spendingShortfall.toFixed(1));
+
+    /* --- 5) 계좌 소진 후 모든 버킷이 0 --- */
+    const stC = { bal: Object.fromEntries(AID.map(id => [id, emptyBuckets()])), isaUsed: 0 };
+    stC.bal.taxable.free = 1000; stC.bal.taxable.gain = 500;
+    const ctxC = { year: 2050, age: 65, eligible: {}, pLimit: {}, pYear: {},
+                   cfg: state.cfg, capDeductLeft: 250, otherComp: 0, openYear: {} };
+    applyWithdrawals(stC, { ...Object.fromEntries(AID.map(id => [id, 0])), taxable: 99999 }, ctxC);
+    const leftover = BUCKETS.reduce((s, k) => s + Math.abs(stC.bal.taxable[k.key] || 0), 0);
+    ok("5. 계좌 소진 후 버킷 0", leftover < 0.01, "0", leftover.toFixed(4));
+
+    /* --- 12) 위기 구간이 겹치지 않음 --- */
+    reset();
+    let overlapFound = false, seedsChecked = 0;
+    for (let s = 0; s < 60; s++) {
+      state.cfg.gameSeed = 1000 + s * 37; state.cfg.crashCount = 3;
+      const plan = crashPlan(state.cfg);
+      const spans = {};
+      for (const yr in plan) {
+        const c = plan[yr];
+        (spans[c.key + "@" + (yr - c.step)] ||= []).push(+yr);
+      }
+      const allYears = Object.keys(plan).map(Number);
+      if (new Set(allYears).size !== allYears.length) overlapFound = true;
+      seedsChecked++;
+    }
+    ok("12. 위기 구간 비중첩", !overlapFound,
+       `${seedsChecked}개 시드 모두 비중첩`, overlapFound ? "중첩 발견" : "비중첩");
+
+    /* --- 13) 기간 부족 시 위기 수 자동 축소 --- */
+    reset();
+    state.cfg.startYear = 2026; state.cfg.endYear = 2034; state.cfg.crashCount = 3;
+    state.cfg.gameSeed = 777;
+    const tight = crashPlan(state.cfg);
+    const placedN = tight.__meta ? tight.__meta.placed : null;
+    ok("13. 기간 부족 시 축소", placedN !== null && placedN <= 3,
+       "placed <= 3 이고 메타 보고", String(placedN));
+
+    /* --- 14) 저장 후 불러온 결과가 동일 --- */
+    reset();
+    state.cfg.gameSeed = 4242; state.cfg.npsAmount = 900;
+    const before = JSON.stringify(state.cfg);
+    const roundTrip = migrateState(JSON.parse(JSON.stringify({ cfg: state.cfg, rows: state.rows })));
+    ok("14. 저장→불러오기 동일", JSON.stringify(roundTrip.cfg.gameSeed) === JSON.stringify(4242)
+       && roundTrip.cfg.npsAmount === 900,
+       "seed 4242 / nps 900", `seed ${roundTrip.cfg.gameSeed} / nps ${roundTrip.cfg.npsAmount}`);
+    state.cfg = JSON.parse(before);
+
+    /* --- 15) 구 schemaVersion 저장본 마이그레이션 --- */
+    const legacy = { cfg: { birthYear: 1980, gameSeed: 5, isaMoveYear: 2030, isaMoveAmt: 2000 } };
+    const mig = migrateState(legacy);
+    ok("15. 구버전 마이그레이션", mig.cfg.birthYear === 1980
+       && mig.cfg.schemaVersion === SCHEMA_VERSION
+       && Array.isArray(mig.cfg.transfers) && mig.cfg.transfers.length === 1
+       && mig.cfg.property && typeof mig.cfg.property.value === "number",
+       `schemaVersion ${SCHEMA_VERSION} / 중첩객체 보완 / transfers 1건`,
+       `schemaVersion ${mig.cfg.schemaVersion} / property ${mig.cfg.property ? "있음" : "없음"} / transfers ${(mig.cfg.transfers || []).length}건`);
+
+    /* --- 16) 생활비 부족액 공식 일관성 --- */
+    const parts = { earnedIncome: 1000, publicPensionNet: 500,
+                    portfolioWithdrawalNet: 700, housingPension: 100, requiredSpending: 3000 };
+    const cfD = buildCashflow(parts);
+    ok("16. 미달 공식 일관성",
+       near(cfD.totalCashAvailable, 2300, .01) && near(cfD.spendingShortfall, 700, .01)
+       && near(spendingShortfallOf(parts), 700, .01),
+       "가용 2300 / 미달 700",
+       `가용 ${cfD.totalCashAvailable} / 미달 ${cfD.spendingShortfall}`);
+
+    /* --- 19) 세금이 음수가 되지 않음 --- */
+    reset();
+    let negTax = null;
+    for (const spend of [1200, 3600, 9000]) {
+      state.cfg.gameSpend = spend; state.cfg.gameSeed = 31337;
+      const rp = returnPath(state.cfg);
+      const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
+      for (const r of sim.years) if (r.tax < -0.001) { negTax = `${r.year}년 ${r.tax}`; break; }
+      if (negTax) break;
+    }
+    ok("19. 세금 음수 없음", negTax === null, "모든 해 tax >= 0", negTax || "없음");
+
+    /* --- 20) 인출액이 계좌잔액을 초과하지 않음 / 18) NaN·Infinity 없음 --- */
+    reset();
+    state.cfg.gameSpend = 12000; state.cfg.gameSeed = 8888; state.cfg.crashCount = 2;
+    const rpE = returnPath(state.cfg);
+    const simE = simulate({ returns: rpE.path, auto: { loan: loanSchedule(state.cfg, rpE.crash) } });
+    let negBal = null, badNum = null;
+    for (const r of simE.years) {
+      for (const k of ["total", "net", "tax", "gross"]) if (!finite(r[k])) badNum ||= `${r.year}.${k}=${r[k]}`;
+      for (const a of ACC) {
+        const acc = r.acc[a.id];
+        if (acc.bal < -0.01) negBal ||= `${r.year} ${a.id} ${acc.bal.toFixed(2)}`;
+        if (!finite(acc.bal)) badNum ||= `${r.year}.${a.id}.bal`;
+      }
+    }
+    ok("20. 잔액 음수 없음", negBal === null, "모든 계좌 >= 0", negBal || "없음");
+    ok("18. NaN/Infinity 없음", badNum === null, "전 항목 유한값", badNum || "없음");
+
+    /* --- 17) 몬테카를로 seed 재현성 --- */
+    reset();
+    state.cfg.gameSeed = 20260101; state.cfg.gameSpend = 5600;
+    let mcA = null, mcB = null;
+    monteCarlo(12, r => mcA = r, 0);
+    monteCarlo(12, r => mcB = r, 0);
+    ok("17. 몬테카를로 재현성",
+       mcA && mcB && mcA.survive === mcB.survive && mcA.busts.length === mcB.busts.length,
+       "같은 seed·batch → 같은 결과",
+       mcA && mcB ? `${(mcA.survive * 100).toFixed(0)}% vs ${(mcB.survive * 100).toFixed(0)}%` : "실행 실패");
+
+  } catch (err) {
+    results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
+                   actual: (err && err.message) || String(err) });
+    if (typeof console !== "undefined" && console.error) console.error(err);
+  } finally {
+    state.cfg = saved; state.rows = savedRows;
+    game = savedGame;
+  }
+
+  const failed = results.filter(r => !r.pass);
+  if (console && console.log) {
+    console.log(`%c자체 진단 ${results.length - failed.length}/${results.length} 통과`,
+      `font-weight:bold;color:${failed.length ? "#c0392b" : "#27ae60"}`);
+    for (const r of results) {
+      if (r.pass) console.log(`  ✓ ${r.name}`);
+      else console.log(`  ✗ ${r.name}\n      기대: ${r.expect}\n      실제: ${r.actual}`);
+    }
+  }
+  return { results, failed, passed: results.length - failed.length, total: results.length };
+}
+window.__selfTest = runSelfTests;
+
+const btnSelfTest = document.getElementById("btnSelfTest");
+if (btnSelfTest) btnSelfTest.onclick = () => {
+  const out = document.getElementById("selfTestOut");
+  out.innerHTML = `<p class="hint" style="margin:0">진단 중…</p>`;
+  setTimeout(() => {
+    const r = runSelfTests();
+    out.innerHTML =
+      `<p style="margin:0 0 6px;font-weight:700;color:${r.failed.length ? "var(--critical)" : "var(--good)"}">`
+      + `${r.passed}/${r.total} 통과${r.failed.length ? ` · ${r.failed.length}건 실패` : " · 모두 정상"}</p>`
+      + r.results.map(t => `<div class="gline"><span>${t.pass ? "✓" : "✗"} ${t.name}</span>`
+          + `<span style="color:${t.pass ? "var(--good)" : "var(--critical)"}">${t.pass ? "통과" : "실패"}</span></div>`
+          + (t.pass ? "" : `<div class="hint" style="margin:2px 0 6px 14px">기대: ${t.expect}<br>실제: ${t.actual}</div>`)).join("");
+  }, 20);
+};
 })();
 </script>
