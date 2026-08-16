@@ -3479,6 +3479,57 @@ function diagnose() {
 }
 
 /* 안전 인출액 역산 — 목표 나이까지 버티는 최대 생활비를 이분탐색으로 찾는다. */
+/* ------------------------------------------------------------------
+   100판 돌려보기 — 한 판을 끝내고 나면 "이번 판이 운이 좋았나"를 알 수 없다.
+   같은 조건에 시장만 바꿔 여러 번 돌려, 내 판이 그 분포의 어디쯤인지 보여준다.
+
+   비교는 두 축이다.
+     ① 운  — 시드 N개의 분포 (자동 배분으로 통일해 시장 효과만 남긴다)
+     ② 실력 — 같은 시장(내 시드)을 자동 배분으로 돌린 결과 vs 내가 직접 한 결과
+   ------------------------------------------------------------------ */
+function pctileOf(sorted, p) {
+  if (!sorted.length) return 0;
+  const i = (sorted.length - 1) * p;
+  const lo = Math.floor(i), hi = Math.ceil(i);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+}
+function monteCarlo(n, onDone) {
+  const cfg = state.cfg;
+  const die = clamp0(cfg.gameDeathAge) || 95;
+  const keep = clamp0(cfg.gameSeed) | 0;
+  const runs = [];
+  let mine = null;
+  // 첫 시드는 내가 실제로 플레이한 시장 — 같은 장에서 자동 배분이 어땠는지 보려고 따로 둔다
+  for (let i = 0; i < n; i++) {
+    state.cfg.gameSeed = i === 0 ? keep : keep + i * 7717;
+    const rp = returnPath(state.cfg);
+    const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
+    const dep = sim.sum.depleted;
+    const r = {
+      bust: !!dep && dep - cfg.birthYear < die,
+      bustAge: dep ? dep - cfg.birthYear : null,
+      final: sim.sum.final,
+      net: sim.sum.cumNet,
+      miss: sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0,
+    };
+    runs.push(r);
+    if (i === 0) mine = r;
+  }
+  state.cfg.gameSeed = keep;
+
+  const busts = runs.filter(r => r.bust);
+  const finals = runs.map(r => r.final).sort((a, b) => a - b);
+  const nets = runs.map(r => r.net).sort((a, b) => a - b);
+  const bustAges = busts.map(r => r.bustAge).sort((a, b) => a - b);
+  onDone({
+    n, die, seed: keep,
+    survive: 1 - busts.length / runs.length,
+    bustAges, finals, nets,
+    missAvg: runs.reduce((a, r) => a + r.miss, 0) / runs.length,
+    auto: mine,                       // 내 시장을 자동 배분으로 돌린 결과
+  });
+}
+
 function safeSpend(onDone) {
   const cfg = state.cfg;
   const die = clamp0(cfg.gameDeathAge) || 95;
@@ -3674,6 +3725,11 @@ function renderEnding(box) {
         <span class="hint" id="optOut" style="margin:0"></span>
       </div>
       <div id="optRows"></div>
+      <div class="btnrow" style="margin-top:14px">
+        <button type="button" id="btnMC">🎲 같은 조건으로 100판 돌려보기</button>
+        <span class="hint" id="mcOut" style="margin:0">이번 판이 운이 좋았는지 나빴는지 알려면 여러 판을 봐야 합니다.</span>
+      </div>
+      <div id="mcRows"></div>
     </div>
     <div class="gcols">
       <div class="gcard"><h4>결과</h4>
@@ -3758,6 +3814,57 @@ function renderEnding(box) {
     if (!optPick) return;
     // 탐색이 고른 값을 실제 설정에 적용하고 같은 시드로 새 판을 연다
     optimizeApply(optPick);
+  };
+
+  // ---- 100판 돌려보기
+  const mcBtn = document.getElementById("btnMC"), mcOut = document.getElementById("mcOut"), mcRows = document.getElementById("mcRows");
+  if (mcBtn) mcBtn.onclick = () => {
+    mcBtn.disabled = true; mcBtn.textContent = "돌리는 중…";
+    mcOut.textContent = "시장만 바꿔 100번 다시 살아보는 중입니다…";
+    setTimeout(() => monteCarlo(100, r => {
+      const myFinal = last ? last.total : 0;
+      // "상위 94%" 같은 표현은 좋은 건지 나쁜 건지 헷갈린다 — 등수로 적는다
+      const better = r.finals.filter(v => v > myFinal).length;
+      const myRank = better + 1;
+      // 10칸 히스토그램 — 내 판이 어느 칸에 있는지 표시한다
+      const lo = Math.max(0, r.finals[0]), hi = r.finals[r.finals.length - 1], span = Math.max(1, hi - lo);
+      const bins = new Array(10).fill(0);
+      r.finals.forEach(v => bins[Math.min(9, Math.floor((v - lo) / span * 10))]++);
+      const myBin = Math.min(9, Math.max(0, Math.floor((myFinal - lo) / span * 10)));
+      const peak = Math.max(...bins, 1);
+      const hist = bins.map((c, i) => `<div title="${fmtBig(lo + span * i / 10)} ~ ${fmtBig(lo + span * (i + 1) / 10)} · ${c}판" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px">
+          <div style="width:100%;height:${Math.round(c / peak * 44) + 2}px;background:${i === myBin ? "var(--accent)" : "var(--border)"};border-radius:2px"></div>
+          <div style="font-size:9px;line-height:1;color:var(--accent)">${i === myBin ? "▲" : "&nbsp;"}</div>
+        </div>`).join("");
+      const busted = game.over.why === "bankrupt";
+      const sv = Math.round(r.survive * 100);
+      mcOut.innerHTML = `${r.n}판 중 <strong style="color:${sv >= 80 ? "var(--good)" : sv >= 50 ? "var(--accent)" : "var(--critical)"}">`
+        + `${sv}판이 만 ${r.die}세까지 버텼습니다</strong>`;
+      mcRows.innerHTML = `<div style="margin-top:12px">
+          <div class="gline"><span style="color:var(--muted)">최종 자산 분포</span><span style="color:var(--muted)">하위 10% / 중앙값 / 상위 10%</span></div>
+          <div class="gline"><span>남는 돈</span><span>${fmtBig(pctileOf(r.finals, .1))} · <strong>${fmtBig(pctileOf(r.finals, .5))}</strong> · ${fmtBig(pctileOf(r.finals, .9))}</span></div>
+          <div class="gline"><span>은퇴 후 세후 수령 총액</span><span>${fmtBig(pctileOf(r.nets, .1))} · <strong>${fmtBig(pctileOf(r.nets, .5))}</strong> · ${fmtBig(pctileOf(r.nets, .9))}</span></div>
+          ${r.bustAges.length
+            ? `<div class="gline"><span>파산한 ${r.bustAges.length}판의 파산 나이</span><span>만 ${Math.round(pctileOf(r.bustAges, .1))} · <strong>${Math.round(pctileOf(r.bustAges, .5))}</strong> · ${Math.round(pctileOf(r.bustAges, .9))}세</span></div>`
+            : `<div class="gline"><span>파산</span><span class="pos">한 판도 없었습니다</span></div>`}
+          <div class="gline"><span>생활비를 못 채운 몫</span><span>평균 ${(r.missAvg * 100).toFixed(1)}%</span></div>
+
+          <div class="gline" style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
+            <span style="color:var(--muted)">이번 판(시드 ${r.seed})은 어디쯤이었나</span><span></span></div>
+          <div class="gline"><span>내가 직접 한 결과</span><span><strong>${fmtBig(myFinal)}</strong> — ${r.n}판 중 <strong>${myRank}등</strong></span></div>
+          <div style="display:flex;align-items:flex-end;gap:2px;height:58px;margin:8px 0 2px">${hist}</div>
+          <div class="gline" style="font-size:11px;color:var(--muted)"><span>${fmtBig(lo)}</span><span>최종 자산 분포 · 파란 칸이 이번 판</span><span>${fmtBig(hi)}</span></div>
+          <div class="gline"><span>같은 시장을 자동 배분에 맡겼다면</span><span>${fmtBig(r.auto.final)}${r.auto.bust ? ` <span class="neg">(만 ${r.auto.bustAge}세 파산)</span>` : ""}</span></div>
+        </div>
+        <p class="hint" style="margin:10px 0 0">
+          ${busted
+            ? `이번 판은 파산했지만 <strong>${sv}%는 버텼습니다</strong> — ${sv >= 60 ? "조건 자체보다 이번 시장이 나빴다는 뜻입니다." : "조건을 손보지 않으면 반복될 가능성이 큽니다."}`
+            : `이번 판은 완주했지만 <strong>${100 - sv}%는 파산했습니다</strong> — ${sv >= 80 ? "조건이 웬만한 시장을 견딥니다." : "운이 따라 준 판일 수 있습니다."}`}
+          100판은 모두 <strong>자동 배분</strong>으로 돌린 것이라, 내 결과와의 차이에는 <strong>배분 판단</strong>도 섞여 있습니다.
+          위기 횟수·수익률 해석은 지금 설정 그대로입니다.
+        </p>`;
+      mcBtn.disabled = false; mcBtn.textContent = "다시 돌리기";
+    }), 30);
   };
 }
 
@@ -4587,6 +4694,7 @@ renderSpendRules();
 renderOptUndo();
 loadGame();
 render(true, true);
+setMode(true);   // 첫 화면은 인생 시뮬 — 플래너는 탭으로 넘어간다
 
 function setMode(g) {
   document.getElementById("gamePanel").hidden = !g;
