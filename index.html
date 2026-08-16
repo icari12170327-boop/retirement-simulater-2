@@ -3539,12 +3539,32 @@ function monteCarlo(n, onDone) {
     const rp = returnPath(state.cfg);
     const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
     const dep = sim.sum.depleted;
+    // 무엇이 판을 갈랐는지 보려면 '언제 무슨 일이 있었나'를 같이 남겨야 한다
+    const cagr = (from, to) => {
+      let lg = 0, k = 0;
+      for (let yy = from; yy <= to; yy++) if (rp.path[yy] != null) { lg += Math.log(1 + rp.path[yy] / 100); k++; }
+      return k ? (Math.exp(lg / k) - 1) * 100 : null;
+    };
+    const cyears = Object.keys(rp.crash).map(Number).sort((a, b) => a - b);
+    const cStart = cyears.find(yy => rp.crash[yy].step === 0);
+    let worst = 0, worstAt = null;
+    for (const yy in rp.path) if (rp.path[yy] < worst) { worst = rp.path[yy]; worstAt = +yy; }
+    const R = cfg.retireYear;
     const r = {
+      seed: state.cfg.gameSeed,
       bust: !!dep && dep - cfg.birthYear < die,
       bustAge: dep ? dep - cfg.birthYear : null,
       final: sim.sum.final,
       net: sim.sum.cumNet,
       miss: sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0,
+      atRetire: sim.sum.atRetire,               // 은퇴 시점 자산 — 출발선이 낮았나
+      pre5: cagr(R - 5, R - 1),                 // 은퇴 직전 5년
+      post5: cagr(R, R + 4),                    // 은퇴 직후 5년 — 순서위험의 핵심
+      post10: cagr(R, R + 9),
+      crashKey: cStart != null ? rp.crash[cStart].key : null,
+      crashYear: cStart != null ? cStart : null,
+      crashRel: cStart != null ? cStart - R : null,   // 은퇴 기준 몇 년째에 터졌나
+      worst, worstAt, worstRel: worstAt != null ? worstAt - R : null,
     };
     runs.push(r);
     if (i === 0) mine = r;
@@ -3552,16 +3572,174 @@ function monteCarlo(n, onDone) {
   state.cfg.gameSeed = keep;
 
   const busts = runs.filter(r => r.bust);
+  const alive = runs.filter(r => !r.bust);
   const finals = runs.map(r => r.final).sort((a, b) => a - b);
   const nets = runs.map(r => r.net).sort((a, b) => a - b);
   const bustAges = busts.map(r => r.bustAge).sort((a, b) => a - b);
+  const avg = (arr, k) => { const v = arr.map(x => x[k]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+
+  // 위기가 '언제' 터졌느냐로 묶어 구간별 파산율을 낸다 — 위험한 창이 어디인지 드러난다
+  const WINDOWS = [
+    { name: "은퇴 6년 이상 전", lo: -99, hi: -6 },
+    { name: "은퇴 직전 5년", lo: -5, hi: -1 },
+    { name: "은퇴 직후 5년", lo: 0, hi: 4 },
+    { name: "은퇴 6~15년차", lo: 5, hi: 14 },
+    { name: "은퇴 15년 이후", lo: 15, hi: 99 },
+  ].map(w => {
+    const inWin = runs.filter(r => r.crashRel != null && r.crashRel >= w.lo && r.crashRel <= w.hi);
+    return { ...w, n: inWin.length, bust: inWin.filter(r => r.bust).length };
+  }).filter(w => w.n > 0);
+
+  // 파산판에서 가장 흔한 위기 종류
+  const byCrash = {};
+  for (const r of runs) {
+    if (!r.crashKey) continue;
+    (byCrash[r.crashKey] ||= { n: 0, bust: 0 }).n++;
+    if (r.bust) byCrash[r.crashKey].bust++;
+  }
+  const crashRank = Object.entries(byCrash).map(([k, v]) => ({ key: k, ...v }))
+    .filter(v => v.bust > 0).sort((a, b) => b.bust / b.n - a.bust / a.n);
+
   onDone({
-    n, die, seed: keep,
+    n, die, seed: keep, retire: cfg.retireYear, birth: cfg.birthYear,
     survive: 1 - busts.length / runs.length,
     bustAges, finals, nets,
     missAvg: runs.reduce((a, r) => a + r.miss, 0) / runs.length,
     auto: mine,                       // 내 시장을 자동 배분으로 돌린 결과
+    busts: busts.slice().sort((a, b) => a.bustAge - b.bustAge),
+    windows: WINDOWS, crashRank,
+    cmp: {
+      pre5:  { bust: avg(busts, "pre5"),  alive: avg(alive, "pre5") },
+      post5: { bust: avg(busts, "post5"), alive: avg(alive, "post5") },
+      post10:{ bust: avg(busts, "post10"),alive: avg(alive, "post10") },
+      atRetire: { bust: avg(busts, "atRetire"), alive: avg(alive, "atRetire") },
+    },
   });
+}
+
+/* ------------------------------------------------------------------
+   파산한 판만 따로 뜯어본다.
+   "2%가 파산했다"만으로는 손쓸 데가 없다. 언제 무슨 위기가 왔고, 은퇴 직후
+   수익률이 어땠는지를 보여줘야 "그 구간을 어떻게 버틸까"로 넘어갈 수 있다.
+   ------------------------------------------------------------------ */
+/* 무엇이 판을 갈랐는지 데이터에서 고른다.
+   "순서위험입니다"를 항상 찍으면 틀린다 — 은퇴 시점 자산부터 모자랐던 판이면
+   그건 축적기 문제이고, 처방도 완전히 달라진다. */
+function bustCause(r) {
+  const pc = v => (v == null ? "–" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
+  const A = r.cmp.atRetire, P5 = r.cmp.post5;
+  const ratio = A.alive > 0 ? (A.bust || 0) / A.alive : 1;      // 은퇴 시점 자산이 완주판의 몇 배
+  const seqGap = (P5.alive != null && P5.bust != null) ? P5.alive - P5.bust : 0;
+
+  // 위험한 창 — 전체 파산율보다 뚜렷하게 높고 표본이 최소한 있는 구간만
+  const base = r.busts.length / r.n;
+  const danger = r.windows.filter(w => w.n >= 5 && w.bust / w.n >= base + 0.1)
+    .sort((a, b) => b.bust / b.n - a.bust / a.n);
+
+  // 표본이 몇 판뿐이면 평균은 흔들린다 — 단정하지 않는다
+  const thin = r.busts.length < 5
+    ? `<span style="color:var(--critical)">파산이 ${r.busts.length}판뿐이라 아래 평균은 흔들립니다 — 방향만 참고하세요.</span> ` : "";
+
+  let head, cure;
+  if (ratio < 0.75 && seqGap >= 3) {
+    // 둘 다 크면 한쪽을 깎아내리지 않는다
+    head = `<strong>두 가지가 겹쳤습니다.</strong> 은퇴 시점 자산이 완주판의 <strong>${Math.round(ratio * 100)}%</strong>
+      (${fmtBig(A.bust)} vs ${fmtBig(A.alive)})인 데다, 은퇴 직후 5년 수익률도 <strong>${seqGap.toFixed(1)}%p</strong> 낮았습니다
+      (${pc(P5.bust)} vs ${pc(P5.alive)}). 적게 들고 은퇴해서 곧바로 나쁜 장을 맞은 조합입니다.`;
+    cure = `<strong>그래서 손댈 곳</strong> — ① 「🎯 안전 인출액 역산」으로 <strong>지금 자산이 감당하는 생활비</strong>를 먼저 확인하세요(출발선 쪽).
+      ② 은퇴 직후 <strong>5년치 생활비를 예금·단기채로</strong> 빼두면 나쁜 장에 주식을 팔지 않아도 됩니다(순서 쪽).
+      ③ 주택연금 개시를 앞당기면 두 가지에 동시에 듣습니다.`;
+  } else if (ratio < 0.75) {
+    head = `파산판은 <strong>은퇴 시점 자산부터</strong> 완주판의 <strong>${Math.round(ratio * 100)}%</strong>밖에 안 됐습니다
+      (${fmtBig(A.bust)} vs ${fmtBig(A.alive)}). 은퇴 후 수익률 차이(${pc(P5.bust)} vs ${pc(P5.alive)})보다
+      <strong>출발선 차이가 압도적</strong>입니다 — 인출 순서를 어떻게 바꿔도 뒤집기 어려운, <strong>축적기</strong>의 문제입니다.`;
+    cure = `<strong>그래서 손댈 곳</strong> — ① <strong>생활비를 낮추거나</strong> 은퇴를 늦춰 모으는 기간을 늘리는 게 먼저입니다.
+      ② 「🎯 안전 인출액 역산」으로 <strong>지금 자산이 감당하는 생활비</strong>를 먼저 확인하세요.
+      ③ 인출 전략·계좌 순서를 손보는 건 이 격차 앞에서는 효과가 작습니다.`;
+  } else if (seqGap >= 1) {
+    head = `은퇴 시점 자산은 비슷한데(${fmtBig(A.bust)} vs ${fmtBig(A.alive)})
+      <strong>은퇴 직후 5년 수익률이 ${seqGap.toFixed(1)}%p 낮았습니다</strong> (${pc(P5.bust)} vs ${pc(P5.alive)}).
+      자산이 가장 클 때 깨지고 그 상태에서 생활비를 빼내니 회복할 원금이 남지 않는 <strong>순서위험</strong>입니다.`;
+    cure = `<strong>그래서 손댈 곳</strong> — ① 은퇴 직후 <strong>5년치 생활비를 예금·단기채로 따로</strong> 빼두면 그 구간에 주식을 팔지 않아도 됩니다.
+      ② <strong>주택연금 개시를 앞당기면</strong> 그 구간의 인출액 자체가 줄어듭니다.
+      ③ 생활비 곡선을 <strong>은퇴 초반만 낮게</strong> 깔아도 효과가 큽니다.`;
+  } else {
+    head = `은퇴 시점 자산(${fmtBig(A.bust)} vs ${fmtBig(A.alive)})도 은퇴 직후 수익률(${pc(P5.bust)} vs ${pc(P5.alive)})도
+      완주판과 크게 다르지 않습니다 — <strong>특정 시장 탓이라기보다 조건 자체가 아슬아슬</strong>해서,
+      어디서 조금만 어긋나도 넘어가는 상태입니다.`;
+    cure = `<strong>그래서 손댈 곳</strong> — ① 「🎯 안전 인출액 역산」으로 <strong>여유 있는 생활비 수준</strong>을 먼저 확인하세요.
+      ② 목돈 지출(자녀 결혼·주택 수선)을 <strong>몇 해 흩뜨리기만 해도</strong> 고비를 넘길 수 있습니다.
+      ③ 주택연금·생활비 곡선 같은 안전판을 아직 안 켰다면 그것부터입니다.`;
+  }
+
+  const winLine = danger.length
+    ? `위기가 <strong>${danger.map(w => w.name).join(" · ")}</strong>에 터진 판의 파산율이
+       전체(${Math.round(base * 100)}%)보다 뚜렷하게 높습니다 — 이 구간이 고비입니다.`
+    : `위기가 언제 터졌느냐로는 뚜렷한 차이가 안 보입니다 — 시점보다 위 항목이 결정적이었습니다.`;
+
+  return `<p class="hint" style="margin:8px 0 0">${thin}${head}</p>
+    <p class="hint" style="margin:6px 0 0">${winLine}</p>
+    <p class="hint" style="margin:8px 0 0;color:var(--accent)">${cure}
+      위쪽 「🧭 최적 조합 찾기」가 이 손잡이들을 실제로 돌려 봅니다.</p>`;
+}
+
+function bustReport(r) {
+  if (!r.busts.length) return "";
+  const pc = v => (v == null ? "–" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
+  const gap = (a, b) => (a == null || b == null ? "" : `<span style="color:var(--muted)">(차이 ${(a - b).toFixed(1)}%p)</span>`);
+
+  // 위기 시점별 파산율 — 위험한 창이 어디인지
+  const win = r.windows.map(w => {
+    const pct = w.n ? w.bust / w.n * 100 : 0;
+    return `<div class="gline"><span>${w.name}<span style="color:var(--muted);font-size:11px"> · ${w.n}판</span></span>
+      <span><strong style="color:${pct >= 10 ? "var(--critical)" : pct > 0 ? "var(--accent)" : "var(--good)"}">${pct.toFixed(0)}%</strong> 파산</span></div>`;
+  }).join("");
+
+  // 최악의 판 — 가장 일찍 무너진 것
+  const w0 = r.busts[0];
+  const cname = w0.crashKey && CRASHES[w0.crashKey] ? CRASHES[w0.crashKey].name : "위기 없음";
+  const rel = w0.crashRel == null ? "" :
+    w0.crashRel < 0 ? `은퇴 ${-w0.crashRel}년 전` : w0.crashRel === 0 ? "은퇴하던 해" : `은퇴 ${w0.crashRel}년차`;
+
+  const list = r.busts.slice(0, 6).map(b => {
+    const cn = b.crashKey && CRASHES[b.crashKey] ? CRASHES[b.crashKey].name : "—";
+    const rl = b.crashRel == null ? "—" : b.crashRel < 0 ? `${-b.crashRel}년 전` : b.crashRel === 0 ? "은퇴 해" : `${b.crashRel}년차`;
+    return `<tr><td>만 ${b.bustAge}세</td><td>${cn}</td><td>${rl}</td><td style="text-align:right">${pc(b.post5)}</td><td style="text-align:right">${fmtBig(b.atRetire)}</td></tr>`;
+  }).join("");
+
+  return `<details class="grp" style="margin-top:14px" open>
+    <summary>💀 파산한 ${r.busts.length}판은 왜 무너졌나</summary>
+    <div class="body">
+      <div class="gline" style="border-bottom:1px solid var(--border);padding-bottom:6px">
+        <span style="color:var(--muted)">파산판 vs 완주판 — 무엇이 갈랐나</span><span style="color:var(--muted)">파산 / 완주</span></div>
+      <div class="gline"><span>은퇴 직전 5년 수익률</span><span>${pc(r.cmp.pre5.bust)} / ${pc(r.cmp.pre5.alive)} ${gap(r.cmp.pre5.bust, r.cmp.pre5.alive)}</span></div>
+      <div class="gline"><span><strong>은퇴 직후 5년 수익률</strong></span><span><strong>${pc(r.cmp.post5.bust)} / ${pc(r.cmp.post5.alive)}</strong> ${gap(r.cmp.post5.bust, r.cmp.post5.alive)}</span></div>
+      <div class="gline"><span>은퇴 직후 10년 수익률</span><span>${pc(r.cmp.post10.bust)} / ${pc(r.cmp.post10.alive)} ${gap(r.cmp.post10.bust, r.cmp.post10.alive)}</span></div>
+      <div class="gline"><span>은퇴 시점 자산</span><span>${fmtBig(r.cmp.atRetire.bust)} / ${fmtBig(r.cmp.atRetire.alive)}</span></div>
+
+      <div class="gline" style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
+        <span style="color:var(--muted)">위기가 <strong>언제</strong> 터졌느냐로 나눈 파산율</span><span></span></div>
+      ${win}
+
+      ${r.crashRank.length ? `<div class="gline" style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
+        <span style="color:var(--muted)">파산을 부른 시나리오</span><span style="color:var(--muted)">파산 / 겪은 판</span></div>`
+        + r.crashRank.slice(0, 4).map(c => `<div class="gline"><span>${CRASHES[c.key] ? CRASHES[c.key].name : c.key}</span><span>${c.bust} / ${c.n}판</span></div>`).join("") : ""}
+
+      <div class="tablebox" style="max-height:none;margin-top:12px">
+        <table class="opentbl"><thead><tr>
+          <th class="rowhd">파산 나이</th><th>위기</th><th>시점</th><th>은퇴 후 5년</th><th>은퇴 시점 자산</th>
+        </tr></thead><tbody>${list}</tbody></table>
+      </div>
+
+      <p class="hint" style="margin:12px 0 0">
+        <strong>가장 일찍 무너진 판</strong>(시드 ${w0.seed}) — ${cname}${rel ? ` · ${rel}` : ""}에 맞고
+        은퇴 직후 5년이 <strong>${pc(w0.post5)}</strong>,
+        최악의 해는 ${w0.worstAt}년 <strong class="neg">${pc(w0.worst)}</strong>,
+        만 <strong>${w0.bustAge}세</strong>에 바닥났습니다.
+      </p>
+      ${bustCause(r)}
+    </div>
+  </details>`;
 }
 
 function safeSpend(onDone) {
@@ -3890,6 +4068,7 @@ function renderEnding(box) {
           <div class="gline" style="font-size:11px;color:var(--muted)"><span>${fmtBig(lo)}</span><span>최종 자산 분포 · 파란 칸이 이번 판</span><span>${fmtBig(hi)}</span></div>
           <div class="gline"><span>같은 시장을 자동 배분에 맡겼다면</span><span>${fmtBig(r.auto.final)}${r.auto.bust ? ` <span class="neg">(만 ${r.auto.bustAge}세 파산)</span>` : ""}</span></div>
         </div>
+        ${bustReport(r)}
         <p class="hint" style="margin:10px 0 0">
           ${busted
             ? `이번 판은 파산했지만 <strong>${sv}%는 버텼습니다</strong> — ${sv >= 60 ? "조건 자체보다 이번 시장이 나빴다는 뜻입니다." : "조건을 손보지 않으면 반복될 가능성이 큽니다."}`
