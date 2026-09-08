@@ -942,6 +942,20 @@
         </p>
       </div>
     </details>
+
+    <details>
+      <summary>🧪 자체 진단 — 계산이 스스로 맞는지 검사</summary>
+      <div class="pad">
+        <p class="hint" style="margin:0 0 8px">
+          국민연금 중복 집계, 위기 구간 중첩, 시드 재현성, 저장본 마이그레이션, NaN·음수 세금 등
+          <strong>계산이 스스로 무너지지 않았는지</strong> 확인합니다. 브라우저 콘솔에서 <code>__selfTest()</code> 로도 실행할 수 있습니다.
+        </p>
+        <div class="btnrow" style="margin-bottom:8px">
+          <button id="btnSelfTest" type="button">🧪 자체 진단 실행</button>
+        </div>
+        <div id="selfTestOut"></div>
+      </div>
+    </details>
   </section>
 
   <footer>
@@ -995,40 +1009,292 @@ const PENSION = ACC.filter(a => a.kind === "pension").map(a => a.id);
 const LS_KEY = "tax-retire-sim-v1";
 
 /* ── 포트폴리오 프리셋 ────────────────────────────────────────────────
-   적립기 → 위험구간(은퇴 전후) → 후기 순으로 평균/표준편차가 바뀐다.
-   숫자는 원화 환노출 기준 장기 가정치다. */
+   프리셋은 이제 '평균/변동성 한 쌍'이 아니라 **자산 구성**이다.
+   기대수익·변동성은 아래 PRESET_MIX 의 비중과 ASSETS·상관행렬에서 계산하므로
+   여기에는 이름과 덧말만 둔다 — 숫자를 문구에 박아 두면 반드시 어긋난다.
+   off(직접 입력)와 custom(구간별 입력)만 예전처럼 스칼라 값을 쓴다. */
 const PRESETS = {
-  off:                 { info: "프리셋 안 씀 — 계좌별 수익률 + 아래 평균/변동성으로 시장을 뽑습니다" },
-  aggressive:          { info: "🟢 공격형: 9.7 → 9.0 → 8.5", accum:9.7, accumSd:14.4, risk:9.0, riskSd:11.7, late:8.5, lateSd:10.8 },
-  standard:            { info: "🟡 표준형: 9.0 → 8.0 → 7.5", accum:9.0, accumSd:13.5, risk:8.0, riskSd:9.9, late:7.5, lateSd:9.0 },
-  conservative:        { info: "🟠 보수형: 8.5 → 7.0 → 6.5", accum:8.5, accumSd:11.7, risk:7.0, riskSd:8.1, late:6.5, lateSd:7.2 },
-  "very-conservative": { info: "🔴 매우 보수형: 8.0 → 6.0 → 5.5", accum:8.0, accumSd:10.8, risk:6.0, riskSd:6.3, late:5.5, lateSd:5.4 },
-  sp500:               { info: "📈 S&P 500 100% — 10.5% / σ13.5. 샤프 0.52", accum:10.5, accumSd:13.5, risk:10.5, riskSd:13.5, late:10.5, lateSd:13.5 },
-  nasdaq:              { info: "🚀 나스닥 100% — 13.5% / σ19.8. 최대낙폭 −83% 경험", accum:13.5, accumSd:19.8, risk:13.5, riskSd:19.8, late:13.5, lateSd:19.8 },
-  "sp-nasdaq":         { info: "⚖️ S&P70+나스닥30 — 11.4% / σ15.3", accum:11.4, accumSd:15.3, risk:11.4, riskSd:15.3, late:11.4, lateSd:15.3 },
-  "sp-nasdaq-5050":    { info: "⚖️ S&P50+나스닥50 — 12.0% / σ16.6", accum:12.0, accumSd:16.6, risk:12.0, riskSd:16.6, late:12.0, lateSd:16.6 },
-  "option-f":          { info: "⭐ 옵션 F — 미국주력70+버크셔10+인도5+금6+단기채9. 10.6% / σ14.3", accum:10.6, accumSd:14.3, risk:10.6, riskSd:14.3, late:10.6, lateSd:14.3 },
-  buffett:             { info: "💼 버핏 90/10 — 9.8% / σ12.6", accum:9.8, accumSd:12.6, risk:9.8, riskSd:12.6, late:9.8, lateSd:12.6 },
-  twofund:             { info: "⚡ Two-Fund 80/20 — 9.5% / σ12.6", accum:9.5, accumSd:12.6, risk:9.5, riskSd:12.6, late:9.5, lateSd:12.6 },
-  dividend:            { info: "💰 배당성장 SCHD형 — 8.5% / σ11.7", accum:8.5, accumSd:11.7, risk:8.5, riskSd:11.7, late:8.5, lateSd:11.7 },
-  balanced60:          { info: "📊 60-40 클래식 — 7.5% / σ11.0", accum:7.5, accumSd:11.0, risk:7.5, riskSd:11.0, late:7.5, lateSd:11.0 },
-  "3fund":             { info: "📚 3-Fund Bogleheads — 8.5% / σ11.0", accum:8.5, accumSd:11.0, risk:8.5, riskSd:11.0, late:8.5, lateSd:11.0 },
-  lazy:                { info: "😴 레이지 — 7.8% / σ10.2", accum:7.8, accumSd:10.2, risk:7.8, riskSd:10.2, late:7.8, lateSd:10.2 },
-  tdf2040:             { info: "🎯 타겟데이트 2040 — 7.5% / σ10.1", accum:7.5, accumSd:10.1, risk:7.5, riskSd:10.1, late:7.5, lateSd:10.1 },
-  allweather:          { info: "🌦️ All Weather — 6.5% / σ7.6", accum:6.5, accumSd:7.6, risk:6.5, riskSd:7.6, late:6.5, lateSd:7.6 },
-  permanent:           { info: "🛡️ 영구 포트폴리오 — 5.8% / σ6.5. 4국면 전천후 방어", accum:5.8, accumSd:6.5, risk:5.8, riskSd:6.5, late:5.8, lateSd:6.5 },
-  butterfly:           { info: "🦋 골든 버터플라이 — 6.8% / σ8.0", accum:6.8, accumSd:8.0, risk:6.8, riskSd:8.0, late:6.8, lateSd:8.0 },
-  vt:                  { info: "🌍 전세계 주식 VT형 — 8.8% / σ12.6", accum:8.8, accumSd:12.6, risk:8.8, riskSd:12.6, late:8.8, lateSd:12.6 },
-  "korea-tax":         { info: "🇰🇷 한국 절세형 — 실효 8.5% / σ11.0", accum:8.5, accumSd:11.0, risk:8.5, riskSd:11.0, late:8.5, lateSd:11.0 },
-  deposit:             { info: "🏦 정기예금 100% — 3.0% / σ0.3. 실질 ~0.8%, 인출을 못 버팁니다 (시연용)", accum:3.0, accumSd:0.3, risk:3.0, riskSd:0.3, late:3.0, lateSd:0.3 },
-  kospi:               { info: "🇰🇷 코스피 100% — 5.5% / σ18.0. 샤프 0.11, 홈 바이어스 시연용", accum:5.5, accumSd:18.0, risk:5.5, riskSd:18.0, late:5.5, lateSd:18.0 },
-  gold100:             { info: "🥇 금 100% — 5.0% / σ15.3. 샤프 0.10, 단독 보유 비효율 시연용", accum:5.0, accumSd:15.3, risk:5.0, riskSd:15.3, late:5.0, lateSd:15.3 },
-  nasdaq2x:            { info: "⚡ 나스닥 2x — 21.0% / σ39.6. ⚠️ 산술평균이지 실현 수익이 아닙니다. 아래 CAGR을 보세요", accum:21.0, accumSd:39.6, risk:21.0, riskSd:39.6, late:21.0, lateSd:39.6 },
-  custom:              { info: "⚙️ 커스텀 — 아래 구간별 값을 직접 입력하세요", custom: true },
+  off:                 { name: "프리셋 안 씀", note: "계좌별 수익률 + 아래 평균/변동성으로 시장을 뽑습니다", scalar: true },
+  aggressive:          { name: "🟢 공격형" },
+  standard:            { name: "🟡 표준형" },
+  conservative:        { name: "🟠 보수형" },
+  "very-conservative": { name: "🔴 매우 보수형" },
+  sp500:               { name: "📈 S&P 500 100%" },
+  nasdaq:              { name: "🚀 나스닥 100%", note: "최대낙폭 −83% 경험" },
+  "sp-nasdaq":         { name: "⚖️ S&P70+나스닥30" },
+  "sp-nasdaq-5050":    { name: "⚖️ S&P50+나스닥50" },
+  "option-f":          { name: "⭐ 옵션 F", note: "버크셔 10%는 선진국 주식으로 근사" },
+  buffett:             { name: "💼 버핏 90/10" },
+  twofund:             { name: "⚡ Two-Fund 80/20" },
+  dividend:            { name: "💰 배당성장 SCHD형" },
+  balanced60:          { name: "📊 60-40 클래식" },
+  "3fund":             { name: "📚 3-Fund Bogleheads" },
+  lazy:                { name: "😴 레이지" },
+  tdf2040:             { name: "🎯 타겟데이트 2040", note: "이번 단계에서는 비중이 고정입니다 (글라이드패스는 후속)" },
+  allweather:          { name: "🌦️ All Weather" },
+  permanent:           { name: "🛡️ 영구 포트폴리오", note: "4국면 전천후 방어" },
+  butterfly:           { name: "🦋 골든 버터플라이" },
+  vt:                  { name: "🌍 전세계 주식 VT형" },
+  "korea-tax":         { name: "🇰🇷 한국 절세형" },
+  deposit:             { name: "🏦 정기예금 100%", note: "인출을 못 버팁니다 (시연용)" },
+  kospi:               { name: "🇰🇷 코스피 100%", note: "홈 바이어스 시연용" },
+  gold100:             { name: "🥇 금 100%", note: "단독 보유 비효율 시연용" },
+  nasdaq2x:            { name: "⚡ 나스닥 2x", note: "⚠️ 변동성 침식이 큽니다. 아래 실현 CAGR을 보세요" },
+  custom:              { name: "⚙️ 커스텀", note: "아래 구간별 값을 직접 입력하세요", scalar: true, custom: true },
 };
 
+/* ==================================================================
+   [자산군 정의]  ASSETS
+   ──────────────────────────────────────────────────────────────────
+   기존 모델은 포트폴리오 전체를 '평균 + 표준편차' 한 쌍으로만 다뤘다.
+   그래서 2022년처럼 주식과 채권이 같이 빠지는 상황이나, 환헤지 여부에
+   따라 결과가 갈리는 상황을 표현할 수 없었다.
+
+   필드 뜻
+     er    **총수익률** 기대치(%, 로컬통화·세전·보수차감 전)
+           배당·이자를 포함한 값이다. div 를 따로 더하지 않는다.
+     div   그중 배당·이자로 들어오는 몫(%) — er 의 구성요소이지 덧셈 항이 아니다.
+           지금은 계산에 쓰지 않고, 배당과세·건보료 연결(후속)을 위해 남겨 둔다.
+     vol   변동성(%)                      fee  연간 보수(%) — er 에서 한 번만 뺀다
+     fx    환노출 0~1 (1 = 100% 달러 등 외화 노출)  ─┐ 아직 어느 식에도
+     dur   금리 민감도(듀레이션, 년). 채권만 의미 있음  ├ 쓰지 않는다.
+     infl  물가 민감도 (+면 인플레에 강함)            ─┘ Phase 3 에서 쓸 자리
+     beta  위기 민감도 — 시나리오 충격을 얼마나 크게 받는지
+   숫자는 장기 가정치이지 예측이 아니다.
+   ================================================================== */
+const ASSETS = [
+  { id:"eqKR",    name:"한국 주식",       short:"한국주식", er: 6.5, vol:18.0, div:2.0, fee:0.15, fx:0.0, dur:0,    infl:-0.2, beta:1.00, kind:"equity" },
+  { id:"eqDM",    name:"선진국 주식",     short:"선진주식", er: 8.5, vol:15.0, div:1.8, fee:0.10, fx:1.0, dur:0,    infl:-0.2, beta:1.00, kind:"equity" },
+  { id:"eqUSG",   name:"미국 성장·기술주", short:"미국성장", er:10.5, vol:20.0, div:0.8, fee:0.15, fx:1.0, dur:0,    infl:-0.5, beta:1.25, kind:"equity" },
+  { id:"eqEM",    name:"신흥국 주식",     short:"신흥주식", er: 8.0, vol:22.0, div:2.5, fee:0.30, fx:1.0, dur:0,    infl:-0.1, beta:1.30, kind:"equity" },
+  { id:"bondKR",  name:"한국 국채",       short:"한국국채", er: 3.2, vol: 5.0, div:3.0, fee:0.10, fx:0.0, dur:6.0,  infl:-0.8, beta:0.20, kind:"bond" },
+  { id:"bondGL",  name:"글로벌 국채",     short:"글로벌채", er: 3.5, vol: 7.0, div:3.0, fee:0.20, fx:1.0, dur:7.5,  infl:-0.8, beta:0.25, kind:"bond" },
+  { id:"bondCorp",name:"회사채",          short:"회사채",   er: 4.5, vol: 8.0, div:4.2, fee:0.25, fx:0.6, dur:5.0,  infl:-0.6, beta:0.60, kind:"bond" },
+  { id:"gold",    name:"금",              short:"금",       er: 5.0, vol:15.0, div:0.0, fee:0.25, fx:1.0, dur:0,    infl: 0.8, beta:0.20, kind:"real" },
+  { id:"cash",    name:"현금·예금",       short:"현금",     er: 3.0, vol: 0.5, div:3.0, fee:0.00, fx:0.0, dur:0.1,  infl:-0.3, beta:0.00, kind:"cash" },
+  { id:"reit",    name:"부동산·리츠",     short:"리츠",     er: 7.0, vol:17.0, div:4.0, fee:0.35, fx:0.5, dur:3.0,  infl: 0.4, beta:1.10, kind:"real" },
+  { id:"lev",     name:"레버리지(2x)",    short:"레버리지", er:13.0, vol:39.0, div:0.0, fee:0.90, fx:1.0, dur:0,    infl:-0.6, beta:2.20, kind:"equity" },
+];
+const AS_ID = ASSETS.map(a => a.id);
+const ASSET_BY = Object.fromEntries(ASSETS.map(a => [a.id, a]));
+
+/** 비중 객체를 만든다 — 빠진 자산군은 0 */
+function mixOf(o) {
+  const w = Object.fromEntries(AS_ID.map(id => [id, 0]));
+  for (const k in (o || {})) if (k in w) w[k] = +o[k] || 0;
+  return w;
+}
+/** 합이 100이 되도록 정규화. 전부 0이면 현금 100으로 되돌린다. */
+function normalizeMix(w) {
+  const out = mixOf(w);
+  const s = AS_ID.reduce((t, id) => t + clamp0(out[id]), 0);
+  if (s <= 0) { const z = mixOf({}); z.cash = 100; return z; }
+  for (const id of AS_ID) out[id] = clamp0(out[id]) / s * 100;
+  return out;
+}
+
+/* 프리셋을 '자산 비중'으로 재정의한다. 기존 이름은 그대로 두어
+   저장본이 preset 문자열만으로 계속 살아나게 한다. */
+const PRESET_MIX = {
+  deposit:             { cash:100 },
+  "very-conservative": { cash:40, bondKR:35, bondGL:10, eqDM:10, gold:5 },
+  conservative:        { cash:20, bondKR:30, bondGL:15, eqDM:20, eqKR:5, gold:10 },
+  balanced60:          { eqDM:40, eqKR:5, eqUSG:15, bondKR:20, bondGL:15, gold:5 },
+  standard:            { eqDM:35, eqUSG:20, eqKR:5, eqEM:5, bondKR:15, bondGL:10, gold:5, cash:5 },
+  aggressive:          { eqDM:35, eqUSG:30, eqEM:10, eqKR:5, bondGL:10, gold:5, cash:5 },
+  sp500:               { eqDM:100 },
+  nasdaq:              { eqUSG:100 },
+  "sp-nasdaq":         { eqDM:70, eqUSG:30 },
+  "sp-nasdaq-5050":    { eqDM:50, eqUSG:50 },
+  // 버크셔는 별도 자산군이 없어 선진국 주식으로 근사한다 (미국주력 70 + 버크셔 10 = eqDM 55 + eqUSG 25)
+  "option-f":          { eqDM:55, eqUSG:25, eqEM:5, gold:6, bondKR:9 },
+  buffett:             { eqDM:90, cash:10 },
+  twofund:             { eqDM:80, bondGL:20 },
+  dividend:            { eqDM:60, reit:20, bondCorp:20 },
+  "3fund":             { eqDM:50, eqEM:20, bondGL:30 },
+  lazy:                { eqDM:40, eqKR:10, bondKR:30, reit:20 },
+  tdf2040:             { eqDM:45, eqEM:10, bondKR:25, bondGL:15, cash:5 },
+  allweather:          { eqDM:30, bondGL:40, bondKR:15, gold:7.5, reit:7.5 },
+  permanent:           { eqDM:25, bondGL:25, gold:25, cash:25 },
+  butterfly:           { eqDM:20, eqKR:20, bondGL:20, cash:20, gold:20 },
+  vt:                  { eqDM:60, eqUSG:15, eqEM:20, eqKR:5 },
+  "korea-tax":         { eqKR:30, eqDM:35, bondKR:25, gold:10 },
+  kospi:               { eqKR:100 },
+  gold100:             { gold:100 },
+  nasdaq2x:            { lev:100 },
+};
+
+/* ── 상관계수 행렬 ────────────────────────────────────────────────
+   자산군을 독립적으로 뽑으면 분산효과가 과대평가된다.
+   평상시 행렬과 위기 행렬을 따로 둔다 — 위기에는 상관이 올라간다
+   ("위기에는 상관관계가 1로 수렴한다"는 관찰).
+   대칭이어야 하고, Cholesky 가 실패하면 자동 보정한다. */
+const CORR_BASE = (() => {
+  const c = {
+    eqKR:  { eqKR:1, eqDM:.62, eqUSG:.55, eqEM:.70, bondKR:.05, bondGL:.00, bondCorp:.35, gold:.10, cash:0, reit:.45, lev:.55 },
+    eqDM:  { eqDM:1, eqUSG:.92, eqEM:.75, bondKR:.05, bondGL:.15, bondCorp:.55, gold:.08, cash:0, reit:.65, lev:.92 },
+    eqUSG: { eqUSG:1, eqEM:.68, bondKR:.02, bondGL:.10, bondCorp:.50, gold:.05, cash:0, reit:.55, lev:.99 },
+    eqEM:  { eqEM:1, bondKR:.08, bondGL:.15, bondCorp:.50, gold:.18, cash:0, reit:.50, lev:.68 },
+    bondKR:{ bondKR:1, bondGL:.55, bondCorp:.45, gold:.20, cash:.30, reit:.20, lev:.02 },
+    bondGL:{ bondGL:1, bondCorp:.60, gold:.28, cash:.25, reit:.25, lev:.10 },
+    bondCorp:{ bondCorp:1, gold:.15, cash:.15, reit:.45, lev:.50 },
+    gold:  { gold:1, cash:.05, reit:.15, lev:.05 },
+    cash:  { cash:1, reit:.05, lev:0 },
+    reit:  { reit:1, lev:.55 },
+    lev:   { lev:1 },
+  };
+  return buildSymmetric(c);
+})();
+/* 위기 국면 — 주식끼리는 거의 한 몸이 되고, 안전자산과의 음의 상관도 약해진다 */
+const CORR_CRISIS = (() => {
+  const c = {
+    eqKR:  { eqKR:1, eqDM:.85, eqUSG:.82, eqEM:.88, bondKR:-.10, bondGL:-.15, bondCorp:.65, gold:.05, cash:0, reit:.70, lev:.82 },
+    eqDM:  { eqDM:1, eqUSG:.96, eqEM:.90, bondKR:-.10, bondGL:-.05, bondCorp:.75, gold:.02, cash:0, reit:.82, lev:.96 },
+    eqUSG: { eqUSG:1, eqEM:.85, bondKR:-.12, bondGL:-.08, bondCorp:.70, gold:0, cash:0, reit:.75, lev:.99 },
+    eqEM:  { eqEM:1, bondKR:-.05, bondGL:0, bondCorp:.70, gold:.10, cash:0, reit:.70, lev:.85 },
+    bondKR:{ bondKR:1, bondGL:.65, bondCorp:.35, gold:.25, cash:.35, reit:.05, lev:-.10 },
+    bondGL:{ bondGL:1, bondCorp:.45, gold:.35, cash:.30, reit:.10, lev:-.05 },
+    bondCorp:{ bondCorp:1, gold:.10, cash:.10, reit:.60, lev:.70 },
+    gold:  { gold:1, cash:.10, reit:.10, lev:0 },
+    cash:  { cash:1, reit:0, lev:0 },
+    reit:  { reit:1, lev:.75 },
+    lev:   { lev:1 },
+  };
+  return buildSymmetric(c);
+})();
+
+/** 반쪽만 적은 상관표를 대칭 정방행렬로 편다 */
+function buildSymmetric(c) {
+  const n = AS_ID.length;
+  const m = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const a = AS_ID[i], b = AS_ID[j];
+      let v = (c[a] && c[a][b] !== undefined) ? c[a][b]
+            : (c[b] && c[b][a] !== undefined) ? c[b][a] : 0;
+      if (i === j) v = 1;
+      m[i][j] = v;
+    }
+  }
+  return m;
+}
+
+/** 같은 경고를 반복해서 찍지 않는다 (returnPath 가 몬테카를로에서 수백 번 돈다) */
+const WARNED = new Set();
+function warnOnce(msg) {
+  if (WARNED.has(msg)) return;
+  WARNED.add(msg);
+  if (typeof console !== "undefined" && console.warn) console.warn("[수익률 모델] " + msg);
+}
+
+/* ── Cholesky 분해 ────────────────────────────────────────────────
+   상관 있는 정규난수를 만들려면 A·Aᵀ = C 인 하한삼각 A 가 필요하다.
+   손으로 적은 상관표는 양의 정부호가 아닐 수 있다(대각합이 안 맞는 조합).
+   그때는 대각을 조금씩 키워(ridge) 다시 시도하고, 끝내 실패하면
+   상관을 포기하고 단위행렬(=독립)로 안전하게 되돌린다. */
+function cholesky(C) {
+  const n = C.length;
+  const L = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j <= i; j++) {
+      let s = C[i][j];
+      for (let k = 0; k < j; k++) s -= L[i][k] * L[j][k];
+      if (i === j) {
+        if (s <= 1e-12) return null;          // 양의 정부호가 아니다
+        L[i][j] = Math.sqrt(s);
+      } else {
+        L[i][j] = s / L[j][j];
+      }
+      if (!isFinite(L[i][j])) return null;
+    }
+  }
+  return L;
+}
+/** 실패하면 ridge 를 키워 가며 재시도, 그래도 안 되면 독립(단위행렬).
+    보정식은  D = (C + ridge·I) / (1 + ridge)  다. 대각까지 같이 나눠야
+    D 의 대각이 정확히 1 로 남아 '상관행렬'이다. 예전처럼 대각에 ridge 를
+    더하기만 하면 대각이 1+ridge 가 되고, L·Lᵀ 로 뽑은 난수의 분산이 그만큼
+    부풀어 자산 변동성이 조용히 커진다 (ridge 0.2 면 σ가 1.095배). */
+/** 상관행렬로 쓸 수 있는 모양인지 본다 — ridge 는 반올림 오차를 메우는 장치이지
+    입력 오류를 덮는 장치가 아니다. 어긋난 곳을 이름과 함께 돌려준다. */
+function corrMatrixProblems(C) {
+  const bad = [];
+  if (!Array.isArray(C) || !C.length) return ["행렬이 비어 있습니다"];
+  const n = C.length;
+  for (let i = 0; i < n; i++) {
+    if (!Array.isArray(C[i]) || C[i].length !== n) { bad.push(`${i}행의 길이가 ${n}이 아닙니다`); continue; }
+    if (!isFinite(C[i][i]) || Math.abs(C[i][i] - 1) > 1e-9) bad.push(`대각 [${i}]=${C[i][i]} (1이어야 합니다)`);
+    for (let j = 0; j < n; j++) {
+      const v = C[i][j];
+      if (!isFinite(v)) { bad.push(`[${i}][${j}]=${v}`); continue; }
+      if (v < -1 - 1e-9 || v > 1 + 1e-9) bad.push(`[${i}][${j}]=${v} (−1~1 밖)`);
+      if (Math.abs(v - C[j][i]) > 1e-9) bad.push(`[${i}][${j}] 와 [${j}][${i}] 가 다릅니다`);
+    }
+  }
+  return bad.slice(0, 8);
+}
+/** 마지막 safeCholesky 호출이 무엇을 했는지 — 자체 진단과 콘솔 경고가 읽는다 */
+let CHOL_LAST = { ok: true, ridge: 0, identity: false };
+function safeCholesky(C, label) {
+  let L = cholesky(C);
+  CHOL_LAST = { ok: !!L, ridge: 0, identity: false, label: label || "" };
+  if (L) return L;
+  // 여기 왔다는 건 손으로 적은 행렬이 양의 정부호가 아니라는 뜻이다. 조용히 넘기지 않는다.
+  const problems = corrMatrixProblems(C);
+  if (problems.length) warnOnce(`상관행렬(${label || "이름 없음"})이 상관행렬 모양이 아닙니다 — ${problems.join(", ")}`);
+  // 대각을 정규화해 두면 ridge 를 키우는 일이 곧 '단위행렬 쪽으로 축소'다.
+  // 분산은 계속 1 이고 상관만 옅어지므로, 크게까지 시도해도 안전하다 —
+  // 조금 옅은 상관이 무상관(단위행렬)보다 언제나 낫다.
+  for (const ridge of [1e-6, 1e-4, 1e-3, 1e-2, 5e-2, .1, .2, .5, 1, 2, 5, 20]) {
+    const D = C.map((row, i) => row.map((v, j) => (i === j ? v + ridge : v) / (1 + ridge)));
+    L = cholesky(D);
+    if (L) {
+      CHOL_LAST = { ok: false, ridge, identity: false, label: label || "" };
+      // ridge 가 커지면 상관이 ρ/(1+ridge) 로 옅어진다. 1 을 넘으면 절반 이상 날아가므로
+      // '살아남았다'가 아니라 '거의 무상관으로 바꿔 놓았다'에 가깝다 — 반드시 알린다.
+      if (ridge >= 1) warnOnce(`상관행렬(${label || "이름 없음"}) 보정이 큽니다 — ridge ${ridge},`
+        + ` 원래 상관의 약 ${(100 / (1 + ridge)).toFixed(0)}%만 남습니다`);
+      return L;
+    }
+  }
+  CHOL_LAST = { ok: false, ridge: Infinity, identity: true, label: label || "" };
+  warnOnce(`상관행렬(${label || "이름 없음"})을 쓸 수 없어 무상관(단위행렬)으로 되돌립니다`);
+  return C.map((_, i) => C.map((_, j) => i === j ? 1 : 0));
+}
+const CHOL_BASE = safeCholesky(CORR_BASE, "평상시");
+const CHOL_CRISIS = safeCholesky(CORR_CRISIS, "위기");
+
+/* ── 프리셋 문구 ──────────────────────────────────────────────────────
+   숫자를 문자열에 박아 두면 자산 구성을 고칠 때마다 어긋난다.
+   이름은 PRESETS 에서, 숫자는 비중에서 그때그때 계산해 붙인다. */
+function presetName(id) { return (PRESETS[id] || PRESETS.off).name; }
+/** "이름 — 8.4% / σ13.5. 덧말" 형태의 한 줄 설명 */
+function presetInfo(id) {
+  const P = PRESETS[id] || PRESETS.off;
+  const parts = [];
+  if (!P.scalar && PRESET_MIX[id]) {
+    const st = mixStats(PRESET_MIX[id]);
+    const sharpe = st.sd > 0.05 ? (st.mean - assetNetEr(ASSET_BY.cash)) / st.sd : null;
+    parts.push(`${st.mean.toFixed(1)}% / σ${st.sd.toFixed(1)}`
+      + (sharpe != null ? `. 샤프 ${sharpe.toFixed(2)}` : ""));
+  }
+  if (P.note) parts.push(P.note);
+  return P.name + (parts.length ? " — " + parts.join(". ") : "");
+}
+/** 프리셋 구성을 "선진주식 40 · 한국국채 20 …" 로 풀어 쓴다 (비중 큰 순) */
+function mixText(id, top) {
+  if (!PRESET_MIX[id]) return "";
+  const w = normalizeMix(PRESET_MIX[id]);
+  return AS_ID.filter(a => w[a] > 0.05).sort((a, b) => w[b] - w[a]).slice(0, top || 99)
+    .map(a => `${ASSET_BY[a].short} ${Math.round(w[a])}`).join(" · ");
+}
+
 /* ── 위기 시나리오 ────────────────────────────────────────────────────
-   pattern 은 해당 연도들의 수익률을 통째로 덮어쓴다(분포 추첨을 무시).
+   pattern 은 **기준 주식(eqDM)** 이 그해 맞는 수익률이다. 기준 자산은 이 값을
+   정확히 맞고(추첨 없음), 다른 자산은 "기준 주식이 딱 그만큼 빠졌다면" 이라는
+   조건 아래에서 저마다 다르게 맞는다 — 자세한 건 drawCorrelatedAssetReturns.
+   그래서 S&P 500 프리셋은 언제나 패턴 값 그대로이고, 섞인 포트폴리오는
+   무엇을 들고 있느냐에 따라 갈린다.
    투자 시작 후 시드로 뽑은 해에 터진다. */
 const CRASHES = {
   imf1997:     { name: "🇰🇷 1997 IMF형",      pattern: [-.40, .30, .20],  info: "외환위기. 원화 급락으로 해외자산은 방어, 국내자산 직격. V자 회복" , rateBump: 8.0 },
@@ -1098,8 +1364,14 @@ function bucketLabel(a, key) {
 /* ========================================================================
    상태
    ======================================================================== */
+/* 저장본 스키마 버전.
+   1 — schemaVersion 이 없던 최초 형태 (isaMoveYear/isaMoveAmt 시절 포함)
+   2 — 중첩 객체 deep merge + 검증 도입 */
+const SCHEMA_VERSION = 2;
+
 function defaultState() {
   const cfg = {
+    schemaVersion: SCHEMA_VERSION,
     birthYear: 1985, startYear: 2026, retireYear: 2050, endYear: 2080,
     inflation: 2.0, salaryTier: "low", isaType: "general",
     timing: "end", realView: 0,
@@ -1181,6 +1453,85 @@ function pensionRate(age) { return age >= 80 ? 3.3 : age >= 70 ? 4.4 : 5.5; }
 function npsNetOf(cfg, age) {
   const amt = age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
   return amt * (1 - clamp0(cfg.npsRate) / 100);
+}
+/** 국민연금 세전 — 세후와 짝을 이뤄야 gross/net 기준이 흔들리지 않는다 */
+function npsGrossOf(cfg, age) {
+  return age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
+}
+
+/* ==================================================================
+   [현금흐름 단일 진실 공급원]  Cashflow — single source of truth
+
+   고친 문제
+   ─────────
+   국민연금이 두 곳에서 동시에 잡히고 있었다.
+     ① cashOf() 가 salary 에 nps 를 더해 autoSpare(여력)에 반영
+     ② applyWithdrawals() 가 net 에 (nps - npsTax) 를 또 더함
+   그래서 simulate() 는 `greedyDraws(-autoSpare + npsNet)` 처럼
+   목표에 npsNet 을 되얹어 상쇄하는 우회를 하고 있었는데, 이 보정이
+   자동 진행 경로에만 있어서 안전 생활비·몬테카를로·종료 평가 등
+   다른 경로에서는 국민연금이 두 번 세어졌다. 결과가 실제보다
+   낙관적으로 나온 원인이다.
+
+   해결
+   ────
+   현금흐름 항목을 아래 이름으로 명시 분리하고, 국민연금은
+   totalCashAvailable 에 "정확히 한 번만" 들어가게 한다.
+   모든 모드가 buildCashflow() / spendingShortfallOf() 하나만 쓴다.
+
+     earnedIncome            근로·사업·기타 외부소득 (세후 취급)
+     publicPensionGross      국민연금 세전
+     publicPensionNet        국민연금 세후
+     portfolioWithdrawalGross 금융자산 총인출
+     portfolioWithdrawalNet   금융자산 세후인출 (국민연금 제외)
+     housingPension          주택연금 (대출이라 비과세·건보 미부과)
+     otherCash               기타 사용 가능 현금
+     requiredSpending        필요한 생활비 (생활비+지출+대출상환+건보료)
+     totalCashAvailable      그해 실제 사용 가능 현금
+     spendingShortfall       max(0, 필요 - 가용)
+     spendingSurplus         max(0, 가용 - 필요)
+   ================================================================== */
+
+/** 그해 현금흐름을 항목별로 분해한다. DOM 을 만지지 않는 순수 함수. */
+function buildCashflow(parts) {
+  const earnedIncome            = clamp0(parts.earnedIncome);
+  const publicPensionGross      = clamp0(parts.publicPensionGross);
+  const publicPensionNet        = clamp0(parts.publicPensionNet);
+  const portfolioWithdrawalGross= clamp0(parts.portfolioWithdrawalGross);
+  const portfolioWithdrawalNet  = clamp0(parts.portfolioWithdrawalNet);
+  const housingPension          = clamp0(parts.housingPension);
+  const otherCash               = clamp0(parts.otherCash);
+  const requiredSpending        = clamp0(parts.requiredSpending);
+
+  // 국민연금은 여기 단 한 번. portfolioWithdrawalNet 에는 절대 포함되지 않는다.
+  const totalCashAvailable = earnedIncome + publicPensionNet
+    + portfolioWithdrawalNet + housingPension + otherCash;
+
+  const spendingShortfall = Math.max(0, requiredSpending - totalCashAvailable);
+  const spendingSurplus   = Math.max(0, totalCashAvailable - requiredSpending);
+
+  return { earnedIncome, publicPensionGross, publicPensionNet,
+           portfolioWithdrawalGross, portfolioWithdrawalNet,
+           housingPension, otherCash, requiredSpending,
+           totalCashAvailable, spendingShortfall, spendingSurplus };
+}
+
+/** 미달액 — 모든 모드(1년 진행/자동/안전생활비/몬테카를로/최적화/종료평가/파산분석)가 이 함수만 쓴다 */
+function spendingShortfallOf(parts) { return buildCashflow(parts).spendingShortfall; }
+
+/** cashOf() 결과 + 그해 인출결과(rec)를 합쳐 최종 현금흐름을 만든다.
+    rec 를 생략하면 '인출 전' 상태(= 얼마가 모자라 인출이 필요한가)를 준다.
+    화면·게임·종료평가가 전부 이 함수 하나만 쓰게 해서 판정식이 갈라지지 않게 한다. */
+function cashflowOf(c, rec) {
+  return buildCashflow({
+    earnedIncome: c.earnedIncome + c.lump,
+    publicPensionGross: c.npsGross,
+    publicPensionNet: c.npsNet,
+    portfolioWithdrawalGross: rec ? clamp0(rec.gross) : 0,
+    portfolioWithdrawalNet: rec ? clamp0(rec.net) : 0,   // rec.net 은 국민연금 불포함
+    housingPension: c.rev,
+    requiredSpending: c.requiredSpending,
+  });
 }
 
 /* ------------------------------------------------------------------
@@ -1296,31 +1647,238 @@ function phaseParams(cfg, y) {
     const d = { accum: cfg.cAccumSd, risk: cfg.cRiskSd, late: cfg.cLateSd }[ph];
     return { mean: clamp0(m), sd: clamp0(d), phase: ph };
   }
-  const m = { accum: P.accum, risk: P.risk, late: P.late }[ph];
-  const d = { accum: P.accumSd, risk: P.riskSd, late: P.lateSd }[ph];
-  return { mean: m, sd: d, phase: ph };
+  // 자산 기반 프리셋 — 숫자는 비중과 ASSETS·상관행렬에서 나온다.
+  // 비중이 해마다 같으므로 구간별로 값이 달라지지 않는다 (글라이드패스는 후속 단계).
+  const st = presetStats(cfg);
+  return st ? { mean: st.mean, sd: st.sd, phase: ph }
+            : { mean: clamp0(cfg.gameMean), sd: clamp0(cfg.gameVol), phase: ph };
 }
 
 /** 이번 판에 터질 위기 — 종류와 시작 연도를 시드로 정한다. 투자 시작 후에만 온다. */
+/* [위기 중복 배치 수정]
+   예전에는 시작연도를 40번 무작위로 뽑아 보고, 그래도 겹치면 겹친 자리를
+   그냥 썼다. 그러면 한 해에 두 시나리오가 덮여 뒤에 쓴 쪽만 남고,
+   "위기 3회"라고 해 놓고 실제로는 2회만 겪는 판이 조용히 생긴다.
+
+   이제는
+     · 가능한 모든 시작 연도를 먼저 계산하고
+     · 기존 구간과 겹치지 않는 후보만 남긴 뒤 그중에서 고른다
+     · 후보가 없으면 배치를 멈추고 위기 수를 자동 축소한다
+     · 시나리오가 endYear 를 넘으면 애초에 후보에서 제외한다
+   같은 시드는 항상 같은 배치가 나온다 (뽑는 순서를 바꾸지 않았다).
+   결과 맵에는 __meta 로 요청/실제 배치 수를 실어 UI 가 경고할 수 있게 한다. */
 function crashPlan(cfg) {
-  const n = Math.max(0, Math.min(3, +cfg.crashCount || 0));
-  if (!n) return {};
+  const want = Math.max(0, Math.min(3, +cfg.crashCount || 0));
+  const meta = { requested: want, placed: 0, truncated: false };
+  if (!want) return Object.defineProperty({}, "__meta", { value: meta, enumerable: false });
+
   const keys = Object.keys(CRASHES);
   const r = mulberry32((clamp0(cfg.gameSeed) | 0) ^ 0xC0FFEE);
   const first = cfg.startYear + 3, last = cfg.endYear;
   const map = {}, used = [];
-  for (let i = 0; i < n; i++) {
+
+  for (let i = 0; i < want; i++) {
     const key = cfg.crashPick && CRASHES[cfg.crashPick] ? cfg.crashPick : keys[Math.floor(r() * keys.length)];
     const pat = CRASHES[key].pattern;
-    let start = 0;
-    for (let tries = 0; tries < 40; tries++) {          // 이미 터진 위기와 겹치지 않게
-      start = first + Math.floor(r() * Math.max(1, last - first - pat.length));
-      if (!used.some(u => start < u.end && start + pat.length > u.start)) break;
+
+    // 시나리오 전체가 기간 안에 들어가는 시작연도만 후보로 삼는다
+    const cand = [];
+    for (let s = first; s + pat.length - 1 <= last; s++) {
+      if (!used.some(u => s < u.end && s + pat.length > u.start)) cand.push(s);
     }
+    if (!cand.length) { meta.truncated = true; break; }   // 자리가 없으면 위기 수를 줄인다
+
+    const start = cand[Math.floor(r() * cand.length)];
     used.push({ start, end: start + pat.length });
     pat.forEach((v, k) => { map[start + k] = { key, ret: v * 100, step: k, len: pat.length }; });
+    meta.placed++;
   }
-  return map;
+  // __meta 는 열거되지 않게 둔다 — 연도 키만 도는 기존 반복문이 깨지면 안 된다
+  return Object.defineProperty(map, "__meta", { value: meta, enumerable: false });
+}
+
+/* ==================================================================
+   [상관 다중자산 수익률 엔진]
+   ──────────────────────────────────────────────────────────────────
+   예전에는 포트폴리오 전체를 '평균 + 표준편차' 한 쌍으로만 굴렸다.
+   그래서 60-40 이든 영구 포트폴리오든 분산효과가 σ 숫자 하나에 미리
+   반영된 채였고, 주식과 채권이 같이 빠지는 해를 표현할 수 없었다.
+
+   이제 자산군 11개의 수익률을 상관행렬대로 함께 뽑고, 프리셋 비중으로
+   합산해 그해 포트폴리오 수익률을 만든다.
+
+   기준값은 하나씩만 둔다
+     구성 비중  PRESET_MIX      기대수익·변동성·보수  ASSETS
+     상관관계   CORR_BASE / CORR_CRISIS
+   PRESETS 의 옛 accum/risk/late 는 지웠다 — 두 곳에 숫자가 있으면 반드시
+   갈라진다. off(직접 입력)와 custom(구간별 입력)만 스칼라 경로를 남긴다.
+   ================================================================== */
+
+/** 자산의 순기대수익률 — 보수는 여기서 딱 한 번 뺀다 (div 는 er 에 이미 포함) */
+function assetNetEr(a) { return a.er - a.fee; }
+
+/** 공분산 한 칸 — σi·σj·ρij */
+function assetCov(i, j, C) { return ASSETS[i].vol * ASSETS[j].vol * C[i][j]; }
+
+/** 비중에서 포트폴리오 기대수익·변동성을 계산한다.
+    mean = Σ wᵢ·(erᵢ−feeᵢ),  var = wᵀΣw  (Σ 는 평상시 상관 기준) */
+function mixStats(mix, C) {
+  const w = normalizeMix(mix), cor = C || CORR_BASE;
+  let mean = 0, va = 0;
+  for (let i = 0; i < AS_ID.length; i++) {
+    const wi = w[AS_ID[i]] / 100;
+    if (!wi) continue;
+    mean += wi * assetNetEr(ASSETS[i]);
+    for (let j = 0; j < AS_ID.length; j++) {
+      const wj = w[AS_ID[j]] / 100;
+      if (wj) va += wi * wj * assetCov(i, j, cor);
+    }
+  }
+  return { mean, sd: Math.sqrt(Math.max(0, va)) };
+}
+
+/** 프리셋의 목표 비중 — 지금은 해가 바뀌어도 같다.
+    (연도를 받아 두는 건 글라이드패스·리밸런싱을 붙일 자리를 남겨 두려는 것이다.) */
+function mixForPreset(cfg, year) {
+  return normalizeMix(PRESET_MIX[cfg.preset]);
+}
+/** 자산 수익률 × 목표 비중의 합 (단순수익률 가중합) */
+function portfolioReturn(assetReturns, mix) {
+  let r = 0;
+  for (const id of AS_ID) r += (mix[id] / 100) * (assetReturns[id] || 0);
+  return r;
+}
+/** 자산 기반 프리셋인가 — off·custom 만 예전 스칼라 경로를 쓴다 */
+function isAssetPreset(cfg) {
+  const P = PRESETS[cfg.preset];
+  return !!(P && !P.scalar && PRESET_MIX[cfg.preset]);
+}
+/** 프리셋의 기대수익·변동성 — 캐시해 둔다 (매 연도 11×11 을 다시 돌 이유가 없다) */
+const MIX_STATS = {};
+function presetStats(cfg) {
+  const id = cfg.preset;
+  if (!isAssetPreset(cfg)) return null;
+  if (!MIX_STATS[id]) MIX_STATS[id] = mixStats(PRESET_MIX[id]);
+  return MIX_STATS[id];
+}
+
+/** 수익률 하한 — 어떤 자산도 −100% 아래로 내려가지 않게 한다 */
+function clampRet(v) { return Math.max(-85, Math.min(300, v)); }
+
+/* ── 위기 연도의 조건부 분해 ──────────────────────────────────────────
+   시나리오 숫자(2008년 −28%)는 **기준 주식이 그해 정확히 그 값을 맞는다**는
+   뜻이다. 그래서 기준 자산(eqDM)의 잔차를 0 으로 고정하고, 나머지 자산은
+   "기준 주식이 딱 그만큼 빠졌다면" 이라는 조건 아래의 분포에서 뽑는다.
+
+   e ~ N(0, C) 를 e_ref = 0 에 조건부로 두면
+       E[eᵢ | e_ref=0] = 0
+       Cov(eᵢ, eⱼ | e_ref=0) = Cᵢⱼ − Cᵢ,ref·Cⱼ,ref
+   이 조건부 공분산으로 n−1 개를 뽑고 기준 자산에는 0 을 넣는다.
+
+   이렇게 하면
+     · 기준 주식(=S&P 500 프리셋)은 시나리오 값을 정확히 맞는다
+     · 다른 자산은 위기다운 상관을 유지한 채 저마다 다르게 맞는다
+     · 표본마다 달라지는 배수를 쓰지 않으므로 상관이 깨지지 않는다
+   조건을 걸었으므로 관측되는 상관은 원본이 아니라 **편상관**이다. 자체 진단도
+   편상관을 기준으로 검사한다. */
+const CRASH_REF_I = AS_ID.indexOf("eqDM");
+/** 기준 자산을 뺀 나머지 자산의 인덱스 */
+const COND_IDX = AS_ID.map((_, i) => i).filter(i => i !== CRASH_REF_I);
+/** 조건부 공분산 Cᵢⱼ − Cᵢ,ref·Cⱼ,ref (기준 자산 제외) */
+function conditionalCov(C, refI, idx) {
+  return idx.map(i => idx.map(j => C[i][j] - C[i][refI] * C[j][refI]));
+}
+const CHOL_CRISIS_COND = safeCholesky(conditionalCov(CORR_CRISIS, CRASH_REF_I, COND_IDX), "위기 조건부");
+
+/* 위기 충격은 '자산마다 얼마나 아픈가'로 준다.
+   시나리오 숫자(2008년 −28% 같은)는 주식 기준이라, 그걸 현금·국채에까지
+   그대로 씌우면 말이 안 된다. ASSETS.beta 가 바로 그 감도다.
+
+       그 자산의 위기 평균 = 평소 기대수익 + (시나리오 − 기준주식) × betaᵢ
+
+   포트폴리오 수익률은 여기서 따로 맞추지 않고 **자산에서 자연스럽게 집계**한다.
+   예전에는 포트폴리오 합계를 스칼라 목표에 맞추려고 자산별 총수익에 공통 배수를
+   걸었는데, 그 배수가 표본마다 달라 사실상 각 자산을 그해 포트폴리오 총수익으로
+   나누는 꼴이었다. 그래서 시드를 가로질러 보면 상관이 무너지고(선진–현금이
+   −0.8까지 갔다) σ0.5 짜리 현금이 −31% 를 맞았다. 자산별 잔액·리밸런싱을
+   붙이는 순간 그대로 계산 오류가 된다. */
+function crashMeanOf(asset, scenario) {
+  const shock = (scenario - CRASH_REF_MEAN) * Math.min(CRASH_BETA_MAX, clamp0(asset.beta));
+  // 로그정규 변환이 log(1+μ/100) 을 쓰므로 μ 는 −100 아래로 내려가면 안 된다.
+  // 실제로 물리는 건 IMF형(−40%)×레버리지(β2.2) 같은 극단뿐이다.
+  return Math.max(-90, assetNetEr(asset) + shock);
+}
+/** 포트폴리오의 위기 감도 — 자산 베타의 가중평균. 화면 설명에 쓴다. */
+function portfolioCrashBeta(mix) {
+  let b = 0;
+  for (let i = 0; i < AS_ID.length; i++) b += (mix[AS_ID[i]] / 100) * clamp0(ASSETS[i].beta);
+  return Math.min(CRASH_BETA_MAX, b);
+}
+
+/**
+ * 한 해치 자산별 수익률을 상관관계대로 함께 뽑는다.
+ *   z ~ N(0,I) 를 자산 수만큼 뽑고 L·z 로 상관을 입힌다 (L·Lᵀ = 상관행렬).
+ *   위기 연도에는 CHOL_CRISIS 를 쓴다 — 위기에는 주식끼리 거의 한 몸이 된다.
+ *   options.scenario 를 주면 자산별 평균만 그만큼 옮긴다. 평균을 옮기는 것은
+ *   상관을 바꾸지 않으므로, 위기 연도의 최종 수익률도 CORR_CRISIS 를 그대로 따른다.
+ *
+ * 난수는 (시드, 연도)만으로 정해진다. 호출 순서나 몬테카를로 진행 순서가
+ * 결과를 바꾸면 같은 판을 다시 못 돌리므로, 전역 난수열을 쓰지 않는다.
+ */
+function drawCorrelatedAssetReturns(cfg, year, options = {}) {
+  const scenario = options.scenario;
+  const crisis = scenario != null || !!options.crisis;
+  const rnd = mulberry32((((clamp0(cfg.gameSeed) | 0) + year * 2654435761) ^ 0x9E3779B9) >>> 0);
+  const n = AS_ID.length;
+  const eps = new Array(n).fill(0);
+
+  if (scenario != null) {
+    // 위기 연도 — 기준 자산 잔차를 0 으로 고정하고 나머지를 조건부로 뽑는다.
+    // 기준 자산은 잔차가 0 이라 시나리오 값을 정확히 맞는다.
+    const m = COND_IDX.length, z = new Array(m);
+    for (let i = 0; i < m; i++) z[i] = gauss(rnd);
+    for (let i = 0; i < m; i++) {
+      let e = 0;
+      for (let k = 0; k <= i; k++) e += CHOL_CRISIS_COND[i][k] * z[k];
+      eps[COND_IDX[i]] = e;
+    }
+  } else {
+    const L = crisis ? CHOL_CRISIS : CHOL_BASE;
+    const z = new Array(n);
+    for (let i = 0; i < n; i++) z[i] = gauss(rnd);
+    for (let i = 0; i < n; i++) {
+      let e = 0;
+      for (let k = 0; k <= i; k++) e += L[i][k] * z[k];   // L 은 하삼각
+      eps[i] = e;
+    }
+  }
+
+  const out = {};
+  for (let i = 0; i < n; i++) {
+    const a = ASSETS[i], sd = a.vol, e = eps[i];
+    const mean = scenario != null ? crashMeanOf(a, scenario) : assetNetEr(a);
+    if (cfg.retMode === "arith") {
+      out[a.id] = clampRet(mean + e * sd);              // er 을 산술평균으로 본다
+    } else {
+      // er 을 장기 CAGR 로 보고 로그정규로 뽑는다 (arith 외 모드 공통).
+      // exact 의 총수익 보정은 returnPath 에서 연도 단위로 따로 건다.
+      const m = Math.log(1 + mean / 100);
+      const sg = (sd / 100) / (1 + mean / 100);
+      out[a.id] = clampRet((Math.exp(m + e * sg) - 1) * 100);
+    }
+  }
+  return out;
+}
+
+/** 자산별 총수익에 같은 배수 k 를 곱한다 — 가중합도 정확히 k 배가 된다.
+    (Σwᵢ(1+rᵢ)k = k·Σwᵢ(1+rᵢ))
+    exact 모드의 '비위기 연도 전체를 같은 만큼 평행이동' 에만 쓴다. k 가 표본과
+    무관한 상수라서 상관구조가 그대로 남는다 — 표본마다 달라지는 k 를 쓰면
+    그 순간 상관이 깨진다(위 crashMeanOf 주석 참고). */
+function scaleAssetGross(assetReturns, k) {
+  const out = {};
+  for (const id of AS_ID) out[id] = Math.max(-99, (1 + (assetReturns[id] || 0) / 100) * k * 100 - 100);
+  return out;
 }
 
 /**
@@ -1352,7 +1910,10 @@ function drawReturn(cfg, y) {
    자산군 간 상관구조를 따로 두지 않은 단순화라서, 실제 2008년에 금·채권이
    올라 방어된 몫까지 재현하지는 못한다. σ 하나로 잡은 근사다.
    ------------------------------------------------------------------ */
-const CRASH_REF_MEAN = 10.5, CRASH_REF_SD = 13.5;   // 시나리오를 적을 때 기준으로 삼은 주식 (S&P 500)
+/* 시나리오 낙폭을 적을 때 기준으로 삼은 주식 = 선진국 주식(eqDM, S&P 500 프리셋의 구성자산).
+   숫자를 여기 또 적어 두면 자산 표를 고칠 때 조용히 어긋난다 — ASSETS 에서 끌어온다.
+   그래야 "S&P 500 프리셋은 시나리오 값을 그대로 맞는다"가 계속 성립한다. */
+const CRASH_REF_MEAN = assetNetEr(ASSET_BY.eqDM), CRASH_REF_SD = ASSET_BY.eqDM.vol;
 const CRASH_BETA_MAX = 2.5;                          // 2x 레버리지도 이 선에서 멈춘다 (2008년 −75%쯤)
 
 /** 위기 연도의 수익률 — 시나리오 값을 내 포트폴리오 변동성에 맞춰 옮긴 값 */
@@ -1370,25 +1931,51 @@ function crashBeta(cfg, y) {
  * 전체 기간의 수익률을 한 번에 만든다.
  * exact 모드는 여기서 로그수익 합을 목표에 맞춰 평행이동하므로 전 구간을 알아야 한다.
  * 위기 연도는 시나리오가 정한 해라서 평행이동에서 빼고 나머지 해로만 조정한다 —
- * 그래서 exact 에서 위기는 총수익이 아니라 '언제 맞느냐'만 바꾼다(순서위험만 분리해서 보는 모드).
+ * 그래서 exact 에서 위기는 총수익을 바꾸지 않고, '언제 맞느냐' 와 '그 위기에 내 자산들이
+ * 어떻게 갈리느냐' 만 바꾼다 (기준 주식은 고정이고 나머지는 조건부로 갈리므로,
+ * 섞인 포트폴리오에서는 위기의 깊이도 판마다 조금 달라진다).
  * (위기 연도 값 자체는 crashReturn 이 포트폴리오 변동성에 맞춰 정한다.)
  */
 function returnPath(cfg) {
   const crash = crashPlan(cfg);
-  const path = {}, free = [];
+  const asset = isAssetPreset(cfg);
+  const mix = asset ? mixForPreset(cfg, cfg.startYear) : null;
+  const path = {}, assetPath = {}, free = [];
   let targetLog = 0;
+
   for (let y = cfg.startYear; y <= cfg.endYear; y++) {
     targetLog += Math.log(1 + phaseParams(cfg, y).mean / 100);
-    if (crash[y]) path[y] = crashReturn(cfg, y, crash[y].ret);
-    else { path[y] = drawReturn(cfg, y); free.push(y); }
+    const inCrash = !!crash[y];
+    if (!asset) {                                  // off·custom — 예전 스칼라 경로 그대로
+      path[y] = inCrash ? crashReturn(cfg, y, crash[y].ret) : drawReturn(cfg, y);
+      if (!inCrash) free.push(y);
+      continue;
+    }
+    // 위기 연도는 자산별 평균만 시나리오만큼 옮겨서 뽑는다. 포트폴리오 수익률은
+    // 그 결과를 비중으로 합친 값이지, 따로 맞춰 넣은 값이 아니다.
+    const ar = drawCorrelatedAssetReturns(cfg, y, inCrash ? { scenario: crash[y].ret } : {});
+    if (!inCrash) free.push(y);
+    assetPath[y] = ar;
+    path[y] = portfolioReturn(ar, mix);            // path 는 언제나 assetPath 의 가중합이다
   }
+
   if (cfg.retMode === "exact" && free.length) {
     let cur = 0;
     for (let y = cfg.startYear; y <= cfg.endYear; y++) cur += Math.log(1 + path[y] / 100);
     const adj = (targetLog - cur) / free.length;
-    for (const y of free) path[y] = (Math.exp(Math.log(1 + path[y] / 100) + adj) - 1) * 100;
+    const k = Math.exp(adj);
+    for (const y of free) {
+      if (asset) {
+        // 여기서도 같은 배수를 자산별 총수익에 건다. 가중합이 정확히 k 배가 되므로
+        // 포트폴리오 수준의 결과는 예전 스칼라 보정과 완전히 같다.
+        assetPath[y] = scaleAssetGross(assetPath[y], k);
+        path[y] = portfolioReturn(assetPath[y], mix);
+      } else {
+        path[y] = (Math.exp(Math.log(1 + path[y] / 100) + adj) - 1) * 100;
+      }
+    }
   }
-  return { path, crash };
+  return { path, assetPath, crash, mix };
 }
 
 /** 프리셋이 내건 장기 목표 CAGR (구간 평균의 기하 가중) */
@@ -1875,10 +2462,22 @@ function applyWithdrawals(st, draws, ctx) {
   const nps = ctx.age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
   const npsTax = nps * cfg.npsRate / 100;
 
+  /* [국민연금 이중 집계 수정]
+     예전에는  net = gross - tax + nps - npsTax  였는데 tax 안에 이미 npsTax 가
+     들어 있어 국민연금 세금을 두 번 뺐다. 게다가 net 에 nps 를 얹는 바람에
+     cashOf() 의 salary(=nps 포함)와 합쳐지면 국민연금이 두 번 세어졌다.
+
+     이제 net 은 '금융자산 세후인출'만 뜻한다 (국민연금 불포함).
+     국민연금은 npsNet 으로 따로 내보내고, 합산은 buildCashflow() 가
+     totalCashAvailable 에서 딱 한 번만 한다. */
+  const withdrawalTax = pensionTax + etcTax + sevTax + isaTax + capTax; // 금융자산 인출분 세금
+  const tax = withdrawalTax + npsTax;                                   // 신고 기준 총세액 (표시용)
+
   const gross = AID.reduce((s, id) => s + det[id].gross, 0);
-  const tax = pensionTax + etcTax + sevTax + isaTax + npsTax + capTax;
   return {
-    det, gross, tax, net: gross - tax + nps - npsTax,
+    det, gross, tax, withdrawalTax,
+    net: gross - withdrawalTax,       // 금융자산 세후인출 — 국민연금 제외
+    npsNet: nps - npsTax,             // 국민연금 세후 — 합산은 buildCashflow 에서 한 번만
     nps, npsTax, taxablePension, otherIncome, over1500, compPicked, sepTax, compTax,
     pRate: pRate * 100, taxFree, isaTax, pensionTax, sevTax, etcTax, isaGainTaxed,
     realizedGain, capTax,
@@ -2151,10 +2750,17 @@ function simulate(opts = {}) {
     // auto 모드 — 저장된 셀 대신 게임과 같은 방식(현금 부족분만큼 인출 / 남으면 우선순위 배분)으로
     // 그해 납입·인출을 그 자리에서 정한다. 역산·진단은 설정을 바꿔 가며 돌려야 하므로
     // 이미 채워진 셀을 읽는 방식으로는 답이 안 나온다.
-    let autoSpare = 0;
+    let autoSpare = 0, autoCash = null;
     if (opts.auto) {
       const c = cashOf(cfg, y, opts.auto.loan, years.length ? years[years.length - 1].finIncome : 0);
-      autoSpare = c.salary + c.lump - c.living - c.spend - (c.loan ? c.loan.paid : 0);
+      // 인출 전 현금흐름 — 국민연금은 여기서 딱 한 번 잡힌다 (c.earnedIncome 에는 없다)
+      autoCash = buildCashflow({
+        earnedIncome: c.earnedIncome + c.lump,
+        publicPensionGross: c.npsGross, publicPensionNet: c.npsNet,
+        housingPension: c.rev,
+        requiredSpending: c.requiredSpending,
+      });
+      autoSpare = autoCash.spendingSurplus - autoCash.spendingShortfall;
       const ins = autoSpare > 0 ? allocPlan(cfg, autoSpare) : Object.fromEntries(AID.map(id => [id, 0]));
       ins.irpSev = clamp0(ins.irpSev) + Math.round(clamp0(c.sev));
       r = Object.fromEntries(AID.map(id => [id, { in: ins[id] || 0, out: 0 }]));
@@ -2325,17 +2931,18 @@ function simulate(opts = {}) {
     // ---- 인출
     let draws;
     if (opts.auto) {
-      // 목표에 국민연금 세후를 얹는다 — applyWithdrawals 가 실수령에 그만큼 더해 주므로,
-      // 그냥 두면 계좌에서 딱 그만큼 덜 빼고 끝난다 (여력엔 이미 반영돼 있다).
-      const npsNet = npsNetOf(cfg, age);
-      draws = autoSpare < -0.5 ? greedyDraws(st, ctx, -autoSpare + npsNet, cfg.wdStrategy) : Object.fromEntries(AID.map(id => [id, 0]));
+      // [수정] 예전에는 목표에 npsNet 을 되얹어 이중 집계를 상쇄했다.
+      // 이제 net 이 금융자산분만 뜻하고 국민연금은 autoCash 에서 이미 한 번 잡혔으므로,
+      // 모자란 만큼(spendingShortfall)만 그대로 인출 목표로 준다.
+      const needNet = autoCash ? autoCash.spendingShortfall : 0;
+      draws = needNet > 0.5 ? greedyDraws(st, ctx, needNet, cfg.wdStrategy) : Object.fromEntries(AID.map(id => [id, 0]));
     } else if (opts.plan && wdActive(cfg, y)) {
       const fixed = wdFixedOf(cfg, y);
       const seed = Object.fromEntries(AID.map(id => [id, Math.round(clamp0(fixed[id]))]));
       const want = wdTargetOf(cfg, y);
       if (want > 0) {
-        const nps = age >= cfg.npsAge ? clamp0(cfg.npsAmount) * (1 - cfg.npsRate / 100) : 0;
-        draws = greedyDraws(st, ctx, Math.max(0, want - nps), cfg.wdStrategy, seed);
+        // 목표는 '총 실수령'이므로 국민연금 세후를 뺀 나머지만 계좌에서 뽑는다
+        draws = greedyDraws(st, ctx, Math.max(0, want - npsNetOf(cfg, age)), cfg.wdStrategy, seed);
       } else {
         draws = seed;
       }
@@ -2378,26 +2985,43 @@ function simulate(opts = {}) {
     const finIncome = divIncome + (cfg.taxType === "etf" ? res.realizedGain : 0);
     rec.finIncome = finIncome;
     if (finIncome > 2000) rec.flags.finTax = Math.round(finIncome);
-    rec.nps = res.nps; rec.npsTax = res.npsTax;
+    rec.nps = res.nps; rec.npsTax = res.npsTax; rec.npsNet = res.npsNet;
     rec.taxablePension = res.taxablePension; rec.pRate = res.pRate;
     rec.compPicked = res.compPicked; rec.sepTax = res.sepTax; rec.compTax = res.compTax;
     rec.total = total;
     rec.pool = pool; // 연금계좌 합산 재원 — 인출 순서와 세율이 갈리는 곳
     rec.deflator = Math.pow(1 + cfg.inflation / 100, y - cfg.startYear);
 
-    // 목표 생활비 규칙 대비 미달 여부
+    // 목표 생활비 규칙 대비 미달 여부 — 목표는 '총 실수령'이므로 국민연금을 포함해 견준다.
+    // (rec.net 은 금융자산분만이라 그것만으로 재면 국민연금 받는 해가 부당하게 미달로 찍힌다)
     const want = wdTargetOf(cfg, y);
     if (want > 0) {
       rec.target = want;
-      if (res.net < want - Math.max(1, want * .01)) shortYears.push({ y, want, got: res.net });
+      const gotAll = res.net + res.npsNet;
+      if (gotAll < want - Math.max(1, want * .01)) shortYears.push({ y, want, got: gotAll });
     }
 
     // 미달은 '해의 수'가 아니라 '금액'으로 센다. 2% 모자란 해와 90% 모자란 해를
     // 똑같이 한 건으로 세면, 살짝씩 모자란 계획이 통째로 실격 처리된다.
-    if (opts.auto && autoSpare < -0.5) {
-      const need = -autoSpare;
-      autoNeed += need;
-      autoMiss += Math.max(0, need - res.net);
+    //
+    // [단일 판정] 인출 후 최종 현금흐름을 buildCashflow 로 다시 세운다.
+    // 국민연금은 autoCash 단계에서 이미 한 번 잡혔고, 여기서는 금융자산
+    // 세후인출(res.net)만 더한다 — 두 번 세지 않는다.
+    if (opts.auto && autoCash) {
+      const finalCash = buildCashflow({
+        earnedIncome: autoCash.earnedIncome,
+        publicPensionGross: autoCash.publicPensionGross,
+        publicPensionNet: autoCash.publicPensionNet,
+        portfolioWithdrawalGross: res.gross,
+        portfolioWithdrawalNet: res.net,
+        housingPension: autoCash.housingPension,
+        requiredSpending: autoCash.requiredSpending,
+      });
+      rec.cash = finalCash;
+      if (autoCash.spendingShortfall > 0.5) {
+        autoNeed += autoCash.spendingShortfall;
+        autoMiss += finalCash.spendingShortfall;
+      }
     }
     cumNet += res.net; cumTax += rec.tax; cumWdTax += rec.wdTax; cumOtherTax += rec.otherTax;
     if (depleted === null && y >= cfg.retireYear && total < 1 && rec.gross > 0) depleted = y;
@@ -2975,13 +3599,26 @@ function cashOf(cfg, y, loan, finPrev) {
   const ln = loan && loan[y];
   const lv = livingOf(cfg, y);
   const rev = reverseOf(cfg, y);        // 주택연금 — 명목 고정, 종신
-  // 설정에 적은 국민연금. 일정에 안 적어도 들어오는 돈이라 여기서 소득으로 잡는다 —
-  // 안 잡으면 화면의 '부족'이 그만큼 부풀고, 배분기만 몰래 이 돈을 세게 된다.
-  const nps = npsNetOf(cfg, y - cfg.birthYear);
-  // 주택연금은 대출이라 건보료 소득에 잡히지 않는다. 국민연금은 잡힌다.
-  const health = healthPremium(cfg, y, salary + nps, ln ? ln.balance : 0, finPrev);
-  return { list, salary: salary + rev + nps, lump, spend: spend + health, sev, loan: ln,
-           living: lv.amt, livingName: lv.name, rev, health, nps };
+  const age = y - cfg.birthYear;
+  // 설정에 적은 국민연금. 일정에 안 적어도 들어오는 돈이라 여기서 소득으로 잡는다.
+  const npsGross = npsGrossOf(cfg, age), npsNet = npsNetOf(cfg, age);
+  // 주택연금은 대출이라 건보료 소득에 잡히지 않는다. 국민연금은 잡힌다(세전 기준).
+  const health = healthPremium(cfg, y, salary + npsGross, ln ? ln.balance : 0, finPrev);
+
+  /* [현금흐름 명시 분리]
+     earnedIncome 에는 국민연금·주택연금을 넣지 않는다. 예전에는 salary 가
+     이 셋을 뭉뚱그려 담았고, applyWithdrawals 의 net 도 국민연금을 또 더해
+     이중 집계가 났다. 이제 항목을 나눠 두고 합산은 buildCashflow 만 한다.
+     salary(구 필드)는 기존 화면·CSV 호환을 위해 남긴다. */
+  const earnedIncome = salary;
+  const requiredSpending = lv.amt + spend + health + (ln ? ln.paid : 0);
+
+  return { list, lump, sev, loan: ln,
+           living: lv.amt, livingName: lv.name, rev, health,
+           earnedIncome, npsGross, npsNet, requiredSpending,
+           salary: salary + rev + npsNet,   // 구 필드 — 화면 호환용 (계산에는 쓰지 말 것)
+           nps: npsNet,                     // 구 필드 — 세후 국민연금
+           spend: spend + health };
 }
 
 /** 시작 화면 — 어떤 조건으로 출발하는지 한눈에 보여준다.
@@ -3067,7 +3704,7 @@ function renderStart(box) {
 
       <div class="gcard">
         <h4>시장</h4>
-        <div class="gline"><span>포트폴리오</span><span>${P.info.split(" —")[0].split(":")[0]}</span></div>
+        <div class="gline"><span>포트폴리오</span><span>${presetName(cfg.preset)}</span></div>
         <div class="gline"><span>위기</span><span>${clamp0(cfg.crashCount) ? `${clamp0(cfg.crashCount)}회 · ${cfg.crashPick && CRASHES[cfg.crashPick] ? CRASHES[cfg.crashPick].name : "랜덤"}` : "없음"}</span></div>
         <div class="gline"><span>시드</span><span>${cfg.gameSeed}</span></div>
         <div class="gline tot"><span>목표 장기 CAGR</span><span>${cfg.retMode === "arith" ? "—" : targetCagr(cfg).toFixed(1) + "%"}</span></div>
@@ -3081,7 +3718,7 @@ function renderStart(box) {
               위기의 <em>타이밍</em>만 시험하고 장기 평균은 지키려면 수익률 해석을
               <strong>「장기 수익률 고정」</strong>으로 바꾸세요.</p>`;
         })()}
-        <p class="hint" style="margin:8px 0 0">${P.info}</p>
+        <p class="hint" style="margin:8px 0 0">${presetInfo(cfg.preset)}${mixText(cfg.preset) ? `<br><span style="color:var(--muted)">${mixText(cfg.preset)}</span>` : ""}</p>
         <p class="hint" style="margin:6px 0 0">${returnSourceNote(cfg)}</p>
       </div>
     </div>
@@ -3120,7 +3757,9 @@ function renderGame() {
   const sevIn = Math.round(clamp0(c.sev));
   row(y).irpSev.in = Math.max(0, clamp0(row(y).irpSev.in) - sevIn) + sevIn;
   const loanPay = c.loan ? c.loan.paid : 0;
-  const spare = c.salary + c.lump - c.living - c.spend - loanPay;
+  // 인출 전 여력 — 공통 현금흐름 함수로 계산 (국민연금 1회 집계)
+  const cfPre = cashflowOf(c, null);
+  const spare = cfPre.spendingSurplus - cfPre.spendingShortfall;
   const total = cfg.endYear - cfg.startYear + 1;
   const turn = y - cfg.startYear + 1;
   // 여력 부호가 방향을 정하지만, 플레이어가 뒤집을 수 있다 (여윳돈이 남는 해에도
@@ -3148,7 +3787,7 @@ function renderGame() {
     <div class="gcols">
       <div class="gcard">
         <h4>올해 현금</h4>
-        <div class="gline"><span>소득</span><span class="pos">+${fmt(c.salary - clamp0(c.rev) - clamp0(c.nps))}</span></div>
+        <div class="gline"><span>소득</span><span class="pos">+${fmt(c.earnedIncome)}</span></div>
         ${c.rev > 0 ? `<div class="gline"><span>🏡 주택연금 <span style="font-size:10.5px;color:var(--muted)">명목 고정</span></span><span class="pos">+${fmt(c.rev)}</span></div>` : ""}
         ${c.nps > 0 ? `<div class="gline"><span>🏛️ 국민연금 <span style="font-size:10.5px;color:var(--muted)">설정에 적은 값 · 세후</span></span><span class="pos">+${fmt(c.nps)}</span></div>` : ""}
         ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
@@ -3242,7 +3881,7 @@ function renderGame() {
       const st = returnStats(cfg, game.returns);
       const P = PRESETS[cfg.preset] || PRESETS.off;
       const pp = phaseParams(cfg, y);
-      return `<p class="hint">${P.info.split(" —")[0]} · 지금은 <strong>${PHASE_NAME[pp.phase]}</strong>
+      return `<p class="hint">${presetName(cfg.preset)} · 지금은 <strong>${PHASE_NAME[pp.phase]}</strong>
         (평균 ${pp.mean.toFixed(1)}% / σ${pp.sd.toFixed(1)})
         ${st ? ` · 지금까지 실현 <strong>CAGR ${st.cagr.toFixed(1)}%</strong> (산술 ${st.arith.toFixed(1)}%)` : ""}</p>
         <p class="hint">${returnSourceNote(cfg)}</p>`;
@@ -3375,7 +4014,7 @@ function returnSourceNote(cfg) {
   const P = PRESETS[cfg.preset] || PRESETS.off;
   const mode = { geo: "장기 목표 CAGR", exact: "장기 수익률 고정", arith: "산술평균" }[cfg.retMode] || "";
   if (cfg.preset && cfg.preset !== "off") {
-    return `<strong>${P.info.split(" —")[0].split(":")[0]}</strong> 하나가 <strong>모든 계좌</strong>에 적용됩니다`
+    return `<strong>${presetName(cfg.preset)}</strong> 하나가 <strong>모든 계좌</strong>에 적용됩니다`
       + ` (수익률 해석: <strong>${mode}</strong>). 설정의 「계좌별 수익률」은 게임에서 쓰이지 않습니다(플래너 전용).`;
   }
   return `프리셋을 쓰지 않는 모드입니다. 「프리셋 off · 평균/변동성」으로 그해 시장을 뽑고, `
@@ -3402,9 +4041,19 @@ function rollCard(p) {
 /** 시나리오 원본 낙폭과 내가 실제로 맞은 값이 다른 이유를 한 줄로 밝힌다.
     "2008년인데 왜 −28%가 아니라 −13%지?" 가 안 보이면 계산이 틀린 것처럼 읽힌다. */
 function crashScaleLine(cfg, y, crash) {
+  const raw = CRASHES[crash.key].pattern[crash.step] * 100;
+  if (isAssetPreset(cfg)) {
+    const mix = mixForPreset(cfg, y), beta = portfolioCrashBeta(mix);
+    if (Math.abs(beta - 1) < 0.05) return "";
+    const mine = phaseParams(cfg, y).mean + (raw - CRASH_REF_MEAN) * beta;   // 기댓값
+    return `<div class="sub" style="margin-top:4px;color:var(--muted)">
+      주식 기준 시나리오 <strong>${raw >= 0 ? "+" : ""}${raw.toFixed(1)}%</strong> →
+      이 포트폴리오는 위기 감도가 주식의 <strong>${Math.round(beta * 100)}%</strong>라
+      평균 <strong>${mine >= 0 ? "+" : ""}${mine.toFixed(1)}%</strong> 언저리로 반영됩니다
+      (자산마다 다르게 맞으므로 그해 실제 값은 이보다 위아래로 흔들립니다)</div>`;
+  }
   const beta = crashBeta(cfg, y);
   if (Math.abs(beta - 1) < 0.05) return "";
-  const raw = CRASHES[crash.key].pattern[crash.step] * 100;
   const mine = crashReturn(cfg, y, raw);
   return `<div class="sub" style="margin-top:4px;color:var(--muted)">
     주식 기준 시나리오 <strong>${raw >= 0 ? "+" : ""}${raw.toFixed(1)}%</strong> →
@@ -3418,11 +4067,12 @@ function crashScaleLine(cfg, y, crash) {
    달라져서, 리포트의 '자동 배분에 맡겼다면'과도 어긋난다.
    ------------------------------------------------------------------ */
 function autoAllocateYear(y, isInOverride) {
-  const cfg = state.cfg, age = y - cfg.birthYear;
+  const cfg = state.cfg;
   const prev = gameSim().years.find(r => r.year === y - 1);
   const c = cashOf(cfg, y, game.loan, prev ? prev.finIncome : 0);
   const sevIn = Math.round(clamp0(c.sev));
-  const spare = c.salary + c.lump - c.living - c.spend - (c.loan ? c.loan.paid : 0);
+  const cfPre = cashflowOf(c, null);
+  const spare = cfPre.spendingSurplus - cfPre.spendingShortfall;
 
   // 방향은 여력의 부호로 정하되, 플레이어가 뒤집었으면 그 뜻을 따른다
   const isIn = isInOverride === undefined ? spare > 0 : !!isInOverride;
@@ -3435,7 +4085,9 @@ function autoAllocateYear(y, isInOverride) {
     row(y).irpSev.in = sevIn;
     const st = rebuildStateAt(gameSim(), y);
     if (st) {
-      const d = greedyDraws(st.st, st.ctx, Math.max(0, -spare) + npsNetOf(cfg, age), cfg.wdStrategy);
+      // [수정] 예전엔 목표에 npsNet 을 되얹어 이중 집계를 상쇄했다.
+      // 이제 국민연금은 cfPre 에서 이미 한 번 잡혔으므로 부족분만 뽑는다.
+      const d = greedyDraws(st.st, st.ctx, cfPre.spendingShortfall, cfg.wdStrategy);
       AID.forEach(id => { row(y)[id].out = Math.round(d[id]); });
     }
   }
@@ -3456,7 +4108,11 @@ function turnStep() {
 
   const cPrev = after.years.find(r => r.year === y - 1);
   const c = cashOf(cfg, y, game.loan, cPrev ? cPrev.finIncome : 0);
-  game.log.push({ year: y, ret: game.returns[y], total: rec ? rec.total : 0, spend: c.living + c.spend + (c.loan ? c.loan.paid : 0), salary: c.salary });
+  // 로그도 공통 현금흐름 기준 — requiredSpending 은 생활비+지출+건보료+대출상환을 이미 합친 값
+  const cfLog = cashflowOf(c, rec);
+  game.log.push({ year: y, ret: game.returns[y], total: rec ? rec.total : 0,
+                  spend: cfLog.requiredSpending, salary: cfLog.totalCashAvailable,
+                  shortfall: cfLog.spendingShortfall });
 
   const bankrupt = rec && rec.total < 1 && y > cfg.startYear;
   const deathYear = cfg.birthYear + clamp0(cfg.gameDeathAge);
@@ -3932,10 +4588,13 @@ function renderEnding(box) {
   const yrs = sim.years.filter(r => r.year <= game.over.year);
   const retireYear = cfg.retireYear;
   const post = yrs.filter(r => r.year >= retireYear);
+  // [단일 판정] 예전에는 r.net(국민연금 포함) + c.salary(국민연금 포함)로 재서
+  // 국민연금을 두 번 셌다. 이제 공통 cashflowOf() 하나로 판정한다.
   const met = post.filter(r => {
     const pv = yrs.find(x => x.year === r.year - 1);
     const c = cashOf(cfg, r.year, game.loan, pv ? pv.finIncome : 0);
-    return r.net + c.salary >= (c.living + c.spend + (c.loan ? c.loan.paid : 0)) * 0.98;
+    const cf = cashflowOf(c, r);
+    return cf.totalCashAvailable >= cf.requiredSpending * 0.98;
   }).length;
   const pct = post.length ? met / post.length * 100 : 0;
   const last = yrs[yrs.length - 1];
@@ -4202,7 +4861,7 @@ function optimizeApply(r) {
 function buildPresetUI() {
   const sel = document.getElementById("cfg_preset");
   if (sel && !sel.options.length) {
-    sel.innerHTML = Object.keys(PRESETS).map(k => `<option value="${k}">${PRESETS[k].info.split(" —")[0].split(":")[0]}</option>`).join("");
+    sel.innerHTML = Object.keys(PRESETS).map(k => `<option value="${k}">${presetName(k)}</option>`).join("");
   }
   const cp = document.getElementById("cfg_crashPick");
   if (cp && !cp.options.length) {
@@ -4212,7 +4871,7 @@ function buildPresetUI() {
 }
 const RET_MODE_INFO = {
   geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다. 다만 <strong>위기를 켜면 그만큼 평균도 내려갑니다</strong> — 얼마나 내려가는지는 아래 '위기까지 반영한 기대 CAGR'에 실제로 계산해 둡니다. 프리셋 수익률에 이미 과거 위기가 반영돼 있다면 이중 차감입니다.",
-  exact: "<strong>기본값입니다.</strong> 매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 위기도 총수익이 아니라 '언제 맞느냐'만 바꿔서 <strong>순서위험만 따로</strong> 시험합니다. 프리셋 수익률은 이미 과거 위기가 녹아든 장기 평균이므로, 위기를 얹으면서 평균까지 깎으면 같은 위험을 두 번 빼게 됩니다 — 그걸 피하는 모드입니다.",
+  exact: "<strong>기본값입니다.</strong> 매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 장기 CAGR을 고정해 두고, 위기가 <strong>언제 오느냐</strong>와 그 위기에 <strong>내 자산들이 어떻게 갈리느냐</strong>가 현금흐름에 미치는 영향을 시험합니다. 프리셋 수익률은 이미 과거 위기가 녹아든 장기 평균이므로, 위기를 얹으면서 평균까지 깎으면 같은 위험을 두 번 빼게 됩니다 — 그걸 피하는 모드입니다.",
   arith: "프리셋 숫자를 <strong>산술평균</strong>으로 씁니다. 복리로 굴리면 실현 CAGR은 그보다 낮아지며, 변동성이 클수록 차이가 큽니다(나스닥 2x는 5%p 이상).",
 };
 function syncRetMode() {
@@ -4336,7 +4995,8 @@ function syncRev() {
 function syncPresetInfo() {
   const P = PRESETS[state.cfg.preset] || PRESETS.off;
   const n = document.getElementById("presetInfo");
-  if (n) n.innerHTML = P.info + (P.custom ? "" : "");
+  if (n) n.innerHTML = presetInfo(state.cfg.preset)
+    + (mixText(state.cfg.preset) ? `<br><span style="color:var(--muted)">${mixText(state.cfg.preset)}</span>` : "");
   const c = document.getElementById("customPhase");
   if (c) c.hidden = !P.custom;
 }
@@ -4860,6 +5520,159 @@ function migrateTransfers(cfg) {
   delete cfg.isaMoveYear; delete cfg.isaMoveAmt;
 }
 
+/* ==================================================================
+   저장 데이터 마이그레이션
+   ──────────────────────────────────────────────────────────────────
+   예전 load() 는 최상위 cfg 만 얕게 병합하고 rates/limits/fillAmts
+   세 개만 따로 챙겼다. 그래서 property·reverse·health·loan·priority·
+   opening·openYears 같은 중첩 객체는 저장본에 필드가 하나라도 빠져
+   있으면 undefined 인 채로 남아 NaN 을 만들었다.
+
+   원칙
+     · 기존 데이터는 절대 조용히 지우지 않는다
+     · 누락 필드는 기본값으로 보완 (deep merge)
+     · 잘못된 값(NaN·범위 밖)은 기본값으로 되돌리고 경고 목록에 남긴다
+     · 배열은 용도별 정책: 규칙/일정 배열은 replace(사용자 입력 보존),
+       계좌 사전은 migrate(키 단위 보완)
+     · schemaVersion 을 붙여 순차 마이그레이션
+   ================================================================== */
+const MIGRATION_WARNINGS = [];
+
+/** 숫자 필드 안전 복구 — NaN·Infinity·범위 밖이면 기본값 */
+function safeNum(v, def, lo, hi, label) {
+  const n = typeof v === "number" ? v : parseFloat(v);
+  if (!isFinite(n)) {
+    if (v !== undefined && v !== null && v !== "") MIGRATION_WARNINGS.push(`${label}: 숫자가 아니어서 기본값 ${def} 으로 되돌렸습니다 (원래 값 ${JSON.stringify(v)})`);
+    return def;
+  }
+  if (lo !== undefined && n < lo) { MIGRATION_WARNINGS.push(`${label}: ${n} 은 허용 범위(${lo}~${hi}) 미만이라 ${lo} 으로 보정했습니다`); return lo; }
+  if (hi !== undefined && n > hi) { MIGRATION_WARNINGS.push(`${label}: ${n} 은 허용 범위(${lo}~${hi}) 초과라 ${hi} 으로 보정했습니다`); return hi; }
+  return n;
+}
+
+/** 중첩 객체 deep merge — 기본값 형태를 기준으로 저장본을 얹는다.
+    배열은 통째로 교체(사용자가 만든 규칙 목록을 섞으면 안 되므로). */
+function deepMerge(base, over, path) {
+  if (over === undefined || over === null) return base;
+  if (Array.isArray(base)) return Array.isArray(over) ? over.slice() : base;
+  if (typeof base !== "object" || typeof over !== "object") {
+    if (typeof base === "number" && typeof over !== "number") {
+      const n = parseFloat(over);
+      if (!isFinite(n)) { MIGRATION_WARNINGS.push(`${path}: 숫자가 아니어서 기본값 ${base} 유지`); return base; }
+      return n;
+    }
+    return over;
+  }
+  const out = Array.isArray(base) ? base.slice() : { ...base };
+  for (const k of Object.keys(over)) {
+    out[k] = (k in base) ? deepMerge(base[k], over[k], path ? `${path}.${k}` : k) : over[k];
+  }
+  return out;
+}
+
+/** v1 → v2. 구 필드 정리와 중첩 객체 보완. */
+function migrateV1toV2(cfg) {
+  migrateTransfers(cfg);              // isaMoveYear/isaMoveAmt → transfers
+  cfg.schemaVersion = 2;
+  return cfg;
+}
+
+/** 저장본(localStorage 또는 JSON 파일) 하나를 현재 스키마로 올린다.
+    실패해도 예외를 던지지 않고 기본값으로 채운 state 를 돌려준다. */
+function migrateState(raw) {
+  MIGRATION_WARNINGS.length = 0;
+  const def = defaultState();
+  if (!raw || typeof raw !== "object" || !raw.cfg || typeof raw.cfg !== "object") {
+    return { cfg: def.cfg, rows: {}, optUndo: null, warnings: [] };
+  }
+  const src = JSON.parse(JSON.stringify(raw.cfg));
+  const from = safeNum(src.schemaVersion, 1, 1, SCHEMA_VERSION, "schemaVersion");
+
+  // 1) 기본값 위에 저장본을 깊게 얹는다 — 중첩 객체의 누락 필드가 여기서 메워진다
+  let cfg = deepMerge(def.cfg, src, "");
+
+  // 2) 계좌 사전은 키 단위로 보완 (계좌가 추가돼도 옛 저장본이 깨지지 않게)
+  for (const key of ["rates", "limits", "fillAmts", "priority", "openYears"]) {
+    cfg[key] = { ...def.cfg[key], ...(src[key] || {}) };
+  }
+  cfg.opening = cfg.opening && typeof cfg.opening === "object" ? cfg.opening : {};
+  for (const a of ACC) {
+    const d = def.cfg.opening[a.id];
+    const o = (src.opening || {})[a.id];
+    cfg.opening[a.id] = (o && typeof o === "object") ? { ...d, ...o } : { ...d };
+    for (const k of Object.keys(cfg.opening[a.id])) {
+      cfg.opening[a.id][k] = safeNum(cfg.opening[a.id][k], 0, 0, undefined, `기초잔액.${a.id}.${k}`);
+    }
+  }
+
+  // 3) 순차 버전 마이그레이션
+  if (from < 2) cfg = migrateV1toV2(cfg);
+  cfg.schemaVersion = SCHEMA_VERSION;
+
+  // 4) 값 검증 — 잘못된 값은 기본값으로 복구하고 경고로 남긴다
+  cfg.birthYear  = Math.round(safeNum(cfg.birthYear, def.cfg.birthYear, 1900, 2200, "출생연도"));
+  cfg.startYear  = Math.round(safeNum(cfg.startYear, def.cfg.startYear, 1900, 2200, "시작연도"));
+  cfg.retireYear = Math.round(safeNum(cfg.retireYear, def.cfg.retireYear, 1900, 2200, "은퇴연도"));
+  cfg.endYear    = Math.round(safeNum(cfg.endYear, def.cfg.endYear, 1900, 2200, "종료연도"));
+  if (cfg.retireYear < cfg.startYear) {
+    MIGRATION_WARNINGS.push(`은퇴연도(${cfg.retireYear})가 시작연도(${cfg.startYear})보다 빨라 시작연도로 맞췄습니다`);
+    cfg.retireYear = cfg.startYear;
+  }
+  if (cfg.endYear < cfg.retireYear) {
+    MIGRATION_WARNINGS.push(`종료연도(${cfg.endYear})가 은퇴연도(${cfg.retireYear})보다 빨라 은퇴연도로 맞췄습니다`);
+    cfg.endYear = cfg.retireYear;
+  }
+  if (cfg.endYear - cfg.startYear > 120) {
+    MIGRATION_WARNINGS.push(`시뮬레이션 기간이 ${cfg.endYear - cfg.startYear}년이라 120년으로 제한했습니다`);
+    cfg.endYear = cfg.startYear + 120;
+  }
+  cfg.inflation   = safeNum(cfg.inflation, def.cfg.inflation, -10, 50, "물가상승률");
+  cfg.gameMean    = safeNum(cfg.gameMean, def.cfg.gameMean, -50, 100, "기대수익률");
+  cfg.gameVol     = safeNum(cfg.gameVol, def.cfg.gameVol, 0, 200, "변동성");
+  cfg.gameSpend   = safeNum(cfg.gameSpend, def.cfg.gameSpend, 0, 1e9, "목표 생활비");
+  cfg.gameSeed    = Math.round(safeNum(cfg.gameSeed, def.cfg.gameSeed, 0, 4294967295, "시드"));
+  cfg.gameDeathAge= Math.round(safeNum(cfg.gameDeathAge, def.cfg.gameDeathAge, 1, 130, "기대수명"));
+  cfg.crashCount  = Math.round(safeNum(cfg.crashCount, def.cfg.crashCount, 0, 3, "위기 횟수"));
+  cfg.npsAmount   = safeNum(cfg.npsAmount, 0, 0, 1e9, "국민연금 수령액");
+  cfg.npsAge      = Math.round(safeNum(cfg.npsAge, def.cfg.npsAge, 1, 130, "국민연금 개시나이"));
+  cfg.npsRate     = safeNum(cfg.npsRate, def.cfg.npsRate, 0, 100, "국민연금 세율");
+  cfg.sevRate     = safeNum(cfg.sevRate, def.cfg.sevRate, 0, 100, "퇴직소득 실효세율");
+  cfg.compRate    = safeNum(cfg.compRate, def.cfg.compRate, 0, 100, "분리과세율");
+  cfg.divRate     = safeNum(cfg.divRate, def.cfg.divRate, 0, 100, "배당률");
+  for (const a of ACC) {
+    cfg.rates[a.id]  = safeNum(cfg.rates[a.id], a.rate, -50, 100, `수익률.${a.id}`);
+    cfg.limits[a.id] = safeNum(cfg.limits[a.id], a.limit, 0, 1e9, `납입한도.${a.id}`);
+  }
+  if (cfg.loan) {
+    cfg.loan.balance = safeNum(cfg.loan.balance, def.cfg.loan.balance, 0, 1e9, "대출 잔액");
+    cfg.loan.rate    = safeNum(cfg.loan.rate, def.cfg.loan.rate, 0, 50, "대출 금리");
+    cfg.loan.rateMin = safeNum(cfg.loan.rateMin, def.cfg.loan.rateMin, 0, 50, "대출 금리 하한");
+    cfg.loan.rateMax = safeNum(cfg.loan.rateMax, def.cfg.loan.rateMax, 0, 50, "대출 금리 상한");
+    if (cfg.loan.rateMin > cfg.loan.rateMax) {
+      MIGRATION_WARNINGS.push(`대출 금리 하한(${cfg.loan.rateMin})이 상한(${cfg.loan.rateMax})보다 커서 서로 바꿨습니다`);
+      const t = cfg.loan.rateMin; cfg.loan.rateMin = cfg.loan.rateMax; cfg.loan.rateMax = t;
+    }
+  }
+  if (cfg.property) {
+    cfg.property.value  = safeNum(cfg.property.value, def.cfg.property.value, 0, 1e9, "주택 시가");
+    cfg.property.growth = safeNum(cfg.property.growth, def.cfg.property.growth, -50, 50, "주택가격 상승률");
+  }
+  if (cfg.reverse) {
+    cfg.reverse.homeValue = safeNum(cfg.reverse.homeValue, def.cfg.reverse.homeValue, 0, 1e9, "주택연금 주택가격");
+    cfg.reverse.startAge  = Math.round(safeNum(cfg.reverse.startAge, def.cfg.reverse.startAge, 1, 130, "주택연금 개시나이"));
+  }
+  // 배열 필드는 반드시 배열이어야 한다 (아니면 렌더러가 터진다)
+  for (const k of ["transfers", "fillRules", "wdRules", "events", "spendRules"]) {
+    if (!Array.isArray(cfg[k])) {
+      if (cfg[k] !== undefined) MIGRATION_WARNINGS.push(`${k}: 목록 형식이 아니어서 비웠습니다`);
+      cfg[k] = [];
+    }
+  }
+
+  const rows = (raw.rows && typeof raw.rows === "object" && !Array.isArray(raw.rows)) ? raw.rows : {};
+  return { cfg, rows, optUndo: raw.optUndo || null, warnings: MIGRATION_WARNINGS.slice() };
+}
+
 function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
 function load() {
   try {
@@ -4867,14 +5680,15 @@ function load() {
     if (!raw) return false;
     const s = JSON.parse(raw);
     if (!s || !s.cfg) return false;
-    state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {}, optUndo: s.optUndo || null };
-    state.cfg.rates = { ...defaultState().cfg.rates, ...(s.cfg.rates || {}) };
-    state.cfg.limits = { ...defaultState().cfg.limits, ...(s.cfg.limits || {}) };
-    state.cfg.fillAmts = { ...defaultState().cfg.fillAmts, ...(s.cfg.fillAmts || {}) };
+    const m = migrateState(s);
+    state = { cfg: m.cfg, rows: m.rows, optUndo: m.optUndo };
     migrateOpening(state.cfg, s.cfg);
-    migrateTransfers(state.cfg);
+    if (m.warnings.length) state.loadWarnings = m.warnings;
     return true;
-  } catch (e) { return false; }
+  } catch (e) {
+    if (console && console.error) console.error("저장본 불러오기 실패 — 기본값으로 시작합니다", e);
+    return false;
+  }
 }
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -5161,9 +5975,14 @@ document.getElementById("btnImport").onclick = () => {
       try {
         const s = JSON.parse(rd.result);
         if (!s.cfg) throw new Error("형식 오류");
-        state = { cfg: { ...defaultState().cfg, ...s.cfg }, rows: s.rows || {}, optUndo: s.optUndo || null };
-        migrateOpening(state.cfg, s.cfg); migrateTransfers(state.cfg);
+        const m = migrateState(s);
+        state = { cfg: m.cfg, rows: m.rows, optUndo: m.optUndo };
+        migrateOpening(state.cfg, s.cfg);
         builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); renderEvents(); render(true, true);
+        if (m.warnings.length) {
+          alert("불러왔습니다. 다만 아래 값은 보정했습니다:\n\n· " + m.warnings.slice(0, 10).join("\n· ")
+            + (m.warnings.length > 10 ? `\n… 외 ${m.warnings.length - 10}건` : ""));
+        }
       } catch (e) { alert("불러오기 실패: " + e.message); }
     };
     rd.readAsText(f);
@@ -5198,5 +6017,521 @@ document.getElementById("btnSevApply").onclick = () => {
   render(false);
 };
 window.addEventListener("resize", () => { if (lastSim) { renderChart1(lastSim); renderChart2(lastSim); } });
+
+/* ========================================================================
+   자체 진단 (self-test)
+   외부 테스트 프레임워크 없이 브라우저에서 바로 돌린다.
+   콘솔에서  __selfTest()  또는 설정 맨 아래 「🧪 자체 진단」 버튼.
+   실패하면 테스트 이름 / 기대값 / 실제값을 함께 출력한다.
+   ======================================================================== */
+function runSelfTests() {
+  const results = [];
+  const saved = JSON.parse(JSON.stringify(state.cfg));
+  const savedRows = JSON.parse(JSON.stringify(state.rows));
+  const savedGame = game ? JSON.parse(JSON.stringify(game)) : null;
+
+  const ok = (name, pass, expect, actual) =>
+    results.push({ name, pass: !!pass, expect, actual });
+  const near = (a, b, tol) => Math.abs(a - b) <= tol;
+  const finite = v => typeof v === "number" && isFinite(v);
+
+  const reset = () => {
+    const d = defaultState();
+    state.cfg = d.cfg; state.rows = {};
+    state.cfg.startYear = 2026; state.cfg.retireYear = 2040;
+    state.cfg.endYear = 2070; state.cfg.birthYear = 1985;
+    state.cfg.gameSpend = 3600; state.cfg.crashCount = 0;
+    state.cfg.opening.taxable = { free: 50000, ded: 0, sev: 0, gain: 0 };
+  };
+
+  try {
+    /* --- 1) 같은 seed 는 같은 결과 --- */
+    reset();
+    state.cfg.gameSeed = 12345;
+    const p1 = returnPath(state.cfg), p2 = returnPath(state.cfg);
+    ok("1. 같은 seed 재현성", JSON.stringify(p1.path) === JSON.stringify(p2.path),
+       "동일한 수익률 경로", JSON.stringify(p1.path) === JSON.stringify(p2.path) ? "동일" : "상이");
+
+    /* --- 2) 다른 seed 는 일반적으로 다른 결과 --- */
+    state.cfg.gameSeed = 999;
+    const p3 = returnPath(state.cfg);
+    ok("2. 다른 seed 는 다른 결과", JSON.stringify(p1.path) !== JSON.stringify(p3.path),
+       "상이한 경로", JSON.stringify(p1.path) !== JSON.stringify(p3.path) ? "상이" : "동일(충돌)");
+
+    /* --- 3) 국민연금은 한 번만 집계 --- */
+    reset();
+    state.cfg.npsAmount = 1200; state.cfg.npsAge = 60; state.cfg.npsRate = 3;
+    const npsNet = npsNetOf(state.cfg, 65);
+    const cfA = buildCashflow({ earnedIncome: 0, publicPensionNet: npsNet,
+      portfolioWithdrawalNet: 0, requiredSpending: 0 });
+    ok("3. 국민연금 1회 집계", near(cfA.totalCashAvailable, npsNet, 0.01),
+       `가용현금 = ${npsNet.toFixed(1)}`, cfA.totalCashAvailable.toFixed(1));
+
+    /* --- 3b) applyWithdrawals 의 net 에 국민연금이 섞이지 않는가 --- */
+    reset();
+    state.cfg.npsAmount = 1200; state.cfg.npsAge = 60;
+    const stT = { bal: Object.fromEntries(AID.map(id => [id, emptyBuckets()])), isaUsed: 0 };
+    stT.bal.taxable.free = 10000;
+    const ctxT = { year: 2050, age: 65, eligible: {}, pLimit: {}, pYear: {},
+                   cfg: state.cfg, capDeductLeft: 250, otherComp: 0, openYear: {} };
+    const resT = applyWithdrawals(stT, Object.fromEntries(AID.map(id => [id, 0])), ctxT);
+    ok("3b. net 에 국민연금 불포함", near(resT.net, 0, 0.01),
+       "인출 0 이면 net = 0", resT.net.toFixed(2));
+    ok("3c. npsTax 이중차감 없음",
+       near(resT.npsNet, 1200 * (1 - state.cfg.npsRate / 100), 0.01),
+       (1200 * (1 - state.cfg.npsRate / 100)).toFixed(1), resT.npsNet.toFixed(1));
+
+    /* --- 4) 소득 0, 인출 0 이면 생활비 전액 미달 --- */
+    const cfB = buildCashflow({ earnedIncome: 0, publicPensionNet: 0,
+      portfolioWithdrawalNet: 0, requiredSpending: 3600 });
+    ok("4. 소득·인출 0 → 전액 미달", near(cfB.spendingShortfall, 3600, 0.01),
+       "3600", cfB.spendingShortfall.toFixed(1));
+
+    /* --- 5) 계좌 소진 후 모든 버킷이 0 --- */
+    const stC = { bal: Object.fromEntries(AID.map(id => [id, emptyBuckets()])), isaUsed: 0 };
+    stC.bal.taxable.free = 1000; stC.bal.taxable.gain = 500;
+    const ctxC = { year: 2050, age: 65, eligible: {}, pLimit: {}, pYear: {},
+                   cfg: state.cfg, capDeductLeft: 250, otherComp: 0, openYear: {} };
+    applyWithdrawals(stC, { ...Object.fromEntries(AID.map(id => [id, 0])), taxable: 99999 }, ctxC);
+    const leftover = BUCKETS.reduce((s, k) => s + Math.abs(stC.bal.taxable[k.key] || 0), 0);
+    ok("5. 계좌 소진 후 버킷 0", leftover < 0.01, "0", leftover.toFixed(4));
+
+    /* --- 12) 위기 구간이 겹치지 않음 --- */
+    reset();
+    let overlapFound = false, seedsChecked = 0;
+    for (let s = 0; s < 60; s++) {
+      state.cfg.gameSeed = 1000 + s * 37; state.cfg.crashCount = 3;
+      const plan = crashPlan(state.cfg);
+      const spans = {};
+      for (const yr in plan) {
+        const c = plan[yr];
+        (spans[c.key + "@" + (yr - c.step)] ||= []).push(+yr);
+      }
+      const allYears = Object.keys(plan).map(Number);
+      if (new Set(allYears).size !== allYears.length) overlapFound = true;
+      seedsChecked++;
+    }
+    ok("12. 위기 구간 비중첩", !overlapFound,
+       `${seedsChecked}개 시드 모두 비중첩`, overlapFound ? "중첩 발견" : "비중첩");
+
+    /* --- 13) 기간 부족 시 위기 수 자동 축소 --- */
+    reset();
+    state.cfg.startYear = 2026; state.cfg.endYear = 2034; state.cfg.crashCount = 3;
+    state.cfg.gameSeed = 777;
+    const tight = crashPlan(state.cfg);
+    const placedN = tight.__meta ? tight.__meta.placed : null;
+    ok("13. 기간 부족 시 축소", placedN !== null && placedN <= 3,
+       "placed <= 3 이고 메타 보고", String(placedN));
+
+    /* --- 14) 저장 후 불러온 결과가 동일 --- */
+    reset();
+    state.cfg.gameSeed = 4242; state.cfg.npsAmount = 900;
+    const before = JSON.stringify(state.cfg);
+    const roundTrip = migrateState(JSON.parse(JSON.stringify({ cfg: state.cfg, rows: state.rows })));
+    ok("14. 저장→불러오기 동일", JSON.stringify(roundTrip.cfg.gameSeed) === JSON.stringify(4242)
+       && roundTrip.cfg.npsAmount === 900,
+       "seed 4242 / nps 900", `seed ${roundTrip.cfg.gameSeed} / nps ${roundTrip.cfg.npsAmount}`);
+    state.cfg = JSON.parse(before);
+
+    /* --- 15) 구 schemaVersion 저장본 마이그레이션 --- */
+    const legacy = { cfg: { birthYear: 1980, gameSeed: 5, isaMoveYear: 2030, isaMoveAmt: 2000 } };
+    const mig = migrateState(legacy);
+    ok("15. 구버전 마이그레이션", mig.cfg.birthYear === 1980
+       && mig.cfg.schemaVersion === SCHEMA_VERSION
+       && Array.isArray(mig.cfg.transfers) && mig.cfg.transfers.length === 1
+       && mig.cfg.property && typeof mig.cfg.property.value === "number",
+       `schemaVersion ${SCHEMA_VERSION} / 중첩객체 보완 / transfers 1건`,
+       `schemaVersion ${mig.cfg.schemaVersion} / property ${mig.cfg.property ? "있음" : "없음"} / transfers ${(mig.cfg.transfers || []).length}건`);
+
+    /* --- 16) 생활비 부족액 공식 일관성 --- */
+    const parts = { earnedIncome: 1000, publicPensionNet: 500,
+                    portfolioWithdrawalNet: 700, housingPension: 100, requiredSpending: 3000 };
+    const cfD = buildCashflow(parts);
+    ok("16. 미달 공식 일관성",
+       near(cfD.totalCashAvailable, 2300, .01) && near(cfD.spendingShortfall, 700, .01)
+       && near(spendingShortfallOf(parts), 700, .01),
+       "가용 2300 / 미달 700",
+       `가용 ${cfD.totalCashAvailable} / 미달 ${cfD.spendingShortfall}`);
+
+    /* --- 19) 세금이 음수가 되지 않음 --- */
+    reset();
+    let negTax = null;
+    for (const spend of [1200, 3600, 9000]) {
+      state.cfg.gameSpend = spend; state.cfg.gameSeed = 31337;
+      const rp = returnPath(state.cfg);
+      const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
+      for (const r of sim.years) if (r.tax < -0.001) { negTax = `${r.year}년 ${r.tax}`; break; }
+      if (negTax) break;
+    }
+    ok("19. 세금 음수 없음", negTax === null, "모든 해 tax >= 0", negTax || "없음");
+
+    /* --- 20) 인출액이 계좌잔액을 초과하지 않음 / 18) NaN·Infinity 없음 --- */
+    reset();
+    state.cfg.gameSpend = 12000; state.cfg.gameSeed = 8888; state.cfg.crashCount = 2;
+    const rpE = returnPath(state.cfg);
+    const simE = simulate({ returns: rpE.path, auto: { loan: loanSchedule(state.cfg, rpE.crash) } });
+    let negBal = null, badNum = null;
+    for (const r of simE.years) {
+      for (const k of ["total", "net", "tax", "gross"]) if (!finite(r[k])) badNum ||= `${r.year}.${k}=${r[k]}`;
+      for (const a of ACC) {
+        const acc = r.acc[a.id];
+        if (acc.bal < -0.01) negBal ||= `${r.year} ${a.id} ${acc.bal.toFixed(2)}`;
+        if (!finite(acc.bal)) badNum ||= `${r.year}.${a.id}.bal`;
+      }
+    }
+    ok("20. 잔액 음수 없음", negBal === null, "모든 계좌 >= 0", negBal || "없음");
+    ok("18. NaN/Infinity 없음", badNum === null, "전 항목 유한값", badNum || "없음");
+
+    /* --- 17) 몬테카를로 seed 재현성 --- */
+    reset();
+    state.cfg.gameSeed = 20260101; state.cfg.gameSpend = 5600;
+    let mcA = null, mcB = null;
+    monteCarlo(12, r => mcA = r, 0);
+    monteCarlo(12, r => mcB = r, 0);
+    ok("17. 몬테카를로 재현성",
+       mcA && mcB && mcA.survive === mcB.survive && mcA.busts.length === mcB.busts.length,
+       "같은 seed·batch → 같은 결과",
+       mcA && mcB ? `${(mcA.survive * 100).toFixed(0)}% vs ${(mcB.survive * 100).toFixed(0)}%` : "실행 실패");
+
+    /* ================= 자산 기반 수익률 엔진 (Phase 2-2) ================= */
+
+    /* --- 21) 결정론: 같은 시드·연도는 언제 불러도 같다 --- */
+    reset();
+    state.cfg.preset = "balanced60"; state.cfg.gameSeed = 4242; state.cfg.crashCount = 0;
+    const rpA = returnPath(state.cfg);
+    const rpB = returnPath(state.cfg);
+    ok("21. assetPath 재현성",
+       JSON.stringify(rpA.assetPath) === JSON.stringify(rpB.assetPath),
+       "같은 시드 → 같은 자산 경로", JSON.stringify(rpA.assetPath) === JSON.stringify(rpB.assetPath) ? "동일" : "상이");
+    ok("21b. path 재현성", JSON.stringify(rpA.path) === JSON.stringify(rpB.path),
+       "같은 시드 → 같은 포트폴리오 경로", JSON.stringify(rpA.path) === JSON.stringify(rpB.path) ? "동일" : "상이");
+
+    /* --- 22) 호출 순서가 결과를 바꾸지 않는다 --- */
+    const yMid = state.cfg.startYear + 7;
+    const d1 = drawCorrelatedAssetReturns(state.cfg, yMid);
+    drawCorrelatedAssetReturns(state.cfg, yMid + 1);        // 사이에 다른 연도를 끼워 본다
+    drawCorrelatedAssetReturns(state.cfg, yMid - 3);
+    const d2 = drawCorrelatedAssetReturns(state.cfg, yMid);
+    ok("22. 호출 순서 무관", JSON.stringify(d1) === JSON.stringify(d2),
+       "연도만으로 결정", JSON.stringify(d1) === JSON.stringify(d2) ? "동일" : "상이");
+
+    /* --- 23) 다른 시드는 다른 경로 --- */
+    const seedKeep = state.cfg.gameSeed;
+    state.cfg.gameSeed = 918273;
+    const rpC = returnPath(state.cfg);
+    state.cfg.gameSeed = seedKeep;
+    ok("23. 다른 시드 → 다른 자산 경로",
+       JSON.stringify(rpA.assetPath) !== JSON.stringify(rpC.assetPath),
+       "상이한 경로", JSON.stringify(rpA.assetPath) !== JSON.stringify(rpC.assetPath) ? "상이" : "동일(충돌)");
+
+    /* --- 24) 유한하고 −100% 아래로 내려가지 않는다 --- */
+    let bad = null, count = 0;
+    for (const pid of Object.keys(PRESET_MIX)) {
+      for (let sd = 1; sd <= 6 && !bad; sd++) {
+        const c = { ...state.cfg, preset: pid, gameSeed: sd * 1013, crashCount: 3 };
+        const rp = returnPath(c);
+        for (const y in rp.assetPath) for (const id of AS_ID) {
+          const v = rp.assetPath[y][id]; count++;
+          if (!isFinite(v) || v <= -100) { bad = `${pid}/${y}/${id}=${v}`; break; }
+        }
+        for (const y in rp.path) if (!isFinite(rp.path[y])) bad = `${pid}/${y} 포트폴리오=${rp.path[y]}`;
+      }
+    }
+    ok("24. 모든 수익률이 유한 · −100% 초과", !bad, `유한 · > −100% (${count}개 검사)`, bad || "이상 없음");
+
+    /* --- 25) 비중 정규화 --- */
+    const wSum = id => { const w = normalizeMix(PRESET_MIX[id]); return AS_ID.reduce((t, a) => t + w[a], 0); };
+    const worstSum = Object.keys(PRESET_MIX).reduce((m, id) => Math.max(m, Math.abs(wSum(id) - 100)), 0);
+    ok("25. 프리셋 비중 합계 100", worstSum < 1e-9, "합계 100%", `최대 오차 ${worstSum.toExponential(1)}`);
+    const wMissing = normalizeMix({ eqDM: 50, bondKR: 50 });
+    ok("25b. 누락 자산은 0%", wMissing.gold === 0 && wMissing.lev === 0, "0%", `gold=${wMissing.gold}, lev=${wMissing.lev}`);
+    const wZero = normalizeMix({ eqDM: 0, cash: 0 });
+    ok("25c. 전부 0 → 현금 100%", wZero.cash === 100, "cash 100", `cash=${wZero.cash}`);
+
+    /* --- 26) path 는 언제나 assetPath 의 가중합이다 --- */
+    let gap = 0;
+    for (const pid of ["balanced60", "allweather", "nasdaq2x", "deposit"]) {
+      for (const mode of ["arith", "geo", "exact"]) {
+        const c = { ...state.cfg, preset: pid, retMode: mode, crashCount: 2, gameSeed: 77 };
+        const rp = returnPath(c);
+        for (const y in rp.assetPath) gap = Math.max(gap, Math.abs(rp.path[y] - portfolioReturn(rp.assetPath[y], rp.mix)));
+      }
+    }
+    ok("26. path = Σ(비중 × 자산수익률)", gap < 1e-9, "허용오차 내 일치", `최대 오차 ${gap.toExponential(1)}%p`);
+
+    /* --- 27) 단일 자산 100% 프리셋은 그 자산 수익률과 같다 --- */
+    const cK = { ...state.cfg, preset: "kospi", crashCount: 0, gameSeed: 31337 };
+    const rpK = returnPath(cK);
+    let solo = 0;
+    for (const y in rpK.assetPath) solo = Math.max(solo, Math.abs(rpK.path[y] - rpK.assetPath[y].eqKR));
+    ok("27. 단일 자산 프리셋 = 그 자산", solo < 1e-9, "코스피 100% = eqKR", `최대 오차 ${solo.toExponential(1)}%p`);
+
+    /* --- 28) 현금 100% 는 주식 100% 보다 훨씬 덜 흔들린다 --- */
+    const volOf = pid => {
+      const rp = returnPath({ ...state.cfg, preset: pid, crashCount: 0, gameSeed: 555 });
+      const v = Object.values(rp.path), m = v.reduce((a, b) => a + b, 0) / v.length;
+      return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length);
+    };
+    const vCash = volOf("deposit"), vEq = volOf("kospi");
+    ok("28. 현금 변동성 ≪ 주식 변동성", vCash < vEq * 0.2,
+       "현금이 주식의 20% 미만", `현금 σ${vCash.toFixed(2)} vs 주식 σ${vEq.toFixed(2)}`);
+
+    /* --- 29) 표본 상관이 CORR_BASE 방향과 맞는가 --- */
+    const sample = (crisis, n) => {
+      const cols = Object.fromEntries(AS_ID.map(id => [id, []]));
+      for (let i = 0; i < n; i++) {
+        const d = drawCorrelatedAssetReturns({ ...state.cfg, gameSeed: 1 }, 3000 + i, { crisis });
+        for (const id of AS_ID) cols[id].push(d[id]);
+      }
+      return cols;
+    };
+    const corrOf = (a, b) => {
+      const n = a.length, ma = a.reduce((x, y) => x + y, 0) / n, mb = b.reduce((x, y) => x + y, 0) / n;
+      let sab = 0, sa = 0, sb2 = 0;
+      for (let i = 0; i < n; i++) { const da = a[i] - ma, db = b[i] - mb; sab += da * db; sa += da * da; sb2 += db * db; }
+      return sab / Math.sqrt(sa * sb2);
+    };
+    const S = sample(false, 900);
+    const cDMUSG = corrOf(S.eqDM, S.eqUSG), cDMcash = corrOf(S.eqDM, S.cash);
+    ok("29. 표본 상관이 행렬을 따른다", cDMUSG > 0.8 && Math.abs(cDMcash) < 0.2,
+       "선진–미국성장 > 0.8, 선진–현금 ≈ 0",
+       `선진–미국성장 ${cDMUSG.toFixed(2)} · 선진–현금 ${cDMcash.toFixed(2)}`);
+    ok("29b. 선진–미국성장 > 선진–현금", cDMUSG > cDMcash,
+       "주식끼리가 더 높다", `${cDMUSG.toFixed(2)} > ${cDMcash.toFixed(2)}`);
+    const X = sample(true, 900);
+    const cCrisis = corrOf(X.eqKR, X.eqDM), cBase = corrOf(S.eqKR, S.eqDM);
+    ok("29c. 위기에는 주식 상관이 올라간다", cCrisis > cBase,
+       "위기 > 평상시", `위기 ${cCrisis.toFixed(2)} vs 평상시 ${cBase.toFixed(2)}`);
+
+    /* --- 29d~h) 원시 난수가 아니라 '실제로 쓰이는' assetPath 를 본다 ---
+       예전에 포트폴리오 합계를 스칼라 목표에 맞추느라 표본마다 다른 배수를 걸었을 때,
+       원시 난수만 보는 테스트는 전부 통과하면서 최종 assetPath 의 상관은 무너져 있었다.
+       그 결함을 잡는 테스트다 — 프리셋을 여러 개 도는 이유는 배수가 비중에 의존했기 때문.
+
+       위기 연도는 기준 자산(eqDM)을 시나리오 값에 고정하고 나머지를 조건부로 뽑으므로,
+       관측되는 상관은 원본이 아니라 **편상관**이다. 목표값도 편상관으로 계산해 비교한다. */
+    const partialCorr = (C, a, b, r) => {
+      const ia = AS_ID.indexOf(a), ib = AS_ID.indexOf(b), ir = AS_ID.indexOf(r);
+      return (C[ia][ib] - C[ia][ir] * C[ib][ir])
+        / Math.sqrt((1 - C[ia][ir] ** 2) * (1 - C[ib][ir] ** 2));
+    };
+    const crisisSample = (pid, n) => {
+      const cols = Object.fromEntries(AS_ID.map(id => [id, []]));
+      let hit = 0;
+      for (let i = 0; i < n; i++) {
+        const c = { ...state.cfg, preset: pid, crashCount: 1, crashPick: "gfc2008",
+                    retMode: "geo", gameSeed: 20000 + i * 13 };
+        const rp = returnPath(c);
+        const y0 = Object.keys(rp.crash).map(Number).find(y => rp.crash[y].step === 0);
+        if (y0 == null || !rp.assetPath[y0]) continue;
+        hit++;
+        for (const id of AS_ID) cols[id].push(rp.assetPath[y0][id]);
+      }
+      return { cols, hit };
+    };
+    const sdOf = a => { const m = a.reduce((x, y) => x + y, 0) / a.length;
+                        return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); };
+    const tgtEq = partialCorr(CORR_CRISIS, "eqKR", "eqEM", "eqDM");
+    const tgtCash = partialCorr(CORR_CRISIS, "eqKR", "cash", "eqDM");
+    let eqErr = 0, cashErr = 0, worstCashSd = 0, cashRange = "", nSample = 0, refErr = 0;
+    for (const pid of ["allweather", "balanced60", "standard"]) {
+      const { cols, hit } = crisisSample(pid, 400);
+      nSample = hit;
+      eqErr = Math.max(eqErr, Math.abs(corrOf(cols.eqKR, cols.eqEM) - tgtEq));
+      cashErr = Math.max(cashErr, Math.abs(corrOf(cols.eqKR, cols.cash) - tgtCash));
+      worstCashSd = Math.max(worstCashSd, sdOf(cols.cash));
+      refErr = Math.max(refErr, ...cols.eqDM.map(v => Math.abs(v - (-28))));
+      const lo = Math.min(...cols.cash), hi = Math.max(...cols.cash);
+      if (!cashRange || lo < parseFloat(cashRange)) cashRange = `${lo.toFixed(1)} ~ ${hi.toFixed(1)}%`;
+    }
+    ok("29d. 위기 assetPath 의 주식 편상관이 행렬과 맞는다", eqErr < 0.08,
+       `한국–신흥 편상관 ${tgtEq.toFixed(2)} 에서 0.08 이내`, `최대 이탈 ${eqErr.toFixed(3)} (표본 ${nSample})`);
+    ok("29e. 위기 assetPath 의 주식–현금 편상관이 행렬과 맞는다", cashErr < 0.08,
+       `한국주식–현금 편상관 ${tgtCash.toFixed(2)} 에서 0.08 이내`, `최대 이탈 ${cashErr.toFixed(3)}`);
+    ok("29f. 위기에도 현금 변동성이 조건부 상한을 넘지 않는다", worstCashSd <= ASSET_BY.cash.vol + 0.05,
+       `설정 σ${ASSET_BY.cash.vol} 이하 (조건을 걸었으니 더 작아야 정상)`, `최대 σ${worstCashSd.toFixed(2)}`);
+    ok("29g. 위기에도 현금 수익률이 상식 범위", /^-?[0-9.]+ ~/.test(cashRange)
+       && Math.abs(parseFloat(cashRange)) < 5,
+       "현금이 위기에 폭락하지 않는다", `범위 ${cashRange}`);
+    ok("29h. 기준 주식은 시나리오 값을 정확히 맞는다", refErr < 1e-9,
+       "GFC 1년차 eqDM = 정확히 −28%", `최대 이탈 ${refErr.toExponential(1)}%p`);
+
+    /* --- 29i) 모든 시나리오·모든 해에서 기준 프리셋(S&P 500)이 패턴 값 그대로인가 ---
+       "화면엔 2008 금융위기인데 그해가 +22% 로 나온다" 를 막는 테스트다. */
+    let patErr = 0, patYears = 0;
+    for (const key of Object.keys(CRASHES)) {
+      for (let sd2 = 0; sd2 < 12; sd2++) {
+        const c = { ...state.cfg, preset: "sp500", crashCount: 1, crashPick: key,
+                    retMode: "geo", gameSeed: 900 + sd2 * 31 };
+        const rp = returnPath(c);
+        for (const y in rp.crash) {
+          if (!rp.assetPath[y]) continue;
+          patYears++;
+          patErr = Math.max(patErr, Math.abs(rp.path[y] - CRASHES[key].pattern[rp.crash[y].step] * 100));
+        }
+      }
+    }
+    ok("29i. 위기 연도 = 시나리오 패턴 (기준 프리셋)", patErr < 1e-9,
+       `${Object.keys(CRASHES).length}개 시나리오 · ${patYears}개 연도가 패턴 그대로`,
+       `최대 이탈 ${patErr.toExponential(1)}%p`);
+
+    /* --- 30) 상관행렬이 깨져도 safeCholesky 가 받아 준다 ---
+       등상관 0.99 는 사실 양의 정부호라 cholesky 가 그냥 성공한다 — fallback 을
+       전혀 안 밟는다. 음의 등상관은 n 이 크면 반드시 고유값이 음수가 된다
+       (1 + (n−1)ρ < 0). 먼저 cholesky 가 null 인지 확인하고 시작한다. */
+    const equi = r => AS_ID.map((_, i) => AS_ID.map((_, j) => i === j ? 1 : r));
+    const mild = equi(-0.101), hard = equi(-0.5);      // n=11 → 1+10ρ 가 각각 −0.01, −4
+    const nan = AS_ID.map((_, i) => AS_ID.map((_, j) => i === j ? 1 : (i + j === 1 ? NaN : .3)));
+    ok("30. 깨진 행렬은 cholesky 가 거른다",
+       cholesky(mild) === null && cholesky(hard) === null && cholesky(nan) === null,
+       "셋 다 null",
+       [["mild", mild], ["hard", hard], ["nan", nan]]
+         .map(([n, m]) => `${n}=${cholesky(m) === null ? "null" : "성공"}`).join(", "));
+    const lowerTri = L => Array.isArray(L) && L.length === AS_ID.length
+      && L.every((row, i) => row.every((v, j) => isFinite(v) && (j <= i || v === 0)));
+    const isEye = L => L.every((row, i) => row.every((v, j) => v === (i === j ? 1 : 0)));
+    const diagOf = L => { let m = 0;
+      for (let i = 0; i < L.length; i++) { let v = 0;
+        for (let k = 0; k <= i; k++) v += L[i][k] * L[i][k]; m = Math.max(m, Math.abs(v - 1)); }
+      return m; };
+    const Lm = safeCholesky(mild), Lh = safeCholesky(hard), Ln = safeCholesky(nan);
+    ok("30b. ridge 축소로 살아난다", lowerTri(Lm) && !isEye(Lm) && lowerTri(Lh) && !isEye(Lh),
+       "약한 것도 심한 것도 상관을 남긴 채 살아난다",
+       `mild=${isEye(Lm) ? "단위행렬" : "ridge 성공"}, hard=${isEye(Lh) ? "단위행렬" : "ridge 성공"}`);
+    ok("30c. 쓸 수 없는 행렬은 단위행렬로 되돌린다", lowerTri(Ln) && isEye(Ln),
+       "NaN 이 섞이면 단위행렬(=무상관)", isEye(Ln) ? "단위행렬" : "엉뚱한 값을 반환");
+    /* ridge 보정은 대각까지 같이 나눠야 '상관행렬'로 남는다. 대각에 더하기만 하면
+       L·Lᵀ 대각이 1+ridge 가 되어 자산 변동성이 조용히 커진다 (ridge 0.2 → σ 1.095배).
+       가장 큰 ridge 가 걸리는 hard 까지 포함해 엄격하게 본다. */
+    const worstDiag = Math.max(diagOf(Lm), diagOf(Lh), diagOf(CHOL_BASE), diagOf(CHOL_CRISIS));
+    ok("30d. 보정해도 분산이 정확히 보존된다", worstDiag < 1e-9,
+       "L·Lᵀ 대각 = 1 (오차 1e-9 미만)", `최대 이탈 ${worstDiag.toExponential(1)}`);
+    /* 조건부 행렬은 대각이 1 이 아니라 1 − Cᵢ,ref² 다 (조건을 걸면 분산이 준다).
+       그 값을 그대로 재현하는지 본다 — 여기가 틀리면 위기 표본의 분산이 어긋난다. */
+    const condTarget = conditionalCov(CORR_CRISIS, CRASH_REF_I, COND_IDX);
+    let condErr = 0;
+    for (let i = 0; i < COND_IDX.length; i++) for (let j = 0; j < COND_IDX.length; j++) {
+      let v = 0;
+      for (let k = 0; k <= Math.min(i, j); k++) v += CHOL_CRISIS_COND[i][k] * CHOL_CRISIS_COND[j][k];
+      condErr = Math.max(condErr, Math.abs(v - condTarget[i][j]));
+    }
+    ok("30f. 조건부 공분산을 정확히 재현한다", condErr < 1e-9,
+       "L·Lᵀ = Cᵢⱼ − Cᵢ,ref·Cⱼ,ref", `최대 이탈 ${condErr.toExponential(1)}`);
+    ok("30e. 보정 후에도 상관의 부호가 유지된다",
+       Lm[1][0] < 0 && Lh[1][0] < 0, "음의 상관이 음수로 남는다",
+       `mild ρ01=${Lm[1][0].toFixed(3)}, hard ρ01=${Lh[1][0].toFixed(3)}`);
+
+    /* --- 30g) 조건부 분해의 모양이 전제대로인가 (방어) ---
+       CHOL_CRISIS_COND 는 모듈 로드 때 한 번만 만든다. 전제가 깨지면 조용히
+       엉뚱한 자산이 고정되므로, 모양을 그 자리에서 확인해 둔다. */
+    ok("30g. 조건부 분해의 모양", CRASH_REF_I >= 0 && AS_ID[CRASH_REF_I] === "eqDM"
+       && COND_IDX.length === AS_ID.length - 1 && !COND_IDX.includes(CRASH_REF_I)
+       && CHOL_CRISIS_COND.length === COND_IDX.length,
+       `기준=eqDM · 조건부 ${AS_ID.length - 1}개`,
+       `기준=${AS_ID[CRASH_REF_I]} · COND_IDX ${COND_IDX.length} · L ${CHOL_CRISIS_COND.length}`);
+    ok("30h. 상관행렬이 상관행렬 모양이다",
+       corrMatrixProblems(CORR_BASE).length === 0 && corrMatrixProblems(CORR_CRISIS).length === 0,
+       "대칭 · 대각 1 · −1~1 · 유한",
+       [...corrMatrixProblems(CORR_BASE), ...corrMatrixProblems(CORR_CRISIS)].join(", ") || "이상 없음");
+    ok("30i. 실제 쓰는 행렬은 보정 없이 분해된다",
+       !!cholesky(CORR_BASE) && !!cholesky(CORR_CRISIS)
+       && !!cholesky(conditionalCov(CORR_CRISIS, CRASH_REF_I, COND_IDX)),
+       "ridge 없이 성공", "셋 다 원본 그대로 성공");
+
+    /* --- 30j) 위기를 켜도 위기가 아닌 해는 그대로인가 ---
+       위기 연도는 난수를 n−1 개만 쓴다. 연도마다 시드를 새로 잡으므로 다른 해에
+       번지지 않아야 하는데, 그 성질을 직접 지킨다. */
+    {
+      const c0 = { ...state.cfg, preset: "balanced60", crashCount: 0, retMode: "geo", gameSeed: 4747 };
+      const c1 = { ...c0, crashCount: 3, crashPick: "gfc2008" };
+      const a0 = returnPath(c0), a1 = returnPath(c1);
+      let diff = 0, same = 0;
+      for (const y in a0.assetPath) {
+        if (a1.crash[y]) continue;                    // 위기 연도는 당연히 다르다
+        same++;
+        for (const id of AS_ID) diff = Math.max(diff, Math.abs(a0.assetPath[y][id] - a1.assetPath[y][id]));
+      }
+      ok("30j. 위기를 켜도 다른 해는 그대로", same > 0 && diff < 1e-12,
+         `비위기 ${same}개 연도가 동일`, `최대 차이 ${diff.toExponential(1)}%p`);
+    }
+
+    /* --- 31) exact 모드는 목표 CAGR 을 맞춘다 --- */
+    let worstCagr = 0;
+    for (const pid of ["balanced60", "allweather", "sp500"]) {
+      const c = { ...state.cfg, preset: pid, retMode: "exact", crashCount: 1, gameSeed: 909 };
+      const rp = returnPath(c);
+      const ys = Object.keys(rp.path);
+      let lg = 0; for (const y of ys) lg += Math.log(1 + rp.path[y] / 100);
+      const realized = (Math.exp(lg / ys.length) - 1) * 100;
+      worstCagr = Math.max(worstCagr, Math.abs(realized - targetCagr(c)));
+    }
+    ok("31. exact 실현 CAGR = 목표", worstCagr < 0.01, "오차 0.01%p 미만", `최대 오차 ${worstCagr.toFixed(4)}%p`);
+
+    /* --- 32) 세 모드가 서로 다른 결과를 낸다 --- */
+    const pathOf = mode => JSON.stringify(returnPath({ ...state.cfg, preset: "balanced60", retMode: mode, crashCount: 0, gameSeed: 2024 }).path);
+    const pa = pathOf("arith"), pg = pathOf("geo"), pe = pathOf("exact");
+    ok("32. retMode 세 모드가 구분된다", pa !== pg && pg !== pe && pa !== pe,
+       "셋 다 다름", pa !== pg && pg !== pe && pa !== pe ? "구분됨" : "일부 동일");
+
+    /* --- 33) off / custom 은 예전 스칼라 경로를 그대로 쓴다 --- */
+    const rpOff = returnPath({ ...state.cfg, preset: "off", gameMean: 6, gameVol: 10, crashCount: 0, gameSeed: 8 });
+    const offEmpty = Object.keys(rpOff.assetPath).length === 0 && Object.keys(rpOff.path).length > 0;
+    ok("33. off 는 스칼라 경로 유지", offEmpty && isFinite(rpOff.path[state.cfg.startYear]),
+       "assetPath 비어 있고 path 는 정상", offEmpty ? "유지됨" : "자산 경로가 섞임");
+    const rpCus = returnPath({ ...state.cfg, preset: "custom", cAccum: 7, cAccumSd: 9, cRisk: 6, cRiskSd: 8,
+                               cLate: 5, cLateSd: 6, crashCount: 0, gameSeed: 8 });
+    ok("33b. custom 은 구간별 값 유지",
+       Object.keys(rpCus.assetPath).length === 0 && isFinite(rpCus.path[state.cfg.startYear]),
+       "assetPath 비어 있고 path 는 정상",
+       Object.keys(rpCus.assetPath).length === 0 ? "유지됨" : "자산 경로가 섞임");
+
+    /* --- 34) 위기 연도도 가중합 항등식이 유지된다 --- */
+    const cCr = { ...state.cfg, preset: "allweather", crashCount: 3, retMode: "geo", gameSeed: 606 };
+    const rpCr = returnPath(cCr);
+    let crGap = 0, crYears = 0;
+    for (const y in rpCr.crash) {
+      if (!rpCr.assetPath[y]) continue;
+      crYears++;
+      crGap = Math.max(crGap, Math.abs(rpCr.path[y] - portfolioReturn(rpCr.assetPath[y], rpCr.mix)));
+    }
+    ok("34. 위기 연도 가중합 일치", crYears > 0 && crGap < 1e-9,
+       `위기 ${crYears}개 연도에서 일치`, `최대 오차 ${crGap.toExponential(1)}%p`);
+
+  } catch (err) {
+    results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
+                   actual: (err && err.message) || String(err) });
+    if (typeof console !== "undefined" && console.error) console.error(err);
+  } finally {
+    state.cfg = saved; state.rows = savedRows;
+    game = savedGame;
+  }
+
+  const failed = results.filter(r => !r.pass);
+  if (console && console.log) {
+    console.log(`%c자체 진단 ${results.length - failed.length}/${results.length} 통과`,
+      `font-weight:bold;color:${failed.length ? "#c0392b" : "#27ae60"}`);
+    for (const r of results) {
+      if (r.pass) console.log(`  ✓ ${r.name}`);
+      else console.log(`  ✗ ${r.name}\n      기대: ${r.expect}\n      실제: ${r.actual}`);
+    }
+  }
+  return { results, failed, passed: results.length - failed.length, total: results.length };
+}
+window.__selfTest = runSelfTests;
+
+const btnSelfTest = document.getElementById("btnSelfTest");
+if (btnSelfTest) btnSelfTest.onclick = () => {
+  const out = document.getElementById("selfTestOut");
+  out.innerHTML = `<p class="hint" style="margin:0">진단 중…</p>`;
+  setTimeout(() => {
+    const r = runSelfTests();
+    out.innerHTML =
+      `<p style="margin:0 0 6px;font-weight:700;color:${r.failed.length ? "var(--critical)" : "var(--good)"}">`
+      + `${r.passed}/${r.total} 통과${r.failed.length ? ` · ${r.failed.length}건 실패` : " · 모두 정상"}</p>`
+      + r.results.map(t => `<div class="gline"><span>${t.pass ? "✓" : "✗"} ${t.name}</span>`
+          + `<span style="color:${t.pass ? "var(--good)" : "var(--critical)"}">${t.pass ? "통과" : "실패"}</span></div>`
+          + (t.pass ? "" : `<div class="hint" style="margin:2px 0 6px 14px">기대: ${t.expect}<br>실제: ${t.actual}</div>`)).join("");
+  }, 20);
+};
 })();
 </script>
