@@ -1179,6 +1179,14 @@ function buildSymmetric(c) {
   return m;
 }
 
+/** 같은 경고를 반복해서 찍지 않는다 (returnPath 가 몬테카를로에서 수백 번 돈다) */
+const WARNED = new Set();
+function warnOnce(msg) {
+  if (WARNED.has(msg)) return;
+  WARNED.add(msg);
+  if (typeof console !== "undefined" && console.warn) console.warn("[수익률 모델] " + msg);
+}
+
 /* ── Cholesky 분해 ────────────────────────────────────────────────
    상관 있는 정규난수를 만들려면 A·Aᵀ = C 인 하한삼각 A 가 필요하다.
    손으로 적은 상관표는 양의 정부호가 아닐 수 있다(대각합이 안 맞는 조합).
@@ -1207,21 +1215,54 @@ function cholesky(C) {
     D 의 대각이 정확히 1 로 남아 '상관행렬'이다. 예전처럼 대각에 ridge 를
     더하기만 하면 대각이 1+ridge 가 되고, L·Lᵀ 로 뽑은 난수의 분산이 그만큼
     부풀어 자산 변동성이 조용히 커진다 (ridge 0.2 면 σ가 1.095배). */
-function safeCholesky(C) {
+/** 상관행렬로 쓸 수 있는 모양인지 본다 — ridge 는 반올림 오차를 메우는 장치이지
+    입력 오류를 덮는 장치가 아니다. 어긋난 곳을 이름과 함께 돌려준다. */
+function corrMatrixProblems(C) {
+  const bad = [];
+  if (!Array.isArray(C) || !C.length) return ["행렬이 비어 있습니다"];
+  const n = C.length;
+  for (let i = 0; i < n; i++) {
+    if (!Array.isArray(C[i]) || C[i].length !== n) { bad.push(`${i}행의 길이가 ${n}이 아닙니다`); continue; }
+    if (!isFinite(C[i][i]) || Math.abs(C[i][i] - 1) > 1e-9) bad.push(`대각 [${i}]=${C[i][i]} (1이어야 합니다)`);
+    for (let j = 0; j < n; j++) {
+      const v = C[i][j];
+      if (!isFinite(v)) { bad.push(`[${i}][${j}]=${v}`); continue; }
+      if (v < -1 - 1e-9 || v > 1 + 1e-9) bad.push(`[${i}][${j}]=${v} (−1~1 밖)`);
+      if (Math.abs(v - C[j][i]) > 1e-9) bad.push(`[${i}][${j}] 와 [${j}][${i}] 가 다릅니다`);
+    }
+  }
+  return bad.slice(0, 8);
+}
+/** 마지막 safeCholesky 호출이 무엇을 했는지 — 자체 진단과 콘솔 경고가 읽는다 */
+let CHOL_LAST = { ok: true, ridge: 0, identity: false };
+function safeCholesky(C, label) {
   let L = cholesky(C);
+  CHOL_LAST = { ok: !!L, ridge: 0, identity: false, label: label || "" };
   if (L) return L;
+  // 여기 왔다는 건 손으로 적은 행렬이 양의 정부호가 아니라는 뜻이다. 조용히 넘기지 않는다.
+  const problems = corrMatrixProblems(C);
+  if (problems.length) warnOnce(`상관행렬(${label || "이름 없음"})이 상관행렬 모양이 아닙니다 — ${problems.join(", ")}`);
   // 대각을 정규화해 두면 ridge 를 키우는 일이 곧 '단위행렬 쪽으로 축소'다.
   // 분산은 계속 1 이고 상관만 옅어지므로, 크게까지 시도해도 안전하다 —
   // 조금 옅은 상관이 무상관(단위행렬)보다 언제나 낫다.
   for (const ridge of [1e-6, 1e-4, 1e-3, 1e-2, 5e-2, .1, .2, .5, 1, 2, 5, 20]) {
     const D = C.map((row, i) => row.map((v, j) => (i === j ? v + ridge : v) / (1 + ridge)));
     L = cholesky(D);
-    if (L) return L;
+    if (L) {
+      CHOL_LAST = { ok: false, ridge, identity: false, label: label || "" };
+      // ridge 가 커지면 상관이 ρ/(1+ridge) 로 옅어진다. 1 을 넘으면 절반 이상 날아가므로
+      // '살아남았다'가 아니라 '거의 무상관으로 바꿔 놓았다'에 가깝다 — 반드시 알린다.
+      if (ridge >= 1) warnOnce(`상관행렬(${label || "이름 없음"}) 보정이 큽니다 — ridge ${ridge},`
+        + ` 원래 상관의 약 ${(100 / (1 + ridge)).toFixed(0)}%만 남습니다`);
+      return L;
+    }
   }
+  CHOL_LAST = { ok: false, ridge: Infinity, identity: true, label: label || "" };
+  warnOnce(`상관행렬(${label || "이름 없음"})을 쓸 수 없어 무상관(단위행렬)으로 되돌립니다`);
   return C.map((_, i) => C.map((_, j) => i === j ? 1 : 0));
 }
-const CHOL_BASE = safeCholesky(CORR_BASE);
-const CHOL_CRISIS = safeCholesky(CORR_CRISIS);
+const CHOL_BASE = safeCholesky(CORR_BASE, "평상시");
+const CHOL_CRISIS = safeCholesky(CORR_CRISIS, "위기");
 
 /* ── 프리셋 문구 ──────────────────────────────────────────────────────
    숫자를 문자열에 박아 두면 자산 구성을 고칠 때마다 어긋난다.
@@ -1747,7 +1788,7 @@ const COND_IDX = AS_ID.map((_, i) => i).filter(i => i !== CRASH_REF_I);
 function conditionalCov(C, refI, idx) {
   return idx.map(i => idx.map(j => C[i][j] - C[i][refI] * C[j][refI]));
 }
-const CHOL_CRISIS_COND = safeCholesky(conditionalCov(CORR_CRISIS, CRASH_REF_I, COND_IDX));
+const CHOL_CRISIS_COND = safeCholesky(conditionalCov(CORR_CRISIS, CRASH_REF_I, COND_IDX), "위기 조건부");
 
 /* 위기 충격은 '자산마다 얼마나 아픈가'로 준다.
    시나리오 숫자(2008년 −28% 같은)는 주식 기준이라, 그걸 현금·국채에까지
@@ -1890,7 +1931,9 @@ function crashBeta(cfg, y) {
  * 전체 기간의 수익률을 한 번에 만든다.
  * exact 모드는 여기서 로그수익 합을 목표에 맞춰 평행이동하므로 전 구간을 알아야 한다.
  * 위기 연도는 시나리오가 정한 해라서 평행이동에서 빼고 나머지 해로만 조정한다 —
- * 그래서 exact 에서 위기는 총수익이 아니라 '언제 맞느냐'만 바꾼다(순서위험만 분리해서 보는 모드).
+ * 그래서 exact 에서 위기는 총수익을 바꾸지 않고, '언제 맞느냐' 와 '그 위기에 내 자산들이
+ * 어떻게 갈리느냐' 만 바꾼다 (기준 주식은 고정이고 나머지는 조건부로 갈리므로,
+ * 섞인 포트폴리오에서는 위기의 깊이도 판마다 조금 달라진다).
  * (위기 연도 값 자체는 crashReturn 이 포트폴리오 변동성에 맞춰 정한다.)
  */
 function returnPath(cfg) {
@@ -4828,7 +4871,7 @@ function buildPresetUI() {
 }
 const RET_MODE_INFO = {
   geo:   "매년 흔들리지만 <strong>기간이 길수록 프리셋 수익률에 수렴</strong>합니다. 판마다 결과가 달라지고 그 편차가 곧 운입니다. 다만 <strong>위기를 켜면 그만큼 평균도 내려갑니다</strong> — 얼마나 내려가는지는 아래 '위기까지 반영한 기대 CAGR'에 실제로 계산해 둡니다. 프리셋 수익률에 이미 과거 위기가 반영돼 있다면 이중 차감입니다.",
-  exact: "<strong>기본값입니다.</strong> 매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 위기도 총수익이 아니라 '언제 맞느냐'만 바꿔서 <strong>순서위험만 따로</strong> 시험합니다. 프리셋 수익률은 이미 과거 위기가 녹아든 장기 평균이므로, 위기를 얹으면서 평균까지 깎으면 같은 위험을 두 번 빼게 됩니다 — 그걸 피하는 모드입니다.",
+  exact: "<strong>기본값입니다.</strong> 매년 흔들리되 <strong>끝날 때 반드시 프리셋 수익률</strong>이 됩니다. 장기 CAGR을 고정해 두고, 위기가 <strong>언제 오느냐</strong>와 그 위기에 <strong>내 자산들이 어떻게 갈리느냐</strong>가 현금흐름에 미치는 영향을 시험합니다. 프리셋 수익률은 이미 과거 위기가 녹아든 장기 평균이므로, 위기를 얹으면서 평균까지 깎으면 같은 위험을 두 번 빼게 됩니다 — 그걸 피하는 모드입니다.",
   arith: "프리셋 숫자를 <strong>산술평균</strong>으로 씁니다. 복리로 굴리면 실현 CAGR은 그보다 낮아지며, 변동성이 클수록 차이가 큽니다(나스닥 2x는 5%p 이상).",
 };
 function syncRetMode() {
@@ -6377,6 +6420,40 @@ function runSelfTests() {
     ok("30e. 보정 후에도 상관의 부호가 유지된다",
        Lm[1][0] < 0 && Lh[1][0] < 0, "음의 상관이 음수로 남는다",
        `mild ρ01=${Lm[1][0].toFixed(3)}, hard ρ01=${Lh[1][0].toFixed(3)}`);
+
+    /* --- 30g) 조건부 분해의 모양이 전제대로인가 (방어) ---
+       CHOL_CRISIS_COND 는 모듈 로드 때 한 번만 만든다. 전제가 깨지면 조용히
+       엉뚱한 자산이 고정되므로, 모양을 그 자리에서 확인해 둔다. */
+    ok("30g. 조건부 분해의 모양", CRASH_REF_I >= 0 && AS_ID[CRASH_REF_I] === "eqDM"
+       && COND_IDX.length === AS_ID.length - 1 && !COND_IDX.includes(CRASH_REF_I)
+       && CHOL_CRISIS_COND.length === COND_IDX.length,
+       `기준=eqDM · 조건부 ${AS_ID.length - 1}개`,
+       `기준=${AS_ID[CRASH_REF_I]} · COND_IDX ${COND_IDX.length} · L ${CHOL_CRISIS_COND.length}`);
+    ok("30h. 상관행렬이 상관행렬 모양이다",
+       corrMatrixProblems(CORR_BASE).length === 0 && corrMatrixProblems(CORR_CRISIS).length === 0,
+       "대칭 · 대각 1 · −1~1 · 유한",
+       [...corrMatrixProblems(CORR_BASE), ...corrMatrixProblems(CORR_CRISIS)].join(", ") || "이상 없음");
+    ok("30i. 실제 쓰는 행렬은 보정 없이 분해된다",
+       !!cholesky(CORR_BASE) && !!cholesky(CORR_CRISIS)
+       && !!cholesky(conditionalCov(CORR_CRISIS, CRASH_REF_I, COND_IDX)),
+       "ridge 없이 성공", "셋 다 원본 그대로 성공");
+
+    /* --- 30j) 위기를 켜도 위기가 아닌 해는 그대로인가 ---
+       위기 연도는 난수를 n−1 개만 쓴다. 연도마다 시드를 새로 잡으므로 다른 해에
+       번지지 않아야 하는데, 그 성질을 직접 지킨다. */
+    {
+      const c0 = { ...state.cfg, preset: "balanced60", crashCount: 0, retMode: "geo", gameSeed: 4747 };
+      const c1 = { ...c0, crashCount: 3, crashPick: "gfc2008" };
+      const a0 = returnPath(c0), a1 = returnPath(c1);
+      let diff = 0, same = 0;
+      for (const y in a0.assetPath) {
+        if (a1.crash[y]) continue;                    // 위기 연도는 당연히 다르다
+        same++;
+        for (const id of AS_ID) diff = Math.max(diff, Math.abs(a0.assetPath[y][id] - a1.assetPath[y][id]));
+      }
+      ok("30j. 위기를 켜도 다른 해는 그대로", same > 0 && diff < 1e-12,
+         `비위기 ${same}개 연도가 동일`, `최대 차이 ${diff.toExponential(1)}%p`);
+    }
 
     /* --- 31) exact 모드는 목표 CAGR 을 맞춘다 --- */
     let worstCagr = 0;
