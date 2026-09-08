@@ -1023,7 +1023,7 @@ const PRESETS = {
   nasdaq:              { name: "🚀 나스닥 100%", note: "최대낙폭 −83% 경험" },
   "sp-nasdaq":         { name: "⚖️ S&P70+나스닥30" },
   "sp-nasdaq-5050":    { name: "⚖️ S&P50+나스닥50" },
-  "option-f":          { name: "⭐ 옵션 F", note: "미국주력70+버크셔10+인도5+금6+단기채9" },
+  "option-f":          { name: "⭐ 옵션 F", note: "버크셔 10%는 선진국 주식으로 근사" },
   buffett:             { name: "💼 버핏 90/10" },
   twofund:             { name: "⚡ Two-Fund 80/20" },
   dividend:            { name: "💰 배당성장 SCHD형" },
@@ -1106,7 +1106,8 @@ const PRESET_MIX = {
   nasdaq:              { eqUSG:100 },
   "sp-nasdaq":         { eqDM:70, eqUSG:30 },
   "sp-nasdaq-5050":    { eqDM:50, eqUSG:50 },
-  "option-f":          { eqDM:45, eqUSG:25, eqEM:5, gold:6, bondKR:9, reit:10 },
+  // 버크셔는 별도 자산군이 없어 선진국 주식으로 근사한다 (미국주력 70 + 버크셔 10 = eqDM 55 + eqUSG 25)
+  "option-f":          { eqDM:55, eqUSG:25, eqEM:5, gold:6, bondKR:9 },
   buffett:             { eqDM:90, cash:10 },
   twofund:             { eqDM:80, bondGL:20 },
   dividend:            { eqDM:60, reit:20, bondCorp:20 },
@@ -1712,16 +1713,44 @@ function presetStats(cfg) {
 /** 수익률 하한 — 어떤 자산도 −100% 아래로 내려가지 않게 한다 */
 function clampRet(v) { return Math.max(-85, Math.min(300, v)); }
 
+/* 위기 충격은 '자산마다 얼마나 아픈가'로 준다.
+   시나리오 숫자(2008년 −28% 같은)는 주식 기준이라, 그걸 현금·국채에까지
+   그대로 씌우면 말이 안 된다. ASSETS.beta 가 바로 그 감도다.
+
+       그 자산의 위기 평균 = 평소 기대수익 + (시나리오 − 기준주식) × betaᵢ
+
+   포트폴리오 수익률은 여기서 따로 맞추지 않고 **자산에서 자연스럽게 집계**한다.
+   예전에는 포트폴리오 합계를 스칼라 목표에 맞추려고 자산별 총수익에 공통 배수를
+   걸었는데, 그 배수가 표본마다 달라 사실상 각 자산을 그해 포트폴리오 총수익으로
+   나누는 꼴이었다. 그래서 시드를 가로질러 보면 상관이 무너지고(선진–현금이
+   −0.8까지 갔다) σ0.5 짜리 현금이 −31% 를 맞았다. 자산별 잔액·리밸런싱을
+   붙이는 순간 그대로 계산 오류가 된다. */
+function crashMeanOf(asset, scenario) {
+  const shock = (scenario - CRASH_REF_MEAN) * Math.min(CRASH_BETA_MAX, clamp0(asset.beta));
+  // 로그정규 변환이 log(1+μ/100) 을 쓰므로 μ 는 −100 아래로 내려가면 안 된다.
+  // 실제로 물리는 건 IMF형(−40%)×레버리지(β2.2) 같은 극단뿐이다.
+  return Math.max(-90, assetNetEr(asset) + shock);
+}
+/** 포트폴리오의 위기 감도 — 자산 베타의 가중평균. 화면 설명에 쓴다. */
+function portfolioCrashBeta(mix) {
+  let b = 0;
+  for (let i = 0; i < AS_ID.length; i++) b += (mix[AS_ID[i]] / 100) * clamp0(ASSETS[i].beta);
+  return Math.min(CRASH_BETA_MAX, b);
+}
+
 /**
  * 한 해치 자산별 수익률을 상관관계대로 함께 뽑는다.
  *   z ~ N(0,I) 를 자산 수만큼 뽑고 L·z 로 상관을 입힌다 (L·Lᵀ = 상관행렬).
  *   위기 연도에는 CHOL_CRISIS 를 쓴다 — 위기에는 주식끼리 거의 한 몸이 된다.
+ *   options.scenario 를 주면 자산별 평균만 그만큼 옮긴다. 평균을 옮기는 것은
+ *   상관을 바꾸지 않으므로, 위기 연도의 최종 수익률도 CORR_CRISIS 를 그대로 따른다.
  *
  * 난수는 (시드, 연도)만으로 정해진다. 호출 순서나 몬테카를로 진행 순서가
  * 결과를 바꾸면 같은 판을 다시 못 돌리므로, 전역 난수열을 쓰지 않는다.
  */
 function drawCorrelatedAssetReturns(cfg, year, options = {}) {
-  const L = options.crisis ? CHOL_CRISIS : CHOL_BASE;
+  const crisis = options.scenario != null || !!options.crisis;
+  const L = crisis ? CHOL_CRISIS : CHOL_BASE;
   const rnd = mulberry32((((clamp0(cfg.gameSeed) | 0) + year * 2654435761) ^ 0x9E3779B9) >>> 0);
   const n = AS_ID.length;
   const z = new Array(n);
@@ -1731,7 +1760,8 @@ function drawCorrelatedAssetReturns(cfg, year, options = {}) {
   for (let i = 0; i < n; i++) {
     let e = 0;
     for (let k = 0; k <= i; k++) e += L[i][k] * z[k];   // L 은 하삼각
-    const a = ASSETS[i], mean = assetNetEr(a), sd = a.vol;
+    const a = ASSETS[i], sd = a.vol;
+    const mean = options.scenario != null ? crashMeanOf(a, options.scenario) : assetNetEr(a);
     if (cfg.retMode === "arith") {
       out[a.id] = clampRet(mean + e * sd);              // er 을 산술평균으로 본다
     } else {
@@ -1746,8 +1776,10 @@ function drawCorrelatedAssetReturns(cfg, year, options = {}) {
 }
 
 /** 자산별 총수익에 같은 배수 k 를 곱한다 — 가중합도 정확히 k 배가 된다.
-    (Σwᵢ(1+rᵢ)k = k·Σwᵢ(1+rᵢ)) 그래서 포트폴리오를 목표에 맞추는 일이
-    자산 간 상대적인 차이를 흐트러뜨리지 않는다. */
+    (Σwᵢ(1+rᵢ)k = k·Σwᵢ(1+rᵢ))
+    exact 모드의 '비위기 연도 전체를 같은 만큼 평행이동' 에만 쓴다. k 가 표본과
+    무관한 상수라서 상관구조가 그대로 남는다 — 표본마다 달라지는 k 를 쓰면
+    그 순간 상관이 깨진다(위 crashMeanOf 주석 참고). */
 function scaleAssetGross(assetReturns, k) {
   const out = {};
   for (const id of AS_ID) out[id] = Math.max(-99, (1 + (assetReturns[id] || 0) / 100) * k * 100 - 100);
@@ -1822,15 +1854,10 @@ function returnPath(cfg) {
       if (!inCrash) free.push(y);
       continue;
     }
-    let ar = drawCorrelatedAssetReturns(cfg, y, { crisis: inCrash });
-    if (inCrash) {
-      // 위기 연도의 목표는 예전과 같은 스칼라(포트폴리오 σ 로 스케일한 시나리오)다.
-      // 자산별 총수익에 공통 배수를 걸어 가중합이 그 목표와 맞게 한다 —
-      // 배수는 모든 자산에 같으므로 위기 상관구조와 자산 간 상대차는 그대로 남는다.
-      const target = crashReturn(cfg, y, crash[y].ret);
-      const gross = 1 + portfolioReturn(ar, mix) / 100;
-      if (gross > 1e-6) ar = scaleAssetGross(ar, (1 + target / 100) / gross);
-    } else free.push(y);
+    // 위기 연도는 자산별 평균만 시나리오만큼 옮겨서 뽑는다. 포트폴리오 수익률은
+    // 그 결과를 비중으로 합친 값이지, 따로 맞춰 넣은 값이 아니다.
+    const ar = drawCorrelatedAssetReturns(cfg, y, inCrash ? { scenario: crash[y].ret } : {});
+    if (!inCrash) free.push(y);
     assetPath[y] = ar;
     path[y] = portfolioReturn(ar, mix);            // path 는 언제나 assetPath 의 가중합이다
   }
@@ -3917,9 +3944,19 @@ function rollCard(p) {
 /** 시나리오 원본 낙폭과 내가 실제로 맞은 값이 다른 이유를 한 줄로 밝힌다.
     "2008년인데 왜 −28%가 아니라 −13%지?" 가 안 보이면 계산이 틀린 것처럼 읽힌다. */
 function crashScaleLine(cfg, y, crash) {
+  const raw = CRASHES[crash.key].pattern[crash.step] * 100;
+  if (isAssetPreset(cfg)) {
+    const mix = mixForPreset(cfg, y), beta = portfolioCrashBeta(mix);
+    if (Math.abs(beta - 1) < 0.05) return "";
+    const mine = phaseParams(cfg, y).mean + (raw - CRASH_REF_MEAN) * beta;   // 기댓값
+    return `<div class="sub" style="margin-top:4px;color:var(--muted)">
+      주식 기준 시나리오 <strong>${raw >= 0 ? "+" : ""}${raw.toFixed(1)}%</strong> →
+      이 포트폴리오는 위기 감도가 주식의 <strong>${Math.round(beta * 100)}%</strong>라
+      평균 <strong>${mine >= 0 ? "+" : ""}${mine.toFixed(1)}%</strong> 언저리로 반영됩니다
+      (자산마다 다르게 맞으므로 그해 실제 값은 이보다 위아래로 흔들립니다)</div>`;
+  }
   const beta = crashBeta(cfg, y);
   if (Math.abs(beta - 1) < 0.05) return "";
-  const raw = CRASHES[crash.key].pattern[crash.step] * 100;
   const mine = crashReturn(cfg, y, raw);
   return `<div class="sub" style="margin-top:4px;color:var(--muted)">
     주식 기준 시나리오 <strong>${raw >= 0 ? "+" : ""}${raw.toFixed(1)}%</strong> →
@@ -6169,12 +6206,71 @@ function runSelfTests() {
     ok("29c. 위기에는 주식 상관이 올라간다", cCrisis > cBase,
        "위기 > 평상시", `위기 ${cCrisis.toFixed(2)} vs 평상시 ${cBase.toFixed(2)}`);
 
-    /* --- 30) 상관행렬이 깨져도 safeCholesky 가 받아 준다 --- */
-    const broken = AS_ID.map((_, i) => AS_ID.map((_, j) => i === j ? 1 : 0.99));
-    const Lb = safeCholesky(broken);
-    ok("30. safeCholesky fallback", Array.isArray(Lb) && Lb.length === AS_ID.length
-       && Lb.every(row => row.every(v => isFinite(v))),
-       "유한한 하삼각 행렬", Lb ? "정상 반환" : "실패");
+    /* --- 29d~g) 원시 난수가 아니라 '실제로 쓰이는' assetPath 를 본다 ---
+       예전에 포트폴리오 합계를 스칼라 목표에 맞추느라 표본마다 다른 배수를 걸었을 때,
+       원시 난수만 보는 테스트는 전부 통과하면서 최종 assetPath 의 상관은 무너져 있었다.
+       그 결함을 잡는 테스트다 — 프리셋을 여러 개 도는 이유는 배수가 비중에 의존했기 때문. */
+    const crisisSample = (pid, n) => {
+      const cols = Object.fromEntries(AS_ID.map(id => [id, []]));
+      let hit = 0;
+      for (let i = 0; i < n; i++) {
+        const c = { ...state.cfg, preset: pid, crashCount: 1, crashPick: "gfc2008",
+                    retMode: "geo", gameSeed: 20000 + i * 13 };
+        const rp = returnPath(c);
+        const y0 = Object.keys(rp.crash).map(Number).find(y => rp.crash[y].step === 0);
+        if (y0 == null || !rp.assetPath[y0]) continue;
+        hit++;
+        for (const id of AS_ID) cols[id].push(rp.assetPath[y0][id]);
+      }
+      return { cols, hit };
+    };
+    const sdOf = a => { const m = a.reduce((x, y) => x + y, 0) / a.length;
+                        return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); };
+    let worstEq = 1, worstCash = 0, worstCashSd = 0, cashRange = "", nSample = 0;
+    for (const pid of ["allweather", "balanced60", "standard"]) {
+      const { cols, hit } = crisisSample(pid, 400);
+      nSample = hit;
+      worstEq = Math.min(worstEq, corrOf(cols.eqKR, cols.eqDM));
+      worstCash = Math.max(worstCash, Math.abs(corrOf(cols.eqDM, cols.cash)));
+      worstCashSd = Math.max(worstCashSd, Math.abs(sdOf(cols.cash) - ASSET_BY.cash.vol));
+      const lo = Math.min(...cols.cash), hi = Math.max(...cols.cash);
+      if (!cashRange || lo < parseFloat(cashRange)) cashRange = `${lo.toFixed(1)} ~ ${hi.toFixed(1)}%`;
+    }
+    ok("29d. 위기 assetPath 의 주식 상관이 평상시보다 높다", worstEq > cBase,
+       `> 평상시 ${cBase.toFixed(2)}`, `프리셋 3종 최저 ${worstEq.toFixed(2)} (표본 ${nSample})`);
+    ok("29e. 위기 assetPath 의 선진주식–현금 상관이 0 부근", worstCash < 0.2,
+       "|상관| < 0.2", `최대 ${worstCash.toFixed(2)}`);
+    ok("29f. 위기에도 현금 변동성이 설정값을 지킨다", worstCashSd < 0.3,
+       `설정 σ${ASSET_BY.cash.vol} 에서 0.3 이내`, `최대 이탈 ${worstCashSd.toFixed(2)}`);
+    ok("29g. 위기에도 현금 수익률이 상식 범위", /^-?[0-9.]+ ~/.test(cashRange)
+       && Math.abs(parseFloat(cashRange)) < 5,
+       "현금이 위기에 폭락하지 않는다", `범위 ${cashRange}`);
+
+    /* --- 30) 상관행렬이 깨져도 safeCholesky 가 받아 준다 ---
+       등상관 0.99 는 사실 양의 정부호라 cholesky 가 그냥 성공한다 — fallback 을
+       전혀 안 밟는다. 음의 등상관은 n 이 크면 반드시 고유값이 음수가 된다
+       (1 + (n−1)ρ < 0). 먼저 cholesky 가 null 인지 확인하고 시작한다. */
+    const equi = r => AS_ID.map((_, i) => AS_ID.map((_, j) => i === j ? 1 : r));
+    const mild = equi(-0.101), hard = equi(-0.5);      // n=11 → 1+10ρ 가 각각 −0.01, −4
+    ok("30. 깨진 행렬은 cholesky 가 거른다", cholesky(mild) === null && cholesky(hard) === null,
+       "둘 다 null", `mild=${cholesky(mild) === null ? "null" : "성공"}, hard=${cholesky(hard) === null ? "null" : "성공"}`);
+    const lowerTri = L => Array.isArray(L) && L.length === AS_ID.length
+      && L.every((row, i) => row.every((v, j) => isFinite(v) && (j <= i || v === 0)));
+    const Lm = safeCholesky(mild), Lh = safeCholesky(hard);
+    const isEye = L => L.every((row, i) => row.every((v, j) => v === (i === j ? 1 : 0)));
+    // ridge 로 살아난 쪽은 단위행렬이 아니어야 하고, 살릴 수 없는 쪽은 단위행렬로 떨어진다
+    ok("30b. ridge 재시도로 살아난다", lowerTri(Lm) && !isEye(Lm),
+       "유한한 하삼각 · 단위행렬 아님", lowerTri(Lm) ? (isEye(Lm) ? "단위행렬로 떨어짐" : "ridge 성공") : "실패");
+    ok("30c. 끝내 안 되면 단위행렬로 되돌린다", lowerTri(Lh) && isEye(Lh),
+       "단위행렬(=무상관) fallback", lowerTri(Lh) ? (isEye(Lh) ? "단위행렬" : "ridge 성공") : "실패");
+    // 살아난 행렬은 L·Lᵀ 의 대각이 1 근처여야 한다 (분산이 보존돼야 뽑은 값이 안 튄다)
+    let diagErr = 0;
+    for (let i = 0; i < AS_ID.length; i++) {
+      let v = 0; for (let k = 0; k <= i; k++) v += Lm[i][k] * Lm[i][k];
+      diagErr = Math.max(diagErr, Math.abs(v - 1));
+    }
+    ok("30d. 보정된 행렬도 분산을 보존한다", diagErr < 0.15,
+       "L·Lᵀ 대각 ≈ 1", `최대 이탈 ${diagErr.toFixed(3)}`);
 
     /* --- 31) exact 모드는 목표 CAGR 을 맞춘다 --- */
     let worstCagr = 0;
