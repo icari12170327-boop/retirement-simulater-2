@@ -479,10 +479,11 @@
           <label class="f"><span class="t">프리셋 off · 평균 %</span><input type="number" step="0.5" id="cfg_gameMean"></label>
           <label class="f"><span class="t">프리셋 off · 변동성 %</span><input type="number" step="1" id="cfg_gameVol"></label>
           <label class="f"><span class="t">게임 · 시드</span><input type="number" id="cfg_gameSeed"></label>
-          <label class="f" style="grid-column:span 2"><span class="t" title="기본은 자산이 바닥나야 실패입니다. 엄격 모드는 자산이 남아 있어도 그해 필요한 생활비의 5%를 넘게 못 채운 첫 해에 게임을 끝냅니다. 100판·진단·최적화·안전 인출액 역산도 같은 기준으로 판정합니다.">실패 판정</span>
+          <label class="f" style="grid-column:span 2"><span class="t" title="기본은 자산이 바닥나야 실패입니다. 엄격 모드는 자산이 남아 있어도 생활비를 못 채운 첫 해에 게임을 끝냅니다. 「5% 초과」는 그해 필요한 생활비(총액)의 5%를 넘게 못 채운 해, 「1만원 초과」는 계산 오차(1만원)만 빼고 조금이라도 못 채운 해입니다. 100판·진단·최적화·안전 인출액 역산도 같은 기준으로 판정합니다.">실패 판정</span>
             <select id="cfg_strictSpend">
               <option value="0">자산이 바닥나면 (기본)</option>
-              <option value="1">생활비를 못 채운 첫 해 (엄격)</option>
+              <option value="1">생활비를 5% 넘게 못 채운 첫 해 (엄격)</option>
+              <option value="2">생활비를 1만원 넘게 못 채운 첫 해 (가장 엄격)</option>
             </select></label>
           <span id="customPhase" hidden style="display:contents">
             <label class="f"><span class="t">커스텀 적립 %/σ</span><input type="number" step="0.1" id="cfg_cAccum"></label>
@@ -1394,7 +1395,7 @@ function defaultState() {
     npsAmount: 0, npsAge: 65, npsRate: 3.0, npsReal: 1,
     transfers: [],
     allowPenalty: 0, planTarget: null,
-    strictSpend: 0,          // 1 = 생활비를 못 채운 첫 해를 실패로 (0 = 자산이 바닥나야 실패)
+    strictSpend: 0,          // 0 = 자산이 바닥나야 실패 · 1 = 생활비를 5% 넘게 못 채운 첫 해 · 2 = 1만원 넘게 못 채운 첫 해
     pensionCap: 1500, wdStrategy: "ratio", showBuckets: 1,
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [], spendRules: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260101, gameSpend: 3600, gameDeathAge: 95,
@@ -1599,11 +1600,16 @@ const STARVE_TOL = 0.05;
 /** 그해 생활비를 못 채웠나. required = 그해 필요한 생활비 총액, miss = 인출까지 다 한 뒤에도 남은 부족액.
     분모가 '금융자산에서 뽑아야 했던 금액'이 아니라 총 생활비라서, 국민연금·급여가 대부분을 채운 해의
     작은 미달(예: 필요 1억 중 50만원)이 실패로 잡히지 않는다. 1만원 미만은 계산 오차라 뺀다. */
-function isStarved(required, miss) { return required > 0.5 && miss > 1 && miss / required > STARVE_TOL; }
+function isStarved(required, miss) { return isShort(required, miss) && miss / required > STARVE_TOL; }
+/** 1만원 넘게 못 채웠나 — 계산 오차(1만원 이하)만 뺀 가장 엄격한 기준 (엄격 모드 2단계) */
+function isShort(required, miss) { return required > 0.5 && miss > 1; }
+/** 엄격 모드 단계(cfg.strictSpend)에 맞는 미달 판정: 2 = 1만원 초과, 그 밖에는 필요 생활비의 5% 초과 */
+function starvedFor(cfg, required, miss) { return +cfg.strictSpend === 2 ? isShort(required, miss) : isStarved(required, miss); }
 /** 실패한 해 — 기본은 자산이 바닥난 해. 엄격 모드(cfg.strictSpend)면 생활비를 못 채운 첫 해가 더 이르면 그 해.
     게임·100판·진단·최적화·안전 인출액 역산이 전부 이 함수 하나로 판정한다. 실패가 없으면 null. */
 function failYearOf(cfg, sum) {
-  const d = sum.depleted || null, st = (+cfg.strictSpend === 1 && sum.starvedYear) ? sum.starvedYear : null;
+  const lv = +cfg.strictSpend;
+  const d = sum.depleted || null, st = (lv === 1 && sum.starvedYear) ? sum.starvedYear : (lv === 2 && sum.shortYear) ? sum.shortYear : null;
   return d && st ? Math.min(d, st) : (d || st || null);
 }
 
@@ -2857,7 +2863,8 @@ function simulate(opts = {}) {
   let cumIn = 0, cumCredit = 0, cumNet = 0, cumTax = 0, depleted = null;
   let autoNeed = 0, autoMiss = 0;   // auto 모드에서 '필요했던 금액'과 '못 채운 금액'
   let autoMissMax = 0;              // 그중 가장 나빴던 한 해의 미달 비율 = 미달 ÷ 그해 필요한 생활비 (누적에 희석되지 않게 따로 둔다)
-  let starvedYear = null;           // 생활비를 못 채운 첫 해 (isStarved) — 엄격 모드의 실패 연도
+  let starvedYear = null;           // 생활비를 5% 넘게 못 채운 첫 해 (isStarved) — 엄격 모드 1단계의 실패 연도
+  let shortYear = null;             // 1만원 넘게 못 채운 첫 해 (isShort) — 엄격 모드 2단계의 실패 연도
   let cumWdTax = 0, cumOtherTax = 0;
 
   for (let y = y0; y <= y1; y++) {
@@ -3208,6 +3215,7 @@ function simulate(opts = {}) {
         if (finalCash.spendingShortfall > 1 && autoCash.requiredSpending > 0.5)
           autoMissMax = Math.max(autoMissMax, finalCash.spendingShortfall / autoCash.requiredSpending);
         if (starvedYear === null && isStarved(autoCash.requiredSpending, finalCash.spendingShortfall)) starvedYear = y;
+        if (shortYear === null && isShort(autoCash.requiredSpending, finalCash.spendingShortfall)) shortYear = y;
       }
     }
     cumNet += res.net; cumTax += rec.tax; cumWdTax += rec.wdTax; cumOtherTax += rec.otherTax;
@@ -3270,7 +3278,7 @@ function simulate(opts = {}) {
   return {
     years, warnings, planDraws, captured,
     sum: {
-      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal, autoNeed, autoMiss, autoMissMax, starvedYear,
+      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal, autoNeed, autoMiss, autoMissMax, starvedYear, shortYear,
       atRetire: retireRec ? retireRec.total : 0,
       peak: years.reduce((m, r) => Math.max(m, r.total), 0),
       final: years.length ? years[years.length - 1].total : 0,
@@ -4307,7 +4315,7 @@ function turnStep() {
 
   const bankrupt = rec && rec.total < 1 && y > cfg.startYear;
   // 엄격 모드: 자산이 남아 있어도 이 해 생활비를 못 채웠으면 여기서 끝낸다 (자산 소진과는 따로 기록)
-  const starved = +cfg.strictSpend === 1 && isStarved(cfLog.requiredSpending, cfLog.spendingShortfall);
+  const starved = +cfg.strictSpend >= 1 && starvedFor(cfg, cfLog.requiredSpending, cfLog.spendingShortfall);
   const deathYear = cfg.birthYear + clamp0(cfg.gameDeathAge);
   if (bankrupt) game.over = { why: "bankrupt", year: y };
   else if (starved) game.over = { why: "starved", year: y };
@@ -5957,7 +5965,7 @@ function migrateState(raw) {
   if (from < 3) cfg = migrateV2toV3(cfg, src);
   cfg.schemaVersion = SCHEMA_VERSION;
   cfg.npsReal = numOf(cfg.npsReal) === 0 ? 0 : 1;
-  cfg.strictSpend = numOf(cfg.strictSpend) === 1 ? 1 : 0;      // 0/1 밖의 값은 기본(0)
+  { const sv = numOf(cfg.strictSpend); cfg.strictSpend = (sv === 1 || sv === 2) ? sv : 0; }   // 0/1/2 밖의 값은 기본(0)
 
   // 4) 값 검증 — 잘못된 값은 기본값으로 복구하고 경고로 남긴다
   cfg.birthYear  = Math.round(safeNum(cfg.birthYear, def.cfg.birthYear, 1900, 2200, "출생연도"));
@@ -7656,9 +7664,9 @@ function runSelfTests() {
     ok("69h. 안전 인출액 역산: 엄격 모드에서도 미달이 있는 설정은 버틴 것으로 치지 않는다", safe69 && safe69.spend < 100, "< 100", safe69 ? String(safe69.spend) : "없음");
     // 새 설정 값 검증 — 0/1 밖은 기본(0), 문자열 '1'은 1
     const ms = v => migrateState({ cfg: { strictSpend: v }, rows: {} }).cfg.strictSpend;
-    ok("69i. 저장본의 엄격 모드 값 — 1/'1'은 켬, 나머지(2·'abc'·null·없음)는 꺼짐, 기본값은 꺼짐",
-       ms(1) === 1 && ms("1") === 1 && ms(2) === 0 && ms("abc") === 0 && ms(null) === 0 && ms(undefined) === 0 && defaultState().cfg.strictSpend === 0,
-       "1·1·0·0·0·0·0", [ms(1), ms("1"), ms(2), ms("abc"), ms(null), ms(undefined), defaultState().cfg.strictSpend].join("·"));
+    ok("69i. 저장본의 엄격 모드 값 — 1·2(문자열 포함)는 그대로, 그 밖(3·'abc'·null·없음)은 꺼짐, 기본값은 꺼짐",
+       ms(1) === 1 && ms("1") === 1 && ms(2) === 2 && ms("2") === 2 && ms(3) === 0 && ms("abc") === 0 && ms(null) === 0 && ms(undefined) === 0 && defaultState().cfg.strictSpend === 0,
+       "1·1·2·2·0·0·0·0·0", [ms(1), ms("1"), ms(2), ms("2"), ms(3), ms("abc"), ms(null), ms(undefined), defaultState().cfg.strictSpend].join("·"));
     reset();
 
     /* --- 70) 종료 진단: 실제 플레이 결과와 자동 배분 기준을 나란히, 다르면 이유를 밝힌다 --- */
@@ -7718,7 +7726,7 @@ function runSelfTests() {
     /* --- 72) 미달 판정의 분모는 그해 필요한 생활비(총액) — 안내 문구와 같은 기준 --- */
     ok("72. 필요 1억 중 50만원 미달(0.5%)은 실패가 아니고, 600만원(6%)은 실패", !isStarved(10000, 50) && isStarved(10000, 600) && !isStarved(10000, 500) && isStarved(10000, 501),
        "false·true·false·true", [isStarved(10000, 50), isStarved(10000, 600), isStarved(10000, 500), isStarved(10000, 501)].join("·"));
-    const tinyMiss = miss => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 10000, gameDeathAge: 50, crashCount: 0, inflation: 0, strictSpend: 1 });
+    const tinyMiss = (miss, strict = 1) => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 10000, gameDeathAge: 50, crashCount: 0, inflation: 0, strictSpend: strict });
       state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2020;
       state.cfg.events = [{ name: "급여", kind: "salary", amt: 10000 - miss, year: 2030, until: 2040, every: 1, real: 0, jitter: 0 }];
       gameStart(); autoPlay(); const g = game.over; let o; monteCarlo(1, r => { o = r; }, 0);
@@ -7728,6 +7736,26 @@ function runSelfTests() {
        tn50.g.why === "end" && tn50.o.survive === 1 && tn50.sm.starvedYear === null && tn600.g.why === "starved" && tn600.g.year === 2030 && tn600.o.survive === 0 && tn600.sm.starvedYear === 2030,
        "50만: end · 생존 · / 600만: starved 2030 · 실패", `50만: ${tn50.g.why}·생존${tn50.o.survive} / 600만: ${tn600.g.why}(${tn600.g.year})·생존${tn600.o.survive}`);
     reset();
+
+    /* --- 73) 엄격 모드 2단계 — 1만원 넘게 못 채운 첫 해 (1단계는 5% 초과) --- */
+    const l1 = tinyMiss(50, 1), l2 = tinyMiss(50, 2), l2small = tinyMiss(0.9, 2);
+    ok("73. 미달 50만원(총 생활비의 0.5%): 1단계(5% 초과)는 계속, 2단계(1만원 초과)는 첫해 실패 — 게임·100판·시뮬 모두",
+       l1.g.why === "end" && l1.o.survive === 1 && l1.sm.starvedYear === null && l1.sm.shortYear === 2030
+       && l2.g.why === "starved" && l2.g.year === 2030 && l2.o.survive === 0 && l2.o.bustAges[0] === 45,
+       "1단계: end·생존 / 2단계: starved 2030 · 만 45세 실패", `1단계: ${l1.g.why}·생존${l1.o.survive}·short ${l1.sm.shortYear} / 2단계: ${l2.g.why}(${l2.g.year})·생존${l2.o.survive}·${l2.o.bustAges[0]}세`);
+    ok("73b. 2단계도 1만원 이하 미달(0.9만원)은 계산 오차로 본다", l2small.g.why === "end" && l2small.sm.shortYear === null && l2small.o.survive === 1,
+       "end · shortYear 없음 · 생존", `${l2small.g.why} · ${l2small.sm.shortYear} · 생존${l2small.o.survive}`);
+    ok("73c. 실패 연도 함수: 단계별로 다른 기록을 쓰고, 자산 소진이 더 이르면 그쪽",
+       failYearOf({ strictSpend: 2 }, { starvedYear: 2045, shortYear: 2040 }) === 2040 && failYearOf({ strictSpend: 1 }, { starvedYear: 2045, shortYear: 2040 }) === 2045
+       && failYearOf({ strictSpend: 2 }, { depleted: 2035, shortYear: 2040 }) === 2035 && failYearOf({ strictSpend: 0 }, { starvedYear: 2045, shortYear: 2040 }) === null
+       && failYearOf({ strictSpend: 2 }, { starvedYear: 2045 }) === null,
+       "2040 · 2045 · 2035 · null · null",
+       [failYearOf({ strictSpend: 2 }, { starvedYear: 2045, shortYear: 2040 }), failYearOf({ strictSpend: 1 }, { starvedYear: 2045, shortYear: 2040 }),
+        failYearOf({ strictSpend: 2 }, { depleted: 2035, shortYear: 2040 }), failYearOf({ strictSpend: 0 }, { starvedYear: 2045, shortYear: 2040 }), failYearOf({ strictSpend: 2 }, { starvedYear: 2045 })].join(" · "));
+    ok("73d. 미달 판정 함수: 1단계는 5% 초과, 2단계는 1만원 초과",
+       starvedFor({ strictSpend: 1 }, 10000, 50) === false && starvedFor({ strictSpend: 2 }, 10000, 50) === true
+       && starvedFor({ strictSpend: 2 }, 10000, 1) === false && starvedFor({ strictSpend: 1 }, 10000, 600) === true,
+       "false·true·false·true", [starvedFor({ strictSpend: 1 }, 10000, 50), starvedFor({ strictSpend: 2 }, 10000, 50), starvedFor({ strictSpend: 2 }, 10000, 1), starvedFor({ strictSpend: 1 }, 10000, 600)].join("·"));
 
     /* --- 65) 개시 나이 안내 · 범위 밖 경고 · 최적화 손잡이 --- */
     reset(); state.cfg.npsAmount = 2160; state.cfg.npsAge = 55;
