@@ -2823,6 +2823,7 @@ function simulate(opts = {}) {
   const shortYears = [];
   let cumIn = 0, cumCredit = 0, cumNet = 0, cumTax = 0, depleted = null;
   let autoNeed = 0, autoMiss = 0;   // auto 모드에서 '필요했던 금액'과 '못 채운 금액'
+  let autoMissMax = 0;              // 그중 가장 나빴던 한 해의 미달 비율 (누적에 희석되지 않게 따로 둔다)
   let cumWdTax = 0, cumOtherTax = 0;
 
   for (let y = y0; y <= y1; y++) {
@@ -3168,6 +3169,10 @@ function simulate(opts = {}) {
       if (autoCash.spendingShortfall > 0.5) {
         autoNeed += autoCash.spendingShortfall;
         autoMiss += finalCash.spendingShortfall;
+        // 첫해에 전액을 못 뽑아도 뒤에 수십 년을 채우면 누적 비율은 몇 %로 희석된다 — 해마다의 비율로 따로 본다.
+        // 1만원 미만은 계산 오차라 뺀다.
+        if (finalCash.spendingShortfall > 1)
+          autoMissMax = Math.max(autoMissMax, finalCash.spendingShortfall / autoCash.spendingShortfall);
       }
     }
     cumNet += res.net; cumTax += rec.tax; cumWdTax += rec.wdTax; cumOtherTax += rec.otherTax;
@@ -3230,7 +3235,7 @@ function simulate(opts = {}) {
   return {
     years, warnings, planDraws, captured,
     sum: {
-      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal, autoNeed, autoMiss,
+      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal, autoNeed, autoMiss, autoMissMax,
       atRetire: retireRec ? retireRec.total : 0,
       peak: years.reduce((m, r) => Math.max(m, r.total), 0),
       final: years.length ? years[years.length - 1].total : 0,
@@ -4290,8 +4295,9 @@ function autoPlay() {
   saveGame(); render(true, true);
 }
 
-/** 자산이 안 말랐어도 필요한 금액의 이만큼을 넘게 못 뽑았으면 '버텼다'고 하지 않는다.
-    안전 인출액 역산과 100판 돌려보기가 같은 기준을 쓴다 (금액 기준 · 연금수령한도에 묶여 굶는 경우). */
+/** 자산이 안 말랐어도 **어느 한 해든** 그해 필요한 금액의 이만큼을 넘게 못 뽑았으면 '버텼다'고 하지 않는다.
+    안전 인출액 역산과 100판 돌려보기가 같은 기준을 쓴다 (연금수령한도·55세 요건에 묶여 굶는 경우).
+    해마다의 비율이라, 첫해 전액 미달이 뒤 수십 년의 충족에 희석되지 않고 살짝씩(5% 이내) 모자란 해는 실격시키지 않는다. */
 const STARVE_TOL = 0.05;
 
 /* ------------------------------------------------------------------
@@ -4415,7 +4421,7 @@ function monteCarlo(n, onDone, batch = 0) {
       final: sim.sum.final,
       net: sim.sum.cumNet,
       miss: sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0,
-      short: (sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0) > STARVE_TOL,   // 자산은 버텼어도 생활비를 못 채운 판 (안전 인출액 역산과 같은 기준)
+      short: sim.sum.autoMissMax > STARVE_TOL,   // 자산은 버텼어도 어느 한 해 생활비를 못 채운 판 (안전 인출액 역산과 같은 기준)
       atRetire: sim.sum.atRetire,               // 은퇴 시점 자산 — 출발선이 낮았나
       pre5: cagr(R - 5, R - 1),                 // 은퇴 직전 5년
       post5: cagr(R, R + 4),                    // 은퇴 직후 5년 — 순서위험의 핵심
@@ -4655,7 +4661,7 @@ function safeSpend(onDone) {
       // 연금수령한도에 묶여 못 뽑는 경우가 여기 걸린다.
       const mr = sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0;
       missSum += mr; missN++;
-      const starved = mr > STARVE_TOL;
+      const starved = sim.sum.autoMissMax > STARVE_TOL;   // 어느 한 해라도 (누적 비율은 희석되므로 표시용)
       const good = (!d || d - cfg.birthYear >= die) && !starved;
       if (good) ok++;
       if (sd === seeds[0]) ownOk = good;   // 사용자가 실제로 플레이할 시드
@@ -4985,7 +4991,7 @@ function renderEnding(box) {
             ? `<div class="gline"><span>파산한 ${r.bustAges.length}판의 파산 나이</span><span>만 ${Math.round(pctileOf(r.bustAges, .1))} · <strong>${Math.round(pctileOf(r.bustAges, .5))}</strong> · ${Math.round(pctileOf(r.bustAges, .9))}세</span></div>`
             : `<div class="gline"><span>파산</span><span class="pos">한 판도 없었습니다</span></div>`}
           <div class="gline"><span>생활비를 못 채운 몫</span><span>평균 ${(r.missAvg * 100).toFixed(1)}%</span></div>
-          ${r.shortN > 0 ? `<div class="gline"><span>자산은 버텼지만 생활비를 못 채운 판</span><span class="neg">${r.shortN}판 <span style="color:var(--muted);font-size:11px">(총 필요액의 ${Math.round(STARVE_TOL * 100)}% 초과)</span></span></div>` : ""}
+          ${r.shortN > 0 ? `<div class="gline"><span>자산은 버텼지만 생활비를 못 채운 판</span><span class="neg">${r.shortN}판 <span style="color:var(--muted);font-size:11px">(어느 한 해 필요액의 ${Math.round(STARVE_TOL * 100)}% 초과)</span></span></div>` : ""}
 
           <div class="gline" style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
             <span style="color:var(--muted)">이번 판(시드 ${r.seed})은 어디쯤이었나</span><span></span></div>
@@ -7508,14 +7514,41 @@ function runSelfTests() {
        "미달 판 > 0 · 생존 판 이내", `미달 ${mc68.shortN}판 · 생존 ${Math.round(mc68.survive * 6)}판`);
     reset();
 
-    // 총 필요액의 5% 이내 미달은 '버텼다'로 본다(안전 인출액 역산과 같은 기준) — 같은 시드에서 생활비만 조금 올려 선을 넘긴다
+    // 어느 한 해든 그해 필요액의 5% 이내 미달은 '버텼다'로 본다(안전 인출액 역산과 같은 기준) — 같은 시드에서 생활비만 조금 올려 선을 넘긴다
     const shortAt = sp => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: sp, gameDeathAge: 50, crashCount: 0 });
       state.cfg.opening.taxable = { free: 2000, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 667 }; state.cfg.openYears.psDed = 2020; state.cfg.events = [];
-      let out; monteCarlo(1, r => { out = r; }, 0); return out; };
-    const s316 = shortAt(316), s322 = shortAt(322);
-    ok("68d. 필요액의 5% 이내 미달(연 316 → 4.3%)은 '못 채운 판'이 아니고, 넘으면(연 322 → 5.9%) 센다 — 안전 인출액 역산과 같은 기준",
-       s316.auto.miss > 0.04 && s316.auto.miss < STARVE_TOL && s316.shortN === 0 && s322.auto.miss > STARVE_TOL && s322.shortN === 1,
-       "4.3% → 0판 · 5.9% → 1판", `${(s316.auto.miss * 100).toFixed(2)}% → ${s316.shortN}판 · ${(s322.auto.miss * 100).toFixed(2)}% → ${s322.shortN}판`);
+      let out; monteCarlo(1, r => { out = r; }, 0); const rp = returnPath(state.cfg);
+      out.sum = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } }).sum; return out; };
+    const s302 = shortAt(302), s303 = shortAt(303);
+    ok("68d. 그해 필요액의 5% 이내 미달(연 302 → 최악의 해 3.6%)은 '못 채운 판'이 아니고, 넘으면(연 303 → 6.9%) 센다",
+       s302.sum.autoMissMax > 0.02 && s302.sum.autoMissMax < STARVE_TOL && s302.shortN === 0 && s303.sum.autoMissMax > STARVE_TOL && s303.shortN === 1,
+       "3.6% → 0판 · 6.9% → 1판", `${(s302.sum.autoMissMax * 100).toFixed(1)}% → ${s302.shortN}판 · ${(s303.sum.autoMissMax * 100).toFixed(1)}% → ${s303.shortN}판`);
+    // 첫해에 전액을 못 뽑아도 뒤 수십 년을 채우면 누적 비율은 희석된다 — 해마다의 비율로 잡아야 한다
+    reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2060, gameSeed: 1, gameSpend: 1000, gameDeathAge: 75, crashCount: 0, inflation: 0 });
+    state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 50000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    state.cfg.events = [{ name: "목돈", kind: "income", amt: 50000, year: 2031, until: 2031, every: 1, real: 0, jitter: 0 }];
+    let mc68e; monteCarlo(1, r => { mc68e = r; }, 0);
+    const rp68 = returnPath(state.cfg), sum68 = simulate({ returns: rp68.path, auto: { loan: loanSchedule(state.cfg, rp68.crash) } }).sum;
+    ok("68e. 첫해 전액 미달이 뒤 30년의 충족에 희석돼도(누적 5% 미만) '못 채운 판'으로 센다",
+       sum68.autoMiss / sum68.autoNeed < STARVE_TOL && sum68.autoMissMax > 0.9 && mc68e.shortN === 1 && mc68e.survive === 1,
+       "누적 < 5% · 최악의 해 ≈ 100% · 미달 1판 · 생존", `누적 ${(sum68.autoMiss / sum68.autoNeed * 100).toFixed(2)}% · 최악 ${(sum68.autoMissMax * 100).toFixed(0)}% · 미달 ${mc68e.shortN}판 · 생존 ${mc68e.survive}`);
+    reset();
+
+    // 1만원 미만은 계산 오차 — 비율이 100%여도 '못 채운 해'가 아니다
+    reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 0.7, gameDeathAge: 50, crashCount: 0, inflation: 0 });
+    state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2020; state.cfg.events = [];
+    let mc68f; monteCarlo(1, r => { mc68f = r; }, 0);
+    const rp68f = returnPath(state.cfg), sum68f = simulate({ returns: rp68f.path, auto: { loan: loanSchedule(state.cfg, rp68f.crash) } }).sum;
+    ok("68f. 연 0.7만원짜리 미달(비율 100%)은 계산 오차라 '못 채운 판'이 아니다",
+       sum68f.autoNeed > 0 && sum68f.autoMiss / sum68f.autoNeed > 0.9 && mc68f.shortN === 0, "비율 ≈ 100% · 0판",
+       `비율 ${(sum68f.autoMiss / (sum68f.autoNeed || 1) * 100).toFixed(0)}% · ${mc68f.shortN}판`);
+    // 안전 인출액 역산도 같은 기준 — 첫해 전액 미달이 누적에 희석돼 '버텼다'가 되면 안 된다
+    reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2060, gameSeed: 1, gameSpend: 1000, gameDeathAge: 75, crashCount: 0, inflation: 0 });
+    state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 50000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    state.cfg.events = [{ name: "목돈", kind: "income", amt: 50000, year: 2031, until: 2031, every: 1, real: 0, jitter: 0 }];
+    let safe68; safeSpend(r => { safe68 = r; });
+    ok("68g. 안전 인출액 역산: 첫해 전액 미달이 있는 설정은 (누적 5% 미만이어도) 버틴 것으로 치지 않는다",
+       safe68 && safe68.spend < 100, "안전 생활비 < 100", safe68 ? `${safe68.spend}` : "없음");
     reset();
 
     /* --- 65) 개시 나이 안내 · 범위 밖 경고 · 최적화 손잡이 --- */
