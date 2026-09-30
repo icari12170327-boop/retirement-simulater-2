@@ -5711,7 +5711,13 @@ function migrateState(raw) {
 
   // 2) 계좌 사전은 키 단위로 보완 (계좌가 추가돼도 옛 저장본이 깨지지 않게)
   for (const key of ["rates", "limits", "fillAmts", "priority", "openYears"]) {
-    cfg[key] = { ...def.cfg[key], ...(src[key] || {}) };
+    const o = src[key] && typeof src[key] === "object" && !Array.isArray(src[key]) ? src[key] : {};
+    cfg[key] = { ...def.cfg[key], ...o };
+    // 계좌별 값은 전부 숫자다 — 객체·문자열이 그대로 남으면 정렬·비교가 조용히 어긋난다
+    for (const id of Object.keys(cfg[key])) {
+      if (typeof cfg[key][id] !== "number")
+        cfg[key][id] = safeNum(cfg[key][id], def.cfg[key][id] ?? 0, undefined, undefined, `${key}.${id}`);
+    }
   }
   cfg.opening = cfg.opening && typeof cfg.opening === "object" ? cfg.opening : {};
   for (const a of ACC) {
@@ -5840,7 +5846,10 @@ function sanitizeUndo(u, cfg) {
   const pick = Object.fromEntries(OPT_KEYS
     .filter(k => k in u.cfg && kindOf(u.cfg[k]) === kindOf(cfg[k])
       && (typeof cfg[k] !== "number" || Number.isFinite(u.cfg[k])))
-    .map(k => [k, u.cfg[k]]));
+    // 중첩 객체(주택연금·납입 순서)는 통째로 덮지 않고 현재 값 위에 얹는다 — 일부만 담긴 정보가
+    // 빠진 칸을 기본값으로 채우면 되돌리기가 사용자가 고친 적 없는 값까지 조용히 바꾼다
+    .map(k => [k, cfg[k] && typeof cfg[k] === "object" && !Array.isArray(cfg[k])
+      ? deepMerge(cfg[k], u.cfg[k], `되돌리기 정보.${k}`) : u.cfg[k]]));
   const outer = MIGRATION_WARNINGS.slice();   // 안쪽 migrateState 가 경고 목록을 비우므로 보관
   const m = migrateState({ cfg: { ...JSON.parse(JSON.stringify(cfg)), ...pick } });
   MIGRATION_WARNINGS.length = 0;
@@ -6981,6 +6990,22 @@ function runSelfTests() {
     ok("55. 형식이 어긋난 설정 값은 기본값 유지", !!m55 && typeof m55.cfg.reverse === "object"
        && typeof m55.cfg.loan === "object" && typeof m55.cfg.wdStrategy === "string",
        "reverse·loan 객체 / wdStrategy 문자열", e55 || (m55 && `${typeof m55.cfg.reverse} / ${typeof m55.cfg.loan} / ${typeof m55.cfg.wdStrategy}`));
+
+    /* --- 54b) 일부만 담긴 중첩 되돌리기 정보는 현재 값 위에 얹힌다 (기본값으로 채우지 않는다) --- */
+    const cur54 = defaultState().cfg;
+    Object.assign(cur54.reverse, { homeValue: 90000, startAge: 77 }); cur54.priority.irpSev = 99;
+    const m54b = migrateState({ cfg: cur54,
+      optUndo: { at: "x", what: "y", cfg: { reverse: { on: 1 }, priority: { psDed: 3, irpInv: { bad: 1 } } } } });
+    const u54b = (m54b.optUndo || {}).cfg || {}, rv = u54b.reverse || {}, pr = u54b.priority || {};
+    ok("54b. 부분 되돌리기 정보는 현재 값 유지 · 계좌별 순서는 숫자",
+       rv.on === 1 && rv.homeValue === 90000 && rv.startAge === 77 && pr.irpSev === 99 && pr.psDed === 3
+       && typeof pr.irpInv === "number",
+       "on 1 · 90000 · 77세 · irpSev 99 · psDed 3 · irpInv 숫자",
+       `on ${rv.on} · ${rv.homeValue} · ${rv.startAge}세 · irpSev ${pr.irpSev} · psDed ${pr.psDed} · irpInv ${JSON.stringify(pr.irpInv)}`);
+    const m54c = migrateState({ cfg: { priority: { irpSev: { bad: 1 } }, openYears: { isa: "x" } } });
+    ok("54c. 불러온 계좌별 값(순서·가입연도)도 숫자로 검증",
+       typeof m54c.cfg.priority.irpSev === "number" && typeof m54c.cfg.openYears.isa === "number",
+       "number / number", `${typeof m54c.cfg.priority.irpSev} / ${typeof m54c.cfg.openYears.isa}`);
 
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
