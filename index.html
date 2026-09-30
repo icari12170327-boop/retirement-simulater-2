@@ -2764,7 +2764,9 @@ function simulate(opts = {}) {
   const y0 = cfg.startYear, y1 = Math.max(cfg.startYear, cfg.endYear);
   const age55 = cfg.birthYear + 55;
   const pYearCount = Object.fromEntries(AID.map(id => [id, 0]));   // 한도용 연금수령연차
-  const pActualCount = Object.fromEntries(AID.map(id => [id, 0])); // 실제로 연금을 받은 해의 수
+  // 실제로 연금을 받은 '연도 집합' — 횟수가 아니라 집합이라야 계좌이체 때 합칠 수 있다.
+  // 이체받은 계좌는 옮겨 온 계좌의 수령연도를 이어받고, 같은 해에 둘 다 받았으면 한 번만 센다.
+  const pActualYears = Object.fromEntries(AID.map(id => [id, new Set()]));
   // y 해 이전에 이미 지나간 연금수령연차. 1년차는 '최초로 연금수령할 수 있는 해'
   // (만 55세와 가입 5년 중 늦은 해, 퇴직 재원 IRP는 5년 요건 없음).
   // 예전에는 시뮬 시작연도를 항상 0년차로 봐서, 이미 수령 가능 기간이 한참 지난 계좌도 한도에 묶였다.
@@ -2964,6 +2966,8 @@ function simulate(opts = {}) {
           const v = src[key] * k; src[key] -= v; dst[key] += v;
         }
         if (openYear[t.from]) openYear[t.to] = Math.min(openYear[t.to] || Infinity, openYear[t.from]);
+        // 실제 수령연차도 따라간다 — 퇴직재원을 10년 받은 IRP를 옮겨도 다음 해는 1년차가 아니라 11년차다
+        for (const yy of pActualYears[t.from]) pActualYears[t.to].add(yy);
         if (!eligible[t.from]) {
           warnings.push(`${y}년 · ${label} — 계좌이체 특례는 만 55세 이상 + 가입 5년 경과라야 적용됩니다`
             + `(퇴직금 재원 IRP는 5년 요건 없음). 요건 전 이체는 해지로 보아 기타소득세 16.5%가 붙습니다.`);
@@ -3005,7 +3009,7 @@ function simulate(opts = {}) {
     for (const id of PENSION) {
       if (eligible[id]) pYearCount[id] = pYearCount[id] + 1;
       pYear[id] = pYearCount[id];
-      pYearActual[id] = pActualCount[id] + 1;     // 올해 받는다면 몇 번째 해인가
+      pYearActual[id] = pActualYears[id].size + 1; // 올해 받는다면 몇 번째 해인가
       const n = Math.min(pYearCount[id], 10);
       pLimit[id] = pYearCount[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - n) * 1.2;
     }
@@ -3044,7 +3048,7 @@ function simulate(opts = {}) {
     const isaBefore = bTotal(st.bal.isa);
     const res = applyWithdrawals(st, draws, ctx);
     // 금액과 무관하게 연금으로 받은 해는 실제 수령연차에 들어간다 (0.4만원이어도 과세는 했으므로)
-    for (const id of PENSION) if (eligible[id] && res.det[id].gross > 1e-6) pActualCount[id]++;
+    for (const id of PENSION) if (eligible[id] && res.det[id].gross > 1e-6) pActualYears[id].add(y);
     // ISA 를 인출로 비우면 그 계약도 끝난다 — 이전과 마찬가지로 다음 납입은 새 계약이다
     if (isaBefore > 0 && res.det.isa && res.det.isa.gross >= isaBefore - 1e-9) { delete openYear.isa; st.isaUsed = 0; }
 
@@ -5645,6 +5649,14 @@ function safeNum(v, def, lo, hi, label) {
 function deepMerge(base, over, path) {
   if (over === undefined || over === null) return base;
   if (Array.isArray(base)) return Array.isArray(over) ? over.slice() : base;
+  // 형식이 어긋나면 기본값을 지킨다 — 객체 자리에 숫자가 오면 뒤에서 속성을 쓰다 터지고,
+  // 문자열 자리에 객체가 오면 선택값 비교가 조용히 어긋난다
+  if (base && typeof base === "object" && (typeof over !== "object" || Array.isArray(over))) {
+    MIGRATION_WARNINGS.push(`${path}: 형식이 맞지 않아 기본값 유지`); return base;
+  }
+  if (typeof base === "string" && typeof over === "object") {
+    MIGRATION_WARNINGS.push(`${path}: 형식이 맞지 않아 기본값 유지`); return base;
+  }
   if (typeof base !== "object" || typeof over !== "object") {
     if (typeof base === "number" && typeof over !== "number") {
       const n = parseFloat(over);
@@ -5779,7 +5791,7 @@ function migrateState(raw) {
   }
 
   const rows = (raw.rows && typeof raw.rows === "object" && !Array.isArray(raw.rows)) ? raw.rows : {};
-  return { cfg, rows, optUndo: sanitizeUndo(raw.optUndo), warnings: MIGRATION_WARNINGS.slice() };
+  return { cfg, rows, optUndo: sanitizeUndo(raw.optUndo, cfg), warnings: MIGRATION_WARNINGS.slice() };
 }
 
 /* 불러온 JSON 의 목록 원소 검증 — 남이 준 저장본을 여는 기능이 있으므로 입구에서 형식을 맞춘다.
@@ -5818,10 +5830,23 @@ function sanitizeList(kind, list, cfg) {
   });
   return out;
 }
-/** 최적화 되돌리기 정보 — 화면에 찍는 문자열은 문자열로, 되돌릴 설정은 객체일 때만 받는다 */
-function sanitizeUndo(u) {
-  if (!u || typeof u !== "object" || !u.cfg || typeof u.cfg !== "object") return null;
-  return { at: String(u.at ?? ""), what: String(u.what ?? ""), cfg: u.cfg };
+/** 최적화 되돌리기 정보 — 화면에 찍는 문자열은 문자열로 받고, 되돌릴 설정은 본 설정과 같은 검증을 거친다.
+    되돌리기는 이 값을 그대로 설정에 덮어쓰므로, 빠진 키나 엉뚱한 형식이 있으면 클릭 순간 터지거나
+    검증을 우회한 값이 설정에 들어간다. 빠진 키는 불러온 현재 값으로 채운다(그 항목은 되돌려도 그대로). */
+function sanitizeUndo(u, cfg) {
+  if (!u || typeof u !== "object" || !u.cfg || typeof u.cfg !== "object" || Array.isArray(u.cfg) || !cfg) return null;
+  // 형식이 다른 값(숫자 자리에 "abc" 등)은 버린다 — 기본값이 아니라 현재 값이 남아야 되돌리기가 무해하다
+  const kindOf = v => Array.isArray(v) ? "array" : v === null ? "null" : typeof v;
+  const pick = Object.fromEntries(OPT_KEYS
+    .filter(k => k in u.cfg && kindOf(u.cfg[k]) === kindOf(cfg[k])
+      && (typeof cfg[k] !== "number" || Number.isFinite(u.cfg[k])))
+    .map(k => [k, u.cfg[k]]));
+  const outer = MIGRATION_WARNINGS.slice();   // 안쪽 migrateState 가 경고 목록을 비우므로 보관
+  const m = migrateState({ cfg: { ...JSON.parse(JSON.stringify(cfg)), ...pick } });
+  MIGRATION_WARNINGS.length = 0;
+  MIGRATION_WARNINGS.push(...outer, ...m.warnings.map(w => `되돌리기 정보 · ${w}`));
+  return { at: String(u.at ?? ""), what: String(u.what ?? ""),
+           cfg: Object.fromEntries(OPT_KEYS.map(k => [k, m.cfg[k]])) };
 }
 
 function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
@@ -6916,6 +6941,46 @@ function runSelfTests() {
     const st52b = blankSt(); st52b.bal.psDed.ded = 1000;
     const r52b = sum(greedyDraws(st52b, ctx52, 500, "ratio"));
     ok("52b. 과세분은 여전히 한도(100)에서 멈춤", r52b <= 100.5, "≤ 100", r52b.toFixed(1));
+
+    /* --- 53) 계좌이체하면 실제 수령연차도 이어진다 (중복 연도는 한 번) ---
+       퇴직재원 IRP에서 10년 받은 뒤 다른 IRP로 옮겨 받으면 1년차(70%)가 아니라 11년차(60%)다. */
+    sevOnly(1960, 2000, 2026, 2037);
+    state.cfg.rates.irpInv = 0;
+    for (let y = 2026; y <= 2035; y++) row(y).irpSev.out = 100;
+    state.cfg.transfers = [{ from: "irpSev", to: "irpInv", year: 2036, amt: 0 }];
+    row(2036).irpInv.out = 100;
+    const t53 = taxAt(simulate(), 2036, "irpInv"), e53 = 100 * state.cfg.sevRate / 100 * .6;
+    ok("53. 이체받은 계좌가 실제 수령연차를 이어받음 (11년차 60%)", near(t53, e53, 0.001),
+       e53.toFixed(2), t53.toFixed(2));
+    // 두 계좌가 같은 해에 모두 받았으면 그해는 한 번만 센다 — 10년 + 10년이 21년차(50%)가 되면 안 된다
+    state.cfg.opening.irpInv = { free: 0, ded: 10000, sev: 0, gain: 0 }; state.cfg.openYears.irpInv = 2000;
+    for (let y = 2026; y <= 2035; y++) row(y).irpInv.out = 100;
+    const s53b = simulate();
+    const got53b = [2026, 2035].every(y => s53b.years.find(r => r.year === y).acc.irpInv.out > 99);
+    // 2036년 irpInv 인출 100은 옮겨 온 퇴직재원에서 먼저 나간다(비과세 → 퇴직재원 → 공제분 순서)
+    const t53b = taxAt(s53b, 2036, "irpInv") * (got53b ? 1 : NaN);
+    ok("53b. 같은 해 수령은 합산 때 한 번만 (여전히 11년차 60%)", near(t53b, e53, 0.001),
+       e53.toFixed(2), t53b.toFixed(2));
+
+    /* --- 54) 불러온 되돌리기 정보는 빠진 키·엉뚱한 형식이 있어도 되돌리기가 터지지 않는다 --- */
+    const m54 = migrateState({ cfg: { gameSpend: 3000, spendRules: [] },
+      optUndo: { at: "x", what: "y", cfg: { gameSpend: "abc", spendRules: [{ amt: "7", name: 3 }], reverse: 5 } } });
+    const u54 = m54.optUndo && m54.optUndo.cfg;
+    const bad54 = !u54 ? ["되돌리기 정보 없음"] : OPT_KEYS.filter(k => {
+      try { JSON.parse(JSON.stringify(u54[k])); return false; } catch (e) { return true; }
+    });
+    const ok54 = u54 && !bad54.length && u54.gameSpend === 3000 && u54.spendRules[0].amt === 7
+      && typeof u54.spendRules[0].name === "string" && u54.reverse && typeof u54.reverse === "object";
+    ok("54. 되돌리기 정보도 본 설정과 같은 검증 (빠진 키는 현재 값)", !!ok54,
+       "모든 키 복원 가능 · 숫자 3000 · 규칙 amt 7", bad54.length ? `복원 불가: ${bad54.join(",")}`
+       : JSON.stringify(u54 && { spend: u54.gameSpend, amt: u54.spendRules[0] && u54.spendRules[0].amt, rev: typeof u54.reverse }));
+
+    /* --- 55) 객체 자리에 숫자, 문자열 자리에 객체가 와도 불러오기가 터지지 않는다 --- */
+    let m55 = null, e55 = "";
+    try { m55 = migrateState({ cfg: { reverse: 5, loan: "x", wdStrategy: { a: 1 } } }); } catch (e) { e55 = e.message; }
+    ok("55. 형식이 어긋난 설정 값은 기본값 유지", !!m55 && typeof m55.cfg.reverse === "object"
+       && typeof m55.cfg.loan === "object" && typeof m55.cfg.wdStrategy === "string",
+       "reverse·loan 객체 / wdStrategy 문자열", e55 || (m55 && `${typeof m55.cfg.reverse} / ${typeof m55.cfg.loan} / ${typeof m55.cfg.wdStrategy}`));
 
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
