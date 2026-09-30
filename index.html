@@ -4319,23 +4319,27 @@ function diagnose() {
     const cands = early.ages.map(a => {
       const f = npsClaimFactor(by, a) / npsClaimFactor(by, baseAge);
       const r = test("", c => { c.npsAge = a; c.npsAmount = baseAmt * f; });
-      return { a, f, age: r.age };
-    });
+      return { a, f, age: r.age, err: !!r.err };
+    }).filter(c => !c.err);      // 계산이 예외로 끝난 나이는 후보가 아니다 — null 을 '끝까지 버팀'으로 읽지 않게
     // 끝까지 버티는 나이(null)가 가장 좋다. 같으면 감액이 적은(늦은) 나이를 고른다.
     const val = c => c.age == null ? Infinity : c.age;
-    const best = cands.reduce((b, c) => (val(c) > val(b) || (val(c) === val(b) && c.a > b.a)) ? c : b);
-    const n = npsNormalAge(by), cut = 1 - npsClaimFactor(by, best.a);
-    // 정상 나이까지 기다린 경우와 누적 수령액이 같아지는 나이 (세금·할인 없이, 물가연동이라 실질 기준)
-    const f = 1 - cut, breakeven = cut > 0 ? (n - f * best.a) / cut : null;
-    nps = { claimAge: best.a, cut, normal: n, breakeven, cands };
-    rows.push({ label: `🏛️ 국민연금을 만 ${best.a}세부터 조기수령했다면 (평생 −${Math.round(cut * 100)}%)`, age: best.age, nps: 1 });
+    if (cands.length) {
+      const best = cands.reduce((b, c) => (val(c) > val(b) || (val(c) === val(b) && c.a > b.a)) ? c : b);
+      const n = npsNormalAge(by), cut = 1 - npsClaimFactor(by, best.a);
+      // 지금 설정대로 받을 때와 누적 수령액이 같아지는 나이 (세금·할인 없이, 물가연동이라 실질 기준)
+      //   fE·(t − a) = fB·(t − b)  →  t = (fB·b − fE·a) / (fB − fE)
+      const fE = npsClaimFactor(by, best.a), fB = npsClaimFactor(by, baseAge);
+      const breakeven = fB > fE ? (fB * baseAge - fE * best.a) / (fB - fE) : null;
+      nps = { claimAge: best.a, cut, normal: n, baseAge, breakeven, cands };
+      rows.push({ label: `🏛️ 국민연금을 만 ${best.a}세부터 조기수령했다면 (평생 −${Math.round(cut * 100)}%)`, age: best.age, nps: 1 });
+    } else rows.push({ label: "🏛️ 국민연금 조기수령", age: now, status: "na", note: "계산에 실패해 표시하지 않습니다" });
   } else {
     rows.push(early.why === "already" ? skip("🏛️ 국민연금 조기수령", "already", "이미 가장 이른 나이로 반영됨")
       : early.why === "working" ? skip("🏛️ 국민연금 조기수령", "na", "은퇴 전이라 소득 때문에 지급이 정지되어 제외")
       : skip("🏛️ 국민연금 조기수령", "na", "국민연금 금액을 넣지 않았습니다"));
   }
   state.cfg = base;
-  return { now, rows, nps, none: rows.filter(r => !r.status).every(r => r.age != null && r.age - (now || 0) < 2) };
+  return { now, rows, nps, none: rows.filter(r => !r.status && !r.err).every(r => r.age != null && r.age - (now || 0) < 2) };
 }
 
 /* 안전 인출액 역산 — 목표 나이까지 버티는 최대 생활비를 이분탐색으로 찾는다. */
@@ -4788,11 +4792,12 @@ function renderEnding(box) {
                여러 개면 그중 가장 실행하기 쉬운 것부터 손보세요.</p>`;
         const npsNote = d.nps ? `<p class="hint" style="margin:8px 0 0">🏛️ 조기수령은 <strong>평생 감액</strong>입니다.
              만 ${d.nps.claimAge}세에 받으면 정상(만 ${d.nps.normal}세) 대비 −${Math.round(d.nps.cut * 100)}%이고,
-             <strong>만 ${Math.round(d.nps.breakeven)}세를 넘겨 사시면</strong> 정상 수령보다 누적액이 적어집니다(세금·할인 제외).
+             <strong>만 ${Math.round(d.nps.breakeven)}세를 넘겨 사시면</strong> 지금 설정(만 ${d.nps.baseAge}세 수령)보다 누적액이 적어집니다(세금·할인 제외).
              자산이 바닥나는 시점을 미루는 대신 오래 사는 위험을 떠안는 선택입니다.
              가입기간 10년 이상이어야 하고, 소득 있는 업무에 종사하는 동안은 지급이 정지됩니다.</p>` : "";
         return head + d.rows.map(r => {
           if (r.status) return `<div class="gline"><span style="color:var(--muted)">${r.label}</span><span style="color:var(--muted)">${r.note}</span></div>`;
+          if (r.err) return `<div class="gline"><span style="color:var(--muted)">${r.label}</span><span style="color:var(--muted)">계산 실패</span></div>`;
           const fixed = r.age == null;
           const gain = !fixed && d.now != null ? r.age - d.now : 0;
           return `<div class="gline"><span>${r.label}</span><span class="${fixed ? "pos" : gain >= 5 ? "pos" : ""}">${
@@ -7307,7 +7312,7 @@ function runSelfTests() {
        `무감액 ${bustOf(naive61)} / 감액 ${nr61 && nr61.age}`);
     ok("61d. 손익분기 나이 = 정상 나이까지 기다린 누적액과 같아지는 나이",
        !!d61.nps && near(d61.nps.breakeven, (65 - (1 - d61.nps.cut) * d61.nps.claimAge) / d61.nps.cut, 1e-9)
-       && d61.nps.breakeven > 65 && d61.nps.breakeven < 85,
+       && d61.nps.baseAge === 65 && d61.nps.breakeven > 65 && d61.nps.breakeven < 85,
        "65 < 손익분기 < 85", d61.nps ? d61.nps.breakeven.toFixed(1) : "없음");
     // 은퇴 전 나이는 후보에서 뺀다 (소득이 있으면 지급 정지)
     const d61e = dg(c => { c.retireYear = 2032; });      // 1969생 → 63세 은퇴
@@ -7324,6 +7329,11 @@ function runSelfTests() {
        [d61f, d61g, d61h].map(d => (d.rows.find(r => /조기수령/.test(r.label)) || {}).status).join(" / "));
     // 정상 나이보다 늦게 받기로 한 설정에서도 환산이 이어진다 (기준 비율이 1이 아니다)
     const d61i = dg(c => { c.retireYear = 2029; c.npsAge = 68; c.npsAmount = 2160 * 1.216; });
+    // 손익분기는 '지금 설정'과 견준다 — 연기연금으로 잡은 설정이면 정상 나이가 아니라 그 나이가 기준이다
+    const bkT = d61i.nps ? d61i.nps.breakeven : NaN, bn = d61i.nps;
+    ok("61g2. 연기연금 설정의 손익분기 = 그 설정과 누적 수령액이 같아지는 나이",
+       !!bn && near(npsClaimFactor(1969, bn.claimAge) * (bkT - bn.claimAge), npsClaimFactor(1969, 68) * (bkT - 68), 1e-6) && bn.baseAge === 68 && bkT > 68,
+       "fE(t−a) = fB(t−68)", bn ? `t=${bkT.toFixed(2)}` : "없음");
     ok("61g. 연기연금으로 잡은 설정에서 당기면 정상(65세)값 기준으로 환산",
        !!d61i.nps && d61i.nps.cands.some(c => c.a === 60 && near(c.f, 0.7 / 1.216, 1e-9)),
        "60세 후보의 비율 0.7/1.216", d61i.nps ? d61i.nps.cands.map(c => `${c.a}:${c.f.toFixed(3)}`).join(" ") : "없음");
