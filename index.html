@@ -5609,7 +5609,7 @@ function migrateOpening(cfg, raw) {
 /** 예전 저장본의 단발성 ISA 전환 설정을 이전 목록으로 옮긴다 */
 function migrateTransfers(cfg) {
   if (!Array.isArray(cfg.transfers)) cfg.transfers = [];
-  if (cfg.isaMoveYear > 0 && !cfg.transfers.length) {
+  if (numOf(cfg.isaMoveYear) > 0 && !cfg.transfers.length) {
     cfg.transfers.push({ year: cfg.isaMoveYear, until: cfg.isaMoveYear, every: 1, from: "isa", to: "psFree", amt: cfg.isaMoveAmt || 0 });
   }
   delete cfg.isaMoveYear; delete cfg.isaMoveAmt;
@@ -5740,10 +5740,6 @@ function migrateState(raw) {
   // 3) 순차 버전 마이그레이션
   if (from < 2) cfg = migrateV1toV2(cfg);
   if (from < 3) cfg = migrateV2toV3(cfg, src);
-  // 예전 형식의 단발성 설정(목표 생활비·계좌별 고정 납입)을 규칙으로 옮긴다. 예전에는 load·가져오기가
-  // 검증이 끝난 뒤 원본 저장본으로 따로 불렀다 — 그러면 원본의 변환 불가 값이 그대로 닿고,
-  // 옮겨 만든 규칙은 아래 목록 검증을 거치지 않는다. 그래서 검증 앞, 복사본(src)으로 부른다.
-  migrateOpening(cfg, src);
   cfg.schemaVersion = SCHEMA_VERSION;
   cfg.npsReal = numOf(cfg.npsReal) === 0 ? 0 : 1;
 
@@ -5799,6 +5795,12 @@ function migrateState(raw) {
     cfg.reverse.homeValue = safeNum(cfg.reverse.homeValue, def.cfg.reverse.homeValue, 0, 1e9, "주택연금 주택가격");
     cfg.reverse.startAge  = Math.round(safeNum(cfg.reverse.startAge, def.cfg.reverse.startAge, 1, 130, "주택연금 개시나이"));
   }
+  // 예전 형식의 단발성 설정(목표 생활비·계좌별 고정 납입)을 규칙으로 옮긴다.
+  // 순서가 중요하다: 숫자 범위 검증 '뒤'(물가·연도가 보정된 값으로 환산해야 한다),
+  // 목록 검증 '앞'(옮겨 만든 규칙도 검증을 거친다). 원본 대신 복사본(src)을 넘긴다.
+  // 예전에는 load·가져오기가 모든 검증이 끝난 뒤 원본으로 따로 불렀다.
+  migrateOpening(cfg, src);
+
   // 배열 필드는 반드시 배열이어야 한다 (아니면 렌더러가 터진다)
   for (const k of ["transfers", "fillRules", "wdRules", "events", "spendRules"]) {
     if (!Array.isArray(cfg[k])) {
@@ -7051,7 +7053,8 @@ function runSelfTests() {
     })(raw56, []);
     // 예전(v1) 저장본 — 단발성 목표 생활비(planTarget)를 인출 규칙으로 옮기는 경로도 같이 본다
     const v1raw56 = JSON.parse(JSON.stringify(raw56));
-    Object.assign(v1raw56.cfg, { schemaVersion: 1, planTarget: { target: 3000, from: 2027, to: 2029, basis: "real" } });
+    Object.assign(v1raw56.cfg, { schemaVersion: 1, planTarget: { target: 3000, from: 2027, to: 2029, basis: "real" },
+                                 isaMoveYear: 2028, isaMoveAmt: 100 });
     delete v1raw56.cfg.wdRules; delete v1raw56.cfg.fillRules;
     const v1paths56 = [];
     (function walk(o, path) {
@@ -7060,6 +7063,7 @@ function runSelfTests() {
         if (o[k] && typeof o[k] === "object") walk(o[k], [...path, k]);
       }
     })(v1raw56.cfg.planTarget, ["cfg", "planTarget"]);
+    v1paths56.push(["cfg", "isaMoveYear"], ["cfg", "isaMoveAmt"]);
     const POISON = { toString: null, valueOf: null };
     const broke56 = [];
     const cfgSave56 = state.cfg, rowsSave56 = state.rows;
@@ -7105,6 +7109,21 @@ function runSelfTests() {
     ok("57. v1 저장본 목표 생활비 → 인출 규칙 (물가 반영·숫자 검증)",
        !!w57 && w57.amt === e57v && w57.to === 2060 && w57.growth === 2 && !("planTarget" in m57.cfg),
        `${e57v} · 2040~2060 · 2%`, e57 || JSON.stringify(w57));
+
+    /* --- 58) 범위 밖 값을 넣은 저장본 = 미리 보정한 값을 넣은 저장본 (옮겨 만든 규칙까지 같아야) ---
+       v1 목표 생활비·고정 납입을 규칙으로 옮기는 계산이 범위 검증보다 먼저 돌면
+       설정은 50%로 보정돼도 규칙은 100%로 환산된다. */
+    const v1base58 = { schemaVersion: 1, startYear: 2026, retireYear: 2040, endYear: 2080, inflation: 2,
+      planTarget: { target: 3000, from: 2027, to: 2029, basis: "real" }, fillAmts: { isa: 500 }, isaMoveYear: 2030 };
+    const pairs58 = [[{ inflation: 100 }, { inflation: 50 }], [{ inflation: -40 }, { inflation: -10 }],
+                     [{ startYear: 1800 }, { startYear: 1900 }], [{ retireYear: 2300 }, { retireYear: 2200 }]];
+    const diff58 = pairs58.filter(([bad, good]) => {
+      const a = migrateState({ cfg: { ...v1base58, ...bad } }).cfg, b = migrateState({ cfg: { ...v1base58, ...good } }).cfg;
+      return JSON.stringify(a) !== JSON.stringify(b);
+    }).map(([bad]) => Object.keys(bad)[0] + "=" + Object.values(bad)[0]);
+    const r58 = migrateState({ cfg: { ...v1base58, startYear: 2026, inflation: 100 } }).cfg.wdRules[0] || {};
+    ok("58. 범위 밖 저장본 = 보정한 저장본 (v1 규칙 환산 포함)", diff58.length === 0 && r58.amt === 4500 && r58.growth === 50,
+       "4쌍 모두 같음 · 물가 100→50%: 4500·50%", `${diff58.join(", ") || "같음"} · ${r58.amt}·${r58.growth}%`);
 
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
