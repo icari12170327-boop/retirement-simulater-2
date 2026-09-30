@@ -5591,8 +5591,10 @@ function migrateOpening(cfg, raw) {
   if (!Array.isArray(raw.wdRules) && pt && numOf(pt.target) > 0) {
     const infl = clamp0(cfg.inflation), tgt = numOf(pt.target);
     const ptFrom = Number.isFinite(numOf(pt.from)) ? numOf(pt.from) : cfg.startYear;
+    if (ptFrom !== numOf(pt.from)) MIGRATION_WARNINGS.push(`목표 생활비 시작연도: 숫자가 아니어서 ${ptFrom} 으로 바꿨습니다`);
     cfg.wdRules = [{
-      from: pt.from, to: pt.to, unit: "year",   // 숫자 검증은 뒤의 sanitizeList 가 한다
+      // 환산에 쓴 시작연도를 그대로 저장한다 — 환산 기준과 인출 시작이 어긋나면 안 된다
+      from: ptFrom, to: pt.to, unit: "year",
       amt: Math.round(pt.basis === "real" ? tgt * Math.pow(1 + infl / 100, ptFrom - cfg.startYear) : tgt),
       growth: pt.basis === "real" ? infl : 0, target: "plan",
     }];
@@ -5610,7 +5612,8 @@ function migrateOpening(cfg, raw) {
 function migrateTransfers(cfg) {
   if (!Array.isArray(cfg.transfers)) cfg.transfers = [];
   if (numOf(cfg.isaMoveYear) > 0 && !cfg.transfers.length) {
-    cfg.transfers.push({ year: cfg.isaMoveYear, until: cfg.isaMoveYear, every: 1, from: "isa", to: "psFree", amt: cfg.isaMoveAmt || 0 });
+    const y = numOf(cfg.isaMoveYear), amt = numOf(cfg.isaMoveAmt);   // 판정한 값 그대로 규칙에 쓴다
+    cfg.transfers.push({ year: y, until: y, every: 1, from: "isa", to: "psFree", amt: Number.isFinite(amt) ? amt : 0 });
   }
   delete cfg.isaMoveYear; delete cfg.isaMoveAmt;
 }
@@ -5635,8 +5638,11 @@ const MIGRATION_WARNINGS = [];
 
 /** 숫자 필드 안전 복구 — NaN·Infinity·범위 밖이면 기본값 */
 /* 저장본 값 변환 — 숫자와 문자열만 변환한다. 그 밖의 값(객체·배열)은 변환하는 순간
-   {"toString":null} 처럼 예외를 던질 수 있어서, 한 칸 때문에 저장본 전체가 거부된다 */
-const numOf = v => typeof v === "number" ? v : typeof v === "string" ? parseFloat(v) : NaN;
+   {"toString":null} 처럼 예외를 던질 수 있어서, 한 칸 때문에 저장본 전체가 거부된다.
+   불러오기의 모든 숫자 칸은 이 함수 하나로 읽는다 — 칸마다 다른 파서를 쓰면 "2030년" 이
+   규칙을 만들 때는 2030, 규칙을 검증할 때는 숫자 아님(→ 기본값)으로 읽혀 연도가 바뀐다.
+   화면 입력(num)과 같이 천 단위 쉼표는 지우고 앞쪽 숫자를 읽는다 ("1,000만원" → 1000). */
+const numOf = v => typeof v === "number" ? v : typeof v === "string" ? parseFloat(v.replace(/,/g, "")) : NaN;
 const strOf = (v, fb = "") => typeof v === "string" ? v
   : (typeof v === "number" || typeof v === "boolean") ? String(v) : fb;
 
@@ -5843,7 +5849,7 @@ function sanitizeList(kind, list, cfg) {
     for (const f of LIST_NUM_KEYS) {
       if (kind === "transfers" && (f === "from" || f === "to")) continue;   // 이전의 from/to 는 계좌 id
       if (!(f in o)) continue;
-      const n = typeof o[f] === "number" ? o[f] : typeof o[f] === "string" ? Number(o[f]) : NaN;
+      const n = numOf(o[f]);
       if (Number.isFinite(n)) { o[f] = n; continue; }
       const fb = f === "to" ? (Number.isFinite(o.from) ? o.from : cfg.startYear)
                : f === "until" ? (Number.isFinite(o.year) ? o.year : cfg.startYear)
@@ -7124,6 +7130,28 @@ function runSelfTests() {
     const r58 = migrateState({ cfg: { ...v1base58, startYear: 2026, inflation: 100 } }).cfg.wdRules[0] || {};
     ok("58. 범위 밖 저장본 = 보정한 저장본 (v1 규칙 환산 포함)", diff58.length === 0 && r58.amt === 4500 && r58.growth === 50,
        "4쌍 모두 같음 · 물가 100→50%: 4500·50%", `${diff58.join(", ") || "같음"} · ${r58.amt}·${r58.growth}%`);
+
+    /* --- 59) 글자가 섞인 숫자는 어느 단계에서 읽어도 같은 값 (연도가 바뀌지 않는다) ---
+       규칙을 만들 때와 규칙을 검증할 때 파서가 다르면 "2030년" 이 2030 으로 판정된 뒤
+       검증에서 숫자 아님 → 2026 으로 되돌아간다. */
+    const base59 = { schemaVersion: 1, startYear: 2026, retireYear: 2040, endYear: 2080, inflation: 2 };
+    const pairs59 = [
+      [{ isaMoveYear: "2030년", isaMoveAmt: "1,000" }, { isaMoveYear: 2030, isaMoveAmt: 1000 }],
+      [{ planTarget: { target: "3,000", from: "2040년", to: "2060년", basis: "real" } },
+       { planTarget: { target: 3000, from: 2040, to: 2060, basis: "real" } }],
+      [{ gameSpend: "4,800만원", events: [{ name: "e", kind: "expense", amt: "1,500", year: "2031년" }] },
+       { gameSpend: 4800, events: [{ name: "e", kind: "expense", amt: 1500, year: 2031 }] }],
+    ];
+    const diff59 = pairs59.filter(([str, n]) =>
+      JSON.stringify(migrateState({ cfg: { ...base59, ...str } }).cfg) !== JSON.stringify(migrateState({ cfg: { ...base59, ...n } }).cfg))
+      .map(([str]) => Object.keys(str)[0]);
+    const c59 = migrateState({ cfg: { ...base59, ...pairs59[0][0], ...pairs59[1][0] } }).cfg;
+    const t59 = c59.transfers[0] || {}, w59 = c59.wdRules[0] || {};
+    ok("59. \"2030년\"·\"1,000\" = 2030·1000 (v1 이전·목표 생활비·일정)",
+       diff59.length === 0 && t59.year === 2030 && t59.amt === 1000 && w59.from === 2040 && w59.to === 2060
+       && w59.amt === Math.round(3000 * Math.pow(1.02, 14)),
+       "모두 같음 · 이전 2030 · 인출 2040~2060 3958",
+       `${diff59.join(", ") || "같음"} · 이전 ${t59.year} · 인출 ${w59.from}~${w59.to} ${w59.amt}`);
 
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
