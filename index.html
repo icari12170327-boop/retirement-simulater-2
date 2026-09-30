@@ -894,7 +894,7 @@
         <div class="fgrid">
           <label class="f"><span class="t">퇴직소득세 실효세율 %</span><input type="number" step="0.1" id="cfg_sevRate"></label>
           <label class="f"><span class="t">연금소득 1,500만 초과 시 %</span><input type="number" step="0.1" id="cfg_compRate"></label>
-          <label class="f"><span class="t">국민연금 연 수령액</span><input type="number" step="10" id="cfg_npsAmount"></label>
+          <label class="f"><span class="t">국민연금 연 수령액 (시작연도 가치 · 물가연동)</span><input type="number" step="10" id="cfg_npsAmount"></label>
           <label class="f"><span class="t">국민연금 개시 나이</span><input type="number" id="cfg_npsAge"></label>
           <label class="f"><span class="t">국민연금 실효세율 %</span><input type="number" step="0.1" id="cfg_npsRate"></label>
         </div>
@@ -1447,16 +1447,20 @@ function severanceEffRate(pay, years) {
 /** 연령별 연금소득세율(%) */
 function pensionRate(age) { return age >= 80 ? 3.3 : age >= 70 ? 4.4 : 5.5; }
 
+/** 국민연금 세전 — 세후와 짝을 이뤄야 gross/net 기준이 흔들리지 않는다.
+    설정 금액은 '시작연도 가치'이고 매년 물가만큼 오른다 (국민연금법상 물가연동).
+    생활비는 물가로 오르는데 국민연금만 명목 고정이면 후반 현금흐름이 크게 과소계상된다.
+    국민연금 공단 예상연금액도 현재가치로 안내되므로 그 숫자를 그대로 넣으면 된다. */
+function npsGrossOf(cfg, age) {
+  if (age < cfg.npsAge) return 0;
+  const years = Math.max(0, cfg.birthYear + age - cfg.startYear);
+  return clamp0(cfg.npsAmount) * Math.pow(1 + clamp0(cfg.inflation) / 100, years);
+}
 /** 설정에 적어 둔 국민연금의 그해 세후 수령액.
     applyWithdrawals 가 이 금액을 실수령에 더해 주므로, 현금 계산과 인출 목표는
     반드시 같은 기준으로 이 값을 다뤄야 한다 — 한쪽만 세면 딱 이만큼 어긋난다. */
 function npsNetOf(cfg, age) {
-  const amt = age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
-  return amt * (1 - clamp0(cfg.npsRate) / 100);
-}
-/** 국민연금 세전 — 세후와 짝을 이뤄야 gross/net 기준이 흔들리지 않는다 */
-function npsGrossOf(cfg, age) {
-  return age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
+  return npsGrossOf(cfg, age) * (1 - clamp0(cfg.npsRate) / 100);
 }
 
 /* ==================================================================
@@ -1566,6 +1570,11 @@ function pensionCompTax(total) {
 }
 
 const clamp0 = v => (isFinite(v) && v > 0 ? v : 0);
+/** 사용자가 적은 문자열(일정·생활비 구간 이름)을 HTML에 넣기 전에 반드시 거친다.
+    JSON 저장본을 불러오는 기능이 있어, 남이 준 파일의 이름에 태그가 들어 있으면
+    innerHTML 로 그대로 실행된다 (같은 origin 의 localStorage 재무 데이터에 접근 가능). */
+const escHtml = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const num = v => { const n = parseFloat(String(v).replace(/,/g, "")); return isFinite(n) ? n : 0; };
 
 /* ========================================================================
@@ -2398,12 +2407,6 @@ function applyWithdrawals(st, draws, ctx) {
     }
 
     // --- 연금계좌: 법정 인출순서 free → sev → (ded+gain)
-    // 1만원 미만 초과는 반올림 잔여물이므로 한도 내로 본다
-    const excess = amt - ctx.pLimit[a.id];
-    const overRatio = ctx.eligible[a.id]
-      ? (excess > 1 ? Math.min(1, excess / amt) : 0)
-      : 1; // 요건 미달이면 전액 연금외수령
-
     const fFree = Math.min(b.free, amt); b.free -= fFree;
     const fSev = Math.min(b.sev, amt - fFree); b.sev -= fSev;
     let rest = amt - fFree - fSev;
@@ -2411,22 +2414,33 @@ function applyWithdrawals(st, draws, ctx) {
     const fTax = Math.min(pool, rest);
     if (pool > 0 && fTax > 0) { const k = fTax / pool; b.ded -= b.ded * k; b.gain -= b.gain * k; }
 
-    taxFree += fFree;
-    sevNormal += fSev * (1 - overRatio);
-    sevOver += fSev * overRatio;
-    taxablePension += fTax * (1 - overRatio);
-    otherIncome += fTax * overRatio;
+    // 연금수령한도도 같은 순서로 채운다 — 먼저 빠진 돈이 한도를 먼저 쓰고,
+    // 한도를 넘는 '꼬리'가 연금외수령이 된다. 예전에는 초과 비율을 모든 재원에
+    // 똑같이 곱해, 비과세 원금이 앞에 많은 계좌일수록 한도 초과세가 과소계상됐다.
+    // 요건 미달이면 한도가 0 이라 전액 연금외수령. 1만원 미만 초과는 반올림 잔여물로 본다.
+    let room = !ctx.eligible[a.id] ? 0
+      : (amt - ctx.pLimit[a.id] <= 1 ? Infinity : Math.max(0, ctx.pLimit[a.id]));
+    const take = v => { const t = Math.min(v, room); room -= t; return t; };
+    const inFree = take(fFree), inSev = take(fSev), inTax = take(fTax);
+    const over = amt - inFree - inSev - inTax;
 
-    d.parts = { free: fFree, sev: fSev, taxable: fTax, overRatio };
+    taxFree += fFree;                 // 비과세 원금은 한도를 넘어도 세금이 없다
+    sevNormal += inSev;
+    sevOver += fSev - inSev;
+    taxablePension += inTax;
+    otherIncome += fTax - inTax;
+
+    d.parts = { free: fFree, sev: fSev, taxable: fTax, sevIn: inSev, taxIn: inTax,
+                overRatio: amt > 0 ? over / amt : 0 };
     if (!ctx.eligible[a.id]) d.flags.push("연금수령 요건 미충족(만 55세·가입 5년) → 연금외수령");
-    else if (overRatio > 0) d.flags.push(`연금수령한도 ${Math.round(ctx.pLimit[a.id]).toLocaleString()}만원 초과분은 연금외수령`);
+    else if (over > 0.5) d.flags.push(`연금수령한도 ${Math.round(ctx.pLimit[a.id]).toLocaleString()}만원 초과분은 연금외수령`);
   }
 
   // --- 2단계: 연간 합산 기준으로 세율 결정
   // 문턱을 넘으면 '무조건 16.5%'가 아니다 — 종합과세와 분리과세 중 유리한 쪽을 고를 수 있다.
   // 국민연금 말고 다른 소득이 적은 은퇴자는 대개 종합과세가 싸다.
   const over1500 = taxablePension > (clamp0(cfg.pensionCap) || Infinity);
-  const npsNow = ctx.age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
+  const npsNow = npsGrossOf(cfg, ctx.age);
   let pRate = pensionRate(ctx.age) / 100, compPicked = false, sepTax = 0, compTax = 0;
   if (over1500) {
     const other = npsNow + clamp0(ctx.otherComp);      // 같은 해 종합과세에 합산될 다른 소득
@@ -2441,11 +2455,15 @@ function applyWithdrawals(st, draws, ctx) {
   let pensionTax = 0, sevTax = 0, etcTax = 0;
   for (const id of PENSION) {
     const d = det[id]; if (!d || !d.parts) continue;
-    const p = d.parts, o = p.overRatio;
-    const discount = (ctx.pYear[id] > 10) ? .6 : .7;
-    const t1 = p.taxable * (1 - o) * pRate;
-    const t2 = p.taxable * o * .165;
-    const t3 = p.sev * (1 - o) * sevRate * discount + p.sev * o * sevRate;
+    const p = d.parts;
+    // 이연퇴직소득 감면(70% → 11년차부터 60%)은 '실제로 연금을 받은' 연차로 판정한다.
+    // 연금수령한도에 쓰는 연금수령연차(수령 가능해진 해부터 셈)와는 기준이 다르다.
+    // 실제 수령연차를 모르는 호출자(게임 재구성 등)는 한도용 연차로 대신한다.
+    const yrs = (ctx.pYearActual || ctx.pYear)[id];
+    const discount = yrs > 10 ? .6 : .7;
+    const t1 = p.taxIn * pRate;
+    const t2 = (p.taxable - p.taxIn) * .165;
+    const t3 = p.sevIn * sevRate * discount + (p.sev - p.sevIn) * sevRate;
     d.tax = t1 + t2 + t3;
     pensionTax += t1; etcTax += t2; sevTax += t3;
   }
@@ -2459,7 +2477,7 @@ function applyWithdrawals(st, draws, ctx) {
   }
   for (const a of ACC) if (a.kind === "taxable" && det[a.id]) det[a.id].tax = capTax;
 
-  const nps = ctx.age >= cfg.npsAge ? clamp0(cfg.npsAmount) : 0;
+  const nps = npsGrossOf(cfg, ctx.age);
   const npsTax = nps * cfg.npsRate / 100;
 
   /* [국민연금 이중 집계 수정]
@@ -2735,7 +2753,8 @@ function simulate(opts = {}) {
   const years = [];
   const y0 = cfg.startYear, y1 = Math.max(cfg.startYear, cfg.endYear);
   const age55 = cfg.birthYear + 55;
-  const pYearCount = Object.fromEntries(AID.map(id => [id, 0]));
+  const pYearCount = Object.fromEntries(AID.map(id => [id, 0]));   // 한도용 연금수령연차
+  const pActualCount = Object.fromEntries(AID.map(id => [id, 0])); // 실제로 연금을 받은 해의 수
   const wdStarted = new Set(); // 연금수령을 개시한 계좌
   const planDraws = {};
   const warnings = [];
@@ -2810,7 +2829,20 @@ function simulate(opts = {}) {
           rec.acc[a.id] = { growth: base * rate / 100 };
         } else {
           const g = base * rate / 100;
-          b.gain += g;
+          if (g >= 0) b.gain += g;
+          else {
+            // 손실을 운용수익 버킷에 음수로 쌓으면, 계좌를 다 빼도 원금 버킷이 남고
+            // 다음 납입이 그 음수와 상계되어 재원이 뒤틀린다. 손실은 인출순서의
+            // 역순(가장 늦게 빠질 재원)부터 깎는다 — 계좌가 비면 꼬리 재원이
+            // 끝내 인출되지 못하는 것과 같은 결과다.
+            let loss = -g;
+            const order = a.kind === "isa" ? ["gain", "free"] : ["gain", "ded", "sev", "free"];
+            for (const k of order) {
+              const cut = Math.min(Math.max(0, b[k] || 0), loss);
+              b[k] -= cut; loss -= cut;
+              if (loss <= 0) break;
+            }
+          }
           rec.acc[a.id] = { growth: g };
         }
       }
@@ -2842,19 +2874,35 @@ function simulate(opts = {}) {
 
       if (from.kind === "isa") {
         // ISA 만기자금 전환 — 순이익은 비과세 한도 차감 후 9.9%,
-        // 전환금액의 10%(최대 300만)를 추가 세액공제받고 그만큼만 과세 원금이 된다
+        // 전환금액의 10%(최대 300만)를 추가 세액공제받고 그만큼만 과세 원금이 된다.
+        // 가입 3년 전 해지는 만기가 아니므로 이익에 15.4%, 추가 세액공제도 없다.
+        // 3년은 직접 인출과 똑같이 '이 ISA 계약의 가입연도'부터 센다.
         const gainShare = src.gain * k, principalShare = move - gainShare;
-        const cap = cfg.isaType === "seomin" ? 400 : 200;
-        const exempt = Math.min(gainShare, Math.max(0, cap - st.isaUsed));
-        st.isaUsed += exempt;
-        const tax = (gainShare - exempt) * .099;
+        const isaOpen = openYear[t.from];
+        const matured = isaOpen ? y - isaOpen >= 3 : true;
+        let tax, extraDed;
+        if (matured) {
+          const cap = cfg.isaType === "seomin" ? 400 : 200;
+          const exempt = Math.min(gainShare, Math.max(0, cap - st.isaUsed));
+          st.isaUsed += exempt;
+          tax = (gainShare - exempt) * .099;
+          extraDed = Math.min(move * .1, 300);
+        } else {
+          tax = gainShare * .154;
+          extraDed = 0;
+          warnings.push(`${y}년 · ${label} — ISA 가입 ${y - isaOpen}년차 전환이라 만기 혜택이 없습니다 `
+            + `(순이익 15.4% · 추가 세액공제 없음)`);
+        }
+        xferTax += tax;              // 정산세도 그해 세금 합계에 잡는다 (예전에는 잔액에서만 빠졌다)
         src.gain -= gainShare; src.free -= principalShare;
-        const extraDed = Math.min(move * .1, 300);
         dst.ded += extraDed; dst.free += move - extraDed - tax;
         extraCredit += extraDed * (cfg.salaryTier === "low" ? .165 : .132);
         if (!openYear[t.to]) openYear[t.to] = y;
-        if (y < cfg.startYear + 3) warnings.push(`${y}년 · ${label} — ISA 의무가입 3년 전 전환이라 비과세 혜택을 받을 수 없습니다`);
-        (rec.transfers ||= []).push(`${label} ${fmt(move)}만원 · 추가 세액공제 대상 ${fmt(extraDed)}만원`);
+        // 전액을 옮기면 그 ISA 계약은 끝난다. 다음 납입은 새 계약이라
+        // 비과세 한도와 3년 요건이 처음부터 다시 시작된다 (풍차돌리기).
+        if (bTotal(src) < 0.5) { delete openYear[t.from]; st.isaUsed = 0; }
+        (rec.transfers ||= []).push(`${label} ${fmt(move)}만원 · `
+          + (matured ? `추가 세액공제 대상 ${fmt(extraDed)}만원` : `만기 전 해지 · 정산세 ${fmt(tax)}만원`));
       } else if (from.kind === "taxable") {
         // 일반계좌 → 연금계좌는 '이체'가 아니라 매도 후 납입이다.
         // 평가익에 양도세를 물고, 세후 금액만 납입한도 안에서 들어간다.
@@ -2917,16 +2965,21 @@ function simulate(opts = {}) {
     rec.credit = credit;
 
     // ---- 연금수령연차 · 연금수령한도 (이전이 끝난 잔액 기준)
-    const pLimit = {}, pYear = {};
+    // 한도용 연금수령연차는 실제로 받기 시작한 해가 아니라 '최초로 연금수령할 수 있는 해'가
+    // 1년차다 (소득세법 시행령 제40조의3). 그래서 개시를 늦추면 그동안에도 연차가 흘러
+    // 한도가 커진다 — 요건 충족 연도부터 세는 것이 의도된 동작이다.
+    // 반면 퇴직소득 감면(70→60%)은 실제 수령연차로 판정하므로 따로 센다(pYearActual).
+    const pLimit = {}, pYear = {}, pYearActual = {};
     for (const id of PENSION) {
       if (eligible[id]) pYearCount[id] = pYearCount[id] + 1;
       pYear[id] = pYearCount[id];
+      pYearActual[id] = pActualCount[id] + 1;     // 올해 받는다면 몇 번째 해인가
       const n = Math.min(pYearCount[id], 10);
       pLimit[id] = pYearCount[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - n) * 1.2;
     }
     // 종합과세는 그해 다른 소득까지 합산해 세율이 정해진다 — 일정에 적은 소득을 같이 넘긴다
     const otherComp = eventsOf(cfg, y).reduce((t, e) => t + (e.kind === "salary" ? clamp0(e.amt) : 0), 0);
-    const ctx = { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft, otherComp, openYear };
+    const ctx = { year: y, age, eligible, pLimit, pYear, pYearActual, cfg, capDeductLeft, otherComp, openYear };
 
     // ---- 인출
     let draws;
@@ -2952,6 +3005,9 @@ function simulate(opts = {}) {
     }
 
     const res = applyWithdrawals(st, draws, ctx);
+    for (const id of PENSION) if (eligible[id] && res.det[id].gross > 0.5) pActualCount[id]++;
+    // ISA 를 인출로 비우면 그 계약도 끝난다 — 이전과 마찬가지로 다음 납입은 새 계약이다
+    if (res.det.isa && res.det.isa.gross > 0.5 && bTotal(st.bal.isa) < 0.5) { delete openYear.isa; st.isaUsed = 0; }
 
     // ---- 기록
     let total = 0;
@@ -3042,7 +3098,7 @@ function simulate(opts = {}) {
   const dupHits = dupExpenses(cfg);
   if (dupHits.length) {
     const tot = Math.round(dupHits.reduce((a, x) => a + x.per, 0));
-    warnings.push(`지출 일정에 생활비와 겹칠 수 있는 항목 ${dupHits.length}건 (${dupHits.map(x => x.name).join(", ")}) — `
+    warnings.push(`지출 일정에 생활비와 겹칠 수 있는 항목 ${dupHits.length}건 (${dupHits.map(x => escHtml(x.name)).join(", ")}) — `
       + `연 환산 약 ${fmt(tot)}만원입니다. 「목표 생활비」에 이미 포함시켰다면 <strong>같은 돈을 두 번 빼고 있습니다.</strong> `
       + `둘 중 한쪽만 남기세요.`);
   }
@@ -3051,7 +3107,7 @@ function simulate(opts = {}) {
   if (clamp0(cfg.npsAmount) > 0) {
     const evt = (cfg.events || []).filter(e => e && e.kind === "salary" && /국민연금|노령연금/.test(e.name || ""));
     if (evt.length) warnings.push(`국민연금을 <strong>설정(연 ${fmt(clamp0(cfg.npsAmount))}만원)</strong>과 `
-      + `<strong>일정(${evt.map(e => e.name).join(", ")})</strong> 양쪽에 적어 두셨습니다 — <strong>두 번 들어옵니다.</strong> 한쪽만 남기세요.`);
+      + `<strong>일정(${evt.map(e => escHtml(e.name)).join(", ")})</strong> 양쪽에 적어 두셨습니다 — <strong>두 번 들어옵니다.</strong> 한쪽만 남기세요.`);
   }
   if ((cfg.health || {}).on && dupHits.some(x => x.label === "건강보험료")) {
     warnings.push(`건강보험료를 <strong>자동 계산으로 켜 둔 채</strong> 지출 일정에도 건강보험료가 있습니다 — 두 번 빠지고 있습니다. 지출 일정 쪽을 지우세요.`);
@@ -3666,7 +3722,7 @@ function renderStart(box) {
           const pct = clamp0(cfg.gameSpend) ? Math.round(tot / cfg.gameSpend * 100) : 0;
           return `<p class="hint" style="margin:8px 0 0;color:var(--critical)">
             ⚠️ 생활비와 <strong>겹칠 수 있는 지출</strong> ${d.length}건 · 연 환산 ${fmt(tot)}만원${pct ? ` (생활비의 ${pct}%)` : ""} —
-            ${d.map(x => x.name).join(", ")}.
+            ${d.map(x => escHtml(x.name)).join(", ")}.
             목표 생활비 ${fmt(cfg.gameSpend)}만원에 이미 넣어 두셨다면 <strong>같은 돈이 두 번 빠집니다.</strong>
             둘 중 한쪽만 남기세요.</p>`;
         })()}
@@ -3770,7 +3826,7 @@ function renderGame() {
     ? c.list.map(e => {
         const k = EVENT_KINDS[e.kind] || EVENT_KINDS.expense;
         const tags = [e.real ? "물가연동" : "", e.shift ? `예정보다 ${e.shift > 0 ? e.shift + "년 늦게" : -e.shift + "년 일찍"}` : ""].filter(Boolean);
-        return `<div class="evt"><span class="nm">${k.sign < 0 ? "🔻" : "🔺"} ${e.name || k.name}` +
+        return `<div class="evt"><span class="nm">${k.sign < 0 ? "🔻" : "🔺"} ${escHtml(e.name || k.name)}` +
           `${tags.length ? ` <span style="font-size:10.5px;color:var(--muted)">${tags.join(" · ")}</span>` : ""}</span>
           <span class="${k.sign < 0 ? "neg" : "pos"}">${k.sign < 0 ? "−" : "+"}${fmt(clamp0(e.amt))}</span></div>`;
       }).join("")
@@ -3791,7 +3847,7 @@ function renderGame() {
         ${c.rev > 0 ? `<div class="gline"><span>🏡 주택연금 <span style="font-size:10.5px;color:var(--muted)">명목 고정</span></span><span class="pos">+${fmt(c.rev)}</span></div>` : ""}
         ${c.nps > 0 ? `<div class="gline"><span>🏛️ 국민연금 <span style="font-size:10.5px;color:var(--muted)">설정에 적은 값 · 세후</span></span><span class="pos">+${fmt(c.nps)}</span></div>` : ""}
         ${c.lump > 0 ? `<div class="gline"><span>목돈 유입</span><span class="pos">+${fmt(c.lump)}</span></div>` : ""}
-        <div class="gline"><span>생활비 <span style="font-size:10.5px;color:var(--muted)">${c.livingName || (y > cfg.startYear ? `물가연동 · ${cfg.startYear}년 ${fmt(cfg.gameSpend)} 기준` : "물가연동")}</span></span><span class="neg">−${fmt(c.living)}</span></div>
+        <div class="gline"><span>생활비 <span style="font-size:10.5px;color:var(--muted)">${c.livingName ? escHtml(c.livingName) : (y > cfg.startYear ? `물가연동 · ${cfg.startYear}년 ${fmt(cfg.gameSpend)} 기준` : "물가연동")}</span></span><span class="neg">−${fmt(c.living)}</span></div>
         ${c.spend - clamp0(c.health) > 0.5 ? `<div class="gline"><span>예정 지출</span><span class="neg">−${fmt(c.spend - clamp0(c.health))}</span></div>` : ""}
         ${c.health > 0.5 ? `<div class="gline"><span>🏥 건강보험료 <span style="font-size:10.5px;color:var(--muted)">${y < cfg.retireYear ? "직장가입" : "지역가입"}</span></span><span class="neg">−${fmt(c.health)}</span></div>` : ""}
         ${loanPay > 0 ? `<div class="gline"><span>🏠 주담대 상환 <span style="font-size:10.5px;color:var(--muted)">금리 ${c.loan.rate.toFixed(2)}%</span></span><span class="neg">−${fmt(loanPay)}</span></div>` : ""}
@@ -5125,7 +5181,7 @@ function renderSpendRules() {
   const list = state.cfg.spendRules || [];
   box.innerHTML = list.length ? list.map((r, i) => `
     <div class="xrow">
-      <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-s="name" data-i="${i}" value="${(r.name || "").replace(/"/g, "&quot;")}" placeholder="예: 자녀 독립 후"></label>
+      <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-s="name" data-i="${i}" value="${escHtml(r.name)}" placeholder="예: 자녀 독립 후"></label>
       <label class="f"><span class="t">시작</span><input type="number" data-s="from" data-i="${i}" value="${r.from}"></label>
       <label class="f"><span class="t">종료</span><input type="number" data-s="to" data-i="${i}" value="${r.to}"></label>
       <label class="f"><span class="t">단위</span>
@@ -5160,7 +5216,7 @@ function renderSpendPreview() {
   const cells = [];
   for (let y = cfg.startYear; y <= cfg.endYear; y += 5) {
     const lv = livingOf(cfg, y);
-    cells.push(`<div class="gline"><span>${y} <span style="color:var(--muted)">만 ${y - cfg.birthYear}세${lv.name ? " · " + lv.name : ""}</span></span><span>${fmt(lv.amt)}</span></div>`);
+    cells.push(`<div class="gline"><span>${y} <span style="color:var(--muted)">만 ${y - cfg.birthYear}세${lv.name ? " · " + escHtml(lv.name) : ""}</span></span><span>${fmt(lv.amt)}</span></div>`);
   }
   el.innerHTML = `<div class="gcard" style="margin-top:10px"><h4>생활비 미리보기 (5년 간격 · 명목)</h4>${cells.join("")}</div>`;
 }
@@ -5187,7 +5243,7 @@ function renderEvents() {
   if (!list.length) { box.innerHTML = `<p class="hint" style="margin:0">등록된 일정이 없습니다.</p>`; return; }
   box.innerHTML = list.map((e, i) => `
     <div class="xrow">
-      <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-e="name" data-i="${i}" value="${(e.name || "").replace(/"/g, "&quot;")}"></label>
+      <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-e="name" data-i="${i}" value="${escHtml(e.name)}"></label>
       <label class="f"><span class="t">종류</span>
         <select data-e="kind" data-i="${i}">
           ${Object.entries(EVENT_KINDS).map(([k, v]) => `<option value="${k}"${e.kind === k ? " selected" : ""}>${v.name}</option>`).join("")}
@@ -6077,9 +6133,10 @@ function runSelfTests() {
     const resT = applyWithdrawals(stT, Object.fromEntries(AID.map(id => [id, 0])), ctxT);
     ok("3b. net 에 국민연금 불포함", near(resT.net, 0, 0.01),
        "인출 0 이면 net = 0", resT.net.toFixed(2));
-    ok("3c. npsTax 이중차감 없음",
-       near(resT.npsNet, 1200 * (1 - state.cfg.npsRate / 100), 0.01),
-       (1200 * (1 - state.cfg.npsRate / 100)).toFixed(1), resT.npsNet.toFixed(1));
+    // 국민연금은 물가연동이라 2050년(만 65세) 금액은 시작연도 1,200만보다 크다 — 세금은 한 번만 빠져야 한다
+    const nps3c = npsGrossOf(state.cfg, 65) * (1 - state.cfg.npsRate / 100);
+    ok("3c. npsTax 이중차감 없음", near(resT.npsNet, nps3c, 0.01),
+       nps3c.toFixed(1), resT.npsNet.toFixed(1));
 
     /* --- 4) 소득 0, 인출 0 이면 생활비 전액 미달 --- */
     const cfB = buildCashflow({ earnedIncome: 0, publicPensionNet: 0,
@@ -6496,6 +6553,122 @@ function runSelfTests() {
     }
     ok("34. 위기 연도 가중합 일치", crYears > 0 && crGap < 1e-9,
        `위기 ${crYears}개 연도에서 일치`, `최대 오차 ${crGap.toExponential(1)}%p`);
+
+    /* ==================================================================
+       외부 코드 리뷰(2026.9)에서 나온 회귀 테스트
+       ================================================================== */
+    const zeroDraws = () => Object.fromEntries(AID.map(id => [id, 0]));
+    const blankSt = () => ({ bal: Object.fromEntries(AID.map(id => [id, emptyBuckets()])), isaUsed: 0 });
+    const noTaxable = () => { state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; };
+
+    /* --- 35) 연금수령한도 초과분은 인출순서의 '꼬리'에 귀속된다 ---
+       비과세 100 + 과세 50 계좌에서 150 인출, 한도 100 이면
+       한도는 앞쪽(비과세 100)이 먼저 채우고 초과 50은 전부 과세분이다. */
+    reset();
+    const st35 = blankSt(); st35.bal.psDed.free = 100; st35.bal.psDed.ded = 50;
+    const ctx35 = { year: 2050, age: 65, eligible: { psDed: true }, pLimit: { psDed: 100 },
+                    pYear: { psDed: 1 }, cfg: state.cfg, capDeductLeft: 250, otherComp: 0, openYear: {} };
+    const t35 = applyWithdrawals(st35, { ...zeroDraws(), psDed: 150 }, ctx35).det.psDed.tax;
+    ok("35. 한도 초과분 = 인출순서 꼬리(과세분 50 × 16.5%)", near(t35, 50 * .165, 0.01),
+       "8.25", t35.toFixed(2));
+
+    /* 퇴직 재원이 섞인 경우: 퇴직 100은 한도 안(감면 70%), 과세 50은 초과(16.5%) */
+    const st35b = blankSt(); st35b.bal.irpSev.sev = 100; st35b.bal.irpSev.ded = 50;
+    const ctx35b = { ...ctx35, eligible: { irpSev: true }, pLimit: { irpSev: 100 }, pYear: { irpSev: 1 } };
+    const t35b = applyWithdrawals(st35b, { ...zeroDraws(), irpSev: 150 }, ctx35b).det.irpSev.tax;
+    const e35b = 100 * state.cfg.sevRate / 100 * .7 + 50 * .165;
+    ok("35b. 퇴직재원은 한도 안, 과세분만 초과", near(t35b, e35b, 0.01), e35b.toFixed(2), t35b.toFixed(2));
+
+    /* --- 36) 큰 손실 뒤에도 버킷이 음수가 되지 않고, 소진 시 전부 0 --- */
+    reset(); noTaxable();
+    state.cfg.endYear = 2029;
+    state.cfg.opening.psDed = { free: 500, ded: 500, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    state.cfg.rates.psDed = -85;
+    state.rows = {}; row(2027).psDed.out = 99999; row(2028).psDed.in = 100;
+    const s36 = simulate();
+    const bk = y => s36.years.find(r => r.year === y).acc.psDed;
+    const neg36 = s36.years.some(r => BUCKETS.some(b => (r.acc.psDed.buckets[b.key] || 0) < -1e-9));
+    const b26 = bk(2026), sum26 = BUCKETS.reduce((t, b) => t + (b26.buckets[b.key] || 0), 0);
+    ok("36. 손실 뒤 버킷 비음수", !neg36, "모든 버킷 ≥ 0", neg36 ? "음수 버킷 있음" : "정상");
+    ok("36b. 손실 뒤 버킷 합 = 평가액", near(sum26, b26.bal, 0.01) && near(b26.bal, 150, 0.01),
+       "150", `합 ${sum26.toFixed(1)} / 평가액 ${b26.bal.toFixed(1)}`);
+    const left27 = BUCKETS.reduce((t, b) => t + Math.abs(bk(2027).buckets[b.key] || 0), 0);
+    ok("36c. 손실 계좌 전액 인출 후 버킷 0", left27 < 0.01, "0", left27.toFixed(2));
+    const b28 = bk(2028).buckets;
+    ok("36d. 소진 뒤 재납입이 옛 손실과 상계되지 않음", near(b28.free + b28.ded, 100, 0.01) && b28.gain >= -1e-9,
+       "원금 100", `원금 ${(b28.free + b28.ded).toFixed(1)} / 수익 ${b28.gain.toFixed(1)}`);
+
+    /* --- 37) ISA → 연금 이전도 가입 3년 요건을 따른다 --- */
+    const isaXfer = (openYr) => {
+      reset(); noTaxable();
+      state.cfg.endYear = 2027; state.rows = {};
+      state.cfg.rates.isa = 0; state.cfg.rates.psFree = 0;
+      state.cfg.opening.isa = { free: 1000, ded: 0, sev: 0, gain: 500 }; state.cfg.openYears.isa = openYr;
+      state.cfg.transfers = [{ from: "isa", to: "psFree", year: 2026, amt: 0 }];
+      return simulate().years.find(r => r.year === 2026);
+    };
+    const young = isaXfer(2025), aged = isaXfer(2020);
+    ok("37. 가입 3년 미만 ISA 이전 → 이익 15.4%", near(young.acc.psFree.bal, 1500 - 500 * .154, 0.01),
+       (1500 - 77).toFixed(1), young.acc.psFree.bal.toFixed(1));
+    ok("37b. 3년 미만 이전은 추가 세액공제 없음", near(young.acc.psFree.buckets.ded || 0, 0, 0.01),
+       "0", (young.acc.psFree.buckets.ded || 0).toFixed(1));
+    ok("37c. 만기 ISA 이전 → 200만 공제 후 9.9%", near(aged.acc.psFree.bal, 1500 - 300 * .099, 0.01),
+       (1500 - 29.7).toFixed(1), aged.acc.psFree.bal.toFixed(1));
+    ok("37d. ISA 이전 정산세가 세금 합계에 잡힘", near(young.otherTax, 77, 0.01),
+       "77", (young.otherTax || 0).toFixed(1));
+
+    /* --- 38) ISA 풍차돌리기: 새 계약은 비과세 한도와 3년 요건이 새로 시작된다 --- */
+    const windmill = (y2) => {
+      reset(); noTaxable();
+      state.cfg.endYear = 2031; state.rows = {};
+      state.cfg.rates.isa = 10; state.cfg.rates.psFree = 0;
+      state.cfg.opening.isa = { free: 1000, ded: 0, sev: 0, gain: 300 }; state.cfg.openYears.isa = 2020;
+      row(2027).isa.in = 1000;               // 전액 이전 후 새로 여는 ISA
+      state.cfg.transfers = [{ from: "isa", to: "psFree", year: 2026, amt: 0 },
+                             { from: "isa", to: "psFree", year: y2, amt: 0 }];
+      return simulate().years.find(r => r.year === y2);
+    };
+    // 2027 납입 1,000 → 10%씩 불어 2030년 이익 331 (가입 3년차)
+    const w30 = windmill(2030), w29 = windmill(2029);
+    ok("38. 새 ISA 계약은 비과세 200만이 다시 생김", near(w30.otherTax, (331 - 200) * .099, 0.01),
+       ((331 - 200) * .099).toFixed(2), (w30.otherTax || 0).toFixed(2));
+    ok("38b. 새 ISA 계약의 3년 요건은 새로 셈", near(w29.otherTax, 210 * .154, 0.01),
+       (210 * .154).toFixed(2), (w29.otherTax || 0).toFixed(2));
+
+    /* --- 39) 설정 국민연금은 시작연도 가치 기준으로 물가에 연동된다 --- */
+    reset();
+    state.cfg.npsAmount = 1200; state.cfg.npsAge = 65; state.cfg.inflation = 2;
+    const n70 = npsGrossOf(state.cfg, 70), e70 = 1200 * Math.pow(1.02, 1985 + 70 - 2026);
+    ok("39. 국민연금 물가연동", near(n70, e70, 0.01), e70.toFixed(1), n70.toFixed(1));
+    ok("39b. 개시 전 국민연금 0", npsGrossOf(state.cfg, 64) === 0, "0", String(npsGrossOf(state.cfg, 64)));
+
+    /* --- 40) 퇴직소득 60% 감면은 '실제로 받은' 연차 기준 ---
+       한도 계산의 연금수령연차는 수령 가능해진 해부터 세지만,
+       이연퇴직소득 감면(70→60%)은 실제 수령한 연차로 판정한다. */
+    reset(); noTaxable();
+    state.cfg.birthYear = 1960; state.cfg.endYear = 2037; state.rows = {};
+    state.cfg.rates.irpSev = 0;
+    state.cfg.opening.irpSev = { free: 0, ded: 0, sev: 10000, gain: 0 }; state.cfg.openYears.irpSev = 2000;
+    row(2036).irpSev.out = 100;              // 수령 가능 11년차에 처음 수령
+    const r40 = simulate().years.find(r => r.year === 2036);
+    const e40 = 100 * state.cfg.sevRate / 100 * .7;
+    ok("40. 늦게 시작해도 첫 수령은 감면 70%", near(r40.acc.irpSev.tax, e40, 0.001),
+       e40.toFixed(2), r40.acc.irpSev.tax.toFixed(2));
+
+    /* --- 41) 사용자 문자열은 HTML로 해석되지 않는다 --- */
+    reset(); noTaxable();
+    state.cfg.events = [
+      { name: "<img src=x onerror=alert(1)>관리비", kind: "expense", amt: 10, year: 2026, until: 2026, every: 1 },
+      { name: "<b>국민연금</b>", kind: "salary", amt: 10, year: 2026, until: 2026, every: 1 },
+    ];
+    state.cfg.npsAmount = 1200; state.rows = {};
+    const warn41 = simulate().warnings.join(" ");
+    ok("41. 일정 이름이 경고에 이스케이프되어 들어감",
+       !/<img|<b>국민/.test(warn41) && /&lt;img/.test(warn41), "&lt;img… 로 표시",
+       /<img|<b>국민/.test(warn41) ? "태그가 그대로 들어감" : "이스케이프됨");
+    ok("41b. escHtml", typeof escHtml === "function"
+       && escHtml(`<a href="x" onclick='y'>&</a>`) === "&lt;a href=&quot;x&quot; onclick=&#39;y&#39;&gt;&amp;&lt;/a&gt;",
+       "특수문자 5종 치환", typeof escHtml === "function" ? escHtml(`<a href="x" onclick='y'>&</a>`) : "함수 없음");
 
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
