@@ -5587,12 +5587,13 @@ function migrateOpening(cfg, raw) {
   cfg.health = { ...d.health, ...(cfg.health || {}) };
   cfg.property = { ...d.property, ...(cfg.property || {}) };
   // 예전 저장본의 단발성 목표 생활비 설정을 인출 규칙으로 옮긴다
-  if (!Array.isArray(raw.wdRules) && raw.planTarget && raw.planTarget.target > 0) {
-    const pt = raw.planTarget;
-    const infl = clamp0(cfg.inflation);
+  const pt = raw.planTarget && typeof raw.planTarget === "object" ? raw.planTarget : null;
+  if (!Array.isArray(raw.wdRules) && pt && numOf(pt.target) > 0) {
+    const infl = clamp0(cfg.inflation), tgt = numOf(pt.target);
+    const ptFrom = Number.isFinite(numOf(pt.from)) ? numOf(pt.from) : cfg.startYear;
     cfg.wdRules = [{
-      from: pt.from, to: pt.to, unit: "year",
-      amt: Math.round(pt.basis === "real" ? pt.target * Math.pow(1 + infl / 100, pt.from - cfg.startYear) : pt.target),
+      from: pt.from, to: pt.to, unit: "year",   // 숫자 검증은 뒤의 sanitizeList 가 한다
+      amt: Math.round(pt.basis === "real" ? tgt * Math.pow(1 + infl / 100, ptFrom - cfg.startYear) : tgt),
       growth: pt.basis === "real" ? infl : 0, target: "plan",
     }];
   }
@@ -5633,8 +5634,14 @@ function migrateTransfers(cfg) {
 const MIGRATION_WARNINGS = [];
 
 /** 숫자 필드 안전 복구 — NaN·Infinity·범위 밖이면 기본값 */
+/* 저장본 값 변환 — 숫자와 문자열만 변환한다. 그 밖의 값(객체·배열)은 변환하는 순간
+   {"toString":null} 처럼 예외를 던질 수 있어서, 한 칸 때문에 저장본 전체가 거부된다 */
+const numOf = v => typeof v === "number" ? v : typeof v === "string" ? parseFloat(v) : NaN;
+const strOf = (v, fb = "") => typeof v === "string" ? v
+  : (typeof v === "number" || typeof v === "boolean") ? String(v) : fb;
+
 function safeNum(v, def, lo, hi, label) {
-  const n = typeof v === "number" ? v : parseFloat(v);
+  const n = numOf(v);
   if (!isFinite(n)) {
     if (v !== undefined && v !== null && v !== "") MIGRATION_WARNINGS.push(`${label}: 숫자가 아니어서 기본값 ${def} 으로 되돌렸습니다 (원래 값 ${JSON.stringify(v)})`);
     return def;
@@ -5648,6 +5655,7 @@ function safeNum(v, def, lo, hi, label) {
     배열은 통째로 교체(사용자가 만든 규칙 목록을 섞으면 안 되므로). */
 function deepMerge(base, over, path) {
   if (over === undefined || over === null) return base;
+  if (base === null) return over;   // 기본값이 null 인 칸(예전 planTarget) — 뒤 마이그레이션이 검증한다
   if (Array.isArray(base)) return Array.isArray(over) ? over.slice() : base;
   // 형식이 어긋나면 기본값을 지킨다 — 객체 자리에 숫자가 오면 뒤에서 속성을 쓰다 터지고,
   // 문자열 자리에 객체가 오면 선택값 비교가 조용히 어긋난다
@@ -5659,7 +5667,7 @@ function deepMerge(base, over, path) {
   }
   if (typeof base !== "object" || typeof over !== "object") {
     if (typeof base === "number" && typeof over !== "number") {
-      const n = parseFloat(over);
+      const n = numOf(over);
       if (!isFinite(n)) { MIGRATION_WARNINGS.push(`${path}: 숫자가 아니어서 기본값 ${base} 유지`); return base; }
       return n;
     }
@@ -5732,8 +5740,12 @@ function migrateState(raw) {
   // 3) 순차 버전 마이그레이션
   if (from < 2) cfg = migrateV1toV2(cfg);
   if (from < 3) cfg = migrateV2toV3(cfg, src);
+  // 예전 형식의 단발성 설정(목표 생활비·계좌별 고정 납입)을 규칙으로 옮긴다. 예전에는 load·가져오기가
+  // 검증이 끝난 뒤 원본 저장본으로 따로 불렀다 — 그러면 원본의 변환 불가 값이 그대로 닿고,
+  // 옮겨 만든 규칙은 아래 목록 검증을 거치지 않는다. 그래서 검증 앞, 복사본(src)으로 부른다.
+  migrateOpening(cfg, src);
   cfg.schemaVersion = SCHEMA_VERSION;
-  cfg.npsReal = +cfg.npsReal === 0 ? 0 : 1;
+  cfg.npsReal = numOf(cfg.npsReal) === 0 ? 0 : 1;
 
   // 4) 값 검증 — 잘못된 값은 기본값으로 복구하고 경고로 남긴다
   cfg.birthYear  = Math.round(safeNum(cfg.birthYear, def.cfg.birthYear, 1900, 2200, "출생연도"));
@@ -5796,7 +5808,20 @@ function migrateState(raw) {
     cfg[k] = sanitizeList(k, cfg[k], cfg);
   }
 
-  const rows = (raw.rows && typeof raw.rows === "object" && !Array.isArray(raw.rows)) ? raw.rows : {};
+  // 연도별 표 — 칸마다 납입(in)·인출(out) 숫자만 받는다. 계산이 이 값을 그대로 쓰므로
+  // 문자열·객체가 남으면 NaN 이 번지거나 변환 예외로 계산 전체가 멈춘다.
+  const rows = {};
+  if (raw.rows && typeof raw.rows === "object" && !Array.isArray(raw.rows)) {
+    for (const [y, r] of Object.entries(raw.rows)) {
+      if (!/^\d{4}$/.test(y) || !r || typeof r !== "object" || Array.isArray(r)) continue;
+      rows[y] = {};
+      for (const id of AID) {
+        const c = r[id] && typeof r[id] === "object" ? r[id] : {};
+        rows[y][id] = { in: safeNum(c.in, 0, 0, undefined, `표.${y}.${id}.납입`),
+                        out: safeNum(c.out, 0, 0, undefined, `표.${y}.${id}.인출`) };
+      }
+    }
+  }
   return { cfg, rows, optUndo: sanitizeUndo(raw.optUndo, cfg), warnings: MIGRATION_WARNINGS.slice() };
 }
 
@@ -5816,7 +5841,7 @@ function sanitizeList(kind, list, cfg) {
     for (const f of LIST_NUM_KEYS) {
       if (kind === "transfers" && (f === "from" || f === "to")) continue;   // 이전의 from/to 는 계좌 id
       if (!(f in o)) continue;
-      const n = typeof o[f] === "number" ? o[f] : Number(o[f]);
+      const n = typeof o[f] === "number" ? o[f] : typeof o[f] === "string" ? Number(o[f]) : NaN;
       if (Number.isFinite(n)) { o[f] = n; continue; }
       const fb = f === "to" ? (Number.isFinite(o.from) ? o.from : cfg.startYear)
                : f === "until" ? (Number.isFinite(o.year) ? o.year : cfg.startYear)
@@ -5826,8 +5851,8 @@ function sanitizeList(kind, list, cfg) {
     }
     if ("name" in o) o.name = typeof o.name === "string" ? o.name : "";
     if ("unit" in o && o.unit !== "month" && o.unit !== "year") o.unit = "year";
-    if ("target" in o) o.target = String(o.target);
-    if (kind === "events" && !(o.kind in EVENT_KINDS)) o.kind = "expense";
+    if ("target" in o) o.target = strOf(o.target);
+    if (kind === "events" && !(typeof o.kind === "string" && Object.hasOwn(EVENT_KINDS, o.kind))) o.kind = "expense";
     if (kind === "transfers") {
       if (!AID.includes(o.from)) o.from = "";
       if (!AID.includes(o.to)) o.to = "";
@@ -5854,7 +5879,7 @@ function sanitizeUndo(u, cfg) {
   const m = migrateState({ cfg: { ...JSON.parse(JSON.stringify(cfg)), ...pick } });
   MIGRATION_WARNINGS.length = 0;
   MIGRATION_WARNINGS.push(...outer, ...m.warnings.map(w => `되돌리기 정보 · ${w}`));
-  return { at: String(u.at ?? ""), what: String(u.what ?? ""),
+  return { at: strOf(u.at), what: strOf(u.what),
            cfg: Object.fromEntries(OPT_KEYS.map(k => [k, m.cfg[k]])) };
 }
 
@@ -5867,7 +5892,6 @@ function load() {
     if (!s || !s.cfg) return false;
     const m = migrateState(s);
     state = { cfg: m.cfg, rows: m.rows, optUndo: m.optUndo };
-    migrateOpening(state.cfg, s.cfg);
     if (m.warnings.length) state.loadWarnings = m.warnings;
     return true;
   } catch (e) {
@@ -6162,7 +6186,6 @@ document.getElementById("btnImport").onclick = () => {
         if (!s.cfg) throw new Error("형식 오류");
         const m = migrateState(s);
         state = { cfg: m.cfg, rows: m.rows, optUndo: m.optUndo };
-        migrateOpening(state.cfg, s.cfg);
         builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); renderEvents(); render(true, true);
         if (m.warnings.length) {
           alert("불러왔습니다. 다만 아래 값은 보정했습니다:\n\n· " + m.warnings.slice(0, 10).join("\n· ")
@@ -6988,7 +7011,7 @@ function runSelfTests() {
     let m55 = null, e55 = "";
     try { m55 = migrateState({ cfg: { reverse: 5, loan: "x", wdStrategy: { a: 1 } } }); } catch (e) { e55 = e.message; }
     ok("55. 형식이 어긋난 설정 값은 기본값 유지", !!m55 && typeof m55.cfg.reverse === "object"
-       && typeof m55.cfg.loan === "object" && typeof m55.cfg.wdStrategy === "string",
+       && typeof m55.cfg.loan === "object" && !("0" in m55.cfg.loan) && typeof m55.cfg.wdStrategy === "string",
        "reverse·loan 객체 / wdStrategy 문자열", e55 || (m55 && `${typeof m55.cfg.reverse} / ${typeof m55.cfg.loan} / ${typeof m55.cfg.wdStrategy}`));
 
     /* --- 54b) 일부만 담긴 중첩 되돌리기 정보는 현재 값 위에 얹힌다 (기본값으로 채우지 않는다) --- */
@@ -7006,6 +7029,82 @@ function runSelfTests() {
     ok("54c. 불러온 계좌별 값(순서·가입연도)도 숫자로 검증",
        typeof m54c.cfg.priority.irpSev === "number" && typeof m54c.cfg.openYears.isa === "number",
        "number / number", `${typeof m54c.cfg.priority.irpSev} / ${typeof m54c.cfg.openYears.isa}`);
+
+    /* --- 56) 저장본 어느 칸에 변환할 수 없는 값이 와도 그 칸만 복구된다 ---
+       {"toString":null} 같은 객체는 문자열·숫자로 바꾸는 순간 예외를 던진다. 한 칸 때문에
+       저장본 전체를 버리지 않도록, 모든 칸에 하나씩 넣어 불러오기와 계산이 끝까지 가는지 본다. */
+    const full56 = defaultState(); full56.cfg.startYear = 2026; full56.cfg.endYear = 2030;
+    const ent56 = { from: 2027, to: 2028, amt: 100, unit: "year", growth: 0, target: "isa", name: "n",
+                    kind: "expense", year: 2027, every: 1, until: 2028, jitter: 0 };
+    for (const k of ["fillRules", "wdRules", "events", "spendRules"]) full56.cfg[k] = [{ ...ent56 }];
+    full56.cfg.transfers = [{ from: "isa", to: "psFree", year: 2027, amt: 0 }];
+    full56.rows = { 2026: blankRow() };
+    full56.optUndo = { at: "a", what: "b", cfg: JSON.parse(JSON.stringify(
+      Object.fromEntries(OPT_KEYS.map(k => [k, full56.cfg[k]])))) };
+    const raw56 = JSON.parse(JSON.stringify(full56));
+    const paths56 = [];
+    (function walk(o, path) {
+      for (const k of Object.keys(o)) {
+        paths56.push([...path, k]);
+        if (o[k] && typeof o[k] === "object") walk(o[k], [...path, k]);
+      }
+    })(raw56, []);
+    // 예전(v1) 저장본 — 단발성 목표 생활비(planTarget)를 인출 규칙으로 옮기는 경로도 같이 본다
+    const v1raw56 = JSON.parse(JSON.stringify(raw56));
+    Object.assign(v1raw56.cfg, { schemaVersion: 1, planTarget: { target: 3000, from: 2027, to: 2029, basis: "real" } });
+    delete v1raw56.cfg.wdRules; delete v1raw56.cfg.fillRules;
+    const v1paths56 = [];
+    (function walk(o, path) {
+      for (const k of Object.keys(o)) {
+        v1paths56.push([...path, k]);
+        if (o[k] && typeof o[k] === "object") walk(o[k], [...path, k]);
+      }
+    })(v1raw56.cfg.planTarget, ["cfg", "planTarget"]);
+    const POISON = { toString: null, valueOf: null };
+    const broke56 = [];
+    const cfgSave56 = state.cfg, rowsSave56 = state.rows;
+    for (const [src56, p] of [...paths56.map(p => [raw56, p]), ...v1paths56.map(p => [v1raw56, p])]) {
+      const r = JSON.parse(JSON.stringify(src56));
+      let o = r; for (const k of p.slice(0, -1)) o = o[k];
+      o[p[p.length - 1]] = POISON;
+      try {
+        const m = migrateState(r);
+        state.cfg = m.cfg; state.rows = m.rows;
+        simulate(); JSON.stringify(m); renderOptUndo.length;
+        if (m.optUndo) OPT_KEYS.forEach(k => JSON.parse(JSON.stringify(m.optUndo.cfg[k])));
+      } catch (e) { broke56.push(`${p.join(".")}: ${e.message}`); }
+    }
+    state.cfg = cfgSave56; state.rows = rowsSave56;
+    ok(`56. 저장본 ${paths56.length + v1paths56.length}칸 각각에 변환 불가 값 → 불러오기·계산 계속`, broke56.length === 0,
+       "0칸 실패", `${broke56.length}칸 실패 — ${broke56.slice(0, 4).join(" / ")}`);
+
+    /* --- 56b) 변환 불가 값은 그 칸만 복구하고 나머지 값은 그대로 --- */
+    const P56 = { toString: null };
+    let m56a = null, m56b = null, m56c = null, e56 = "";
+    try {
+      m56a = migrateState({ cfg: { schemaVersion: 3, gameSpend: 5000 }, optUndo: { cfg: { priority: { irpSev: P56 } } } });
+      m56b = migrateState({ cfg: { schemaVersion: 3, gameSpend: 5000 }, optUndo: { at: P56, what: "w", cfg: {} } });
+      m56c = migrateState({ cfg: { schemaVersion: 3 }, rows: { 2026: { isa: { in: P56, out: 70 } } } });
+    } catch (e) { e56 = e.message; }
+    const ok56 = m56a && m56a.cfg.gameSpend === 5000 && m56a.optUndo
+      && m56a.optUndo.cfg.priority.irpSev === m56a.cfg.priority.irpSev
+      && m56b.optUndo && m56b.optUndo.at === "" && m56b.optUndo.what === "w"
+      && m56c.rows[2026].isa.in === 0 && m56c.rows[2026].isa.out === 70;
+    ok("56b. 그 칸만 복구 (생활비 5000·되돌리기 문구·같은 줄 인출 70 유지)", !!ok56,
+       "5000 · 순서=현재 값 · at \"\" what \"w\" · 납입 0 인출 70",
+       e56 || JSON.stringify(m56a && { spend: m56a.cfg.gameSpend, at: m56b.optUndo && m56b.optUndo.at,
+         cell: m56c.rows[2026] && m56c.rows[2026].isa }));
+
+    /* --- 57) 예전(v1) 저장본의 목표 생활비는 인출 규칙으로 옮겨진다 ---
+       기본값이 null 인 칸을 병합하다 예외가 나서 이런 저장본은 통째로 불러오지 못했다. */
+    let m57 = null, e57 = "";
+    try { m57 = migrateState({ cfg: { schemaVersion: 1, startYear: 2026, inflation: 2,
+      planTarget: { target: 3000, from: 2040, to: "2060", basis: "real" } } }); } catch (e) { e57 = e.message; }
+    const w57 = m57 && m57.cfg.wdRules[0];
+    const e57v = Math.round(3000 * Math.pow(1.02, 14));
+    ok("57. v1 저장본 목표 생활비 → 인출 규칙 (물가 반영·숫자 검증)",
+       !!w57 && w57.amt === e57v && w57.to === 2060 && w57.growth === 2 && !("planTarget" in m57.cfg),
+       `${e57v} · 2040~2060 · 2%`, e57 || JSON.stringify(w57));
 
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
