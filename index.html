@@ -479,6 +479,12 @@
           <label class="f"><span class="t">프리셋 off · 평균 %</span><input type="number" step="0.5" id="cfg_gameMean"></label>
           <label class="f"><span class="t">프리셋 off · 변동성 %</span><input type="number" step="1" id="cfg_gameVol"></label>
           <label class="f"><span class="t">게임 · 시드</span><input type="number" id="cfg_gameSeed"></label>
+          <label class="f" style="grid-column:span 2"><span class="t" title="기본은 자산이 바닥나야 실패입니다. 엄격 모드는 자산이 남아 있어도 생활비를 못 채운 첫 해에 게임을 끝냅니다. 「5% 초과」는 그해 필요한 생활비(총액)의 5%를 넘게 못 채운 해, 「1만원 초과」는 계산 오차(1만원)만 빼고 조금이라도 못 채운 해입니다. 100판·진단·최적화·안전 인출액 역산도 같은 기준으로 판정합니다.">실패 판정</span>
+            <select id="cfg_strictSpend">
+              <option value="0">자산이 바닥나면 (기본)</option>
+              <option value="1">생활비를 5% 넘게 못 채운 첫 해 (엄격)</option>
+              <option value="2">생활비를 1만원 넘게 못 채운 첫 해 (가장 엄격)</option>
+            </select></label>
           <span id="customPhase" hidden style="display:contents">
             <label class="f"><span class="t">커스텀 적립 %/σ</span><input type="number" step="0.1" id="cfg_cAccum"></label>
             <label class="f"><span class="t">&nbsp;</span><input type="number" step="0.1" id="cfg_cAccumSd"></label>
@@ -894,7 +900,7 @@
         <div class="fgrid">
           <label class="f"><span class="t">퇴직소득세 실효세율 %</span><input type="number" step="0.1" id="cfg_sevRate"></label>
           <label class="f"><span class="t">연금소득 1,500만 초과 시 %</span><input type="number" step="0.1" id="cfg_compRate"></label>
-          <label class="f"><span class="t">국민연금 연 수령액</span><input type="number" step="10" id="cfg_npsAmount"></label>
+          <label class="f"><span class="t" title="공단 노후준비서비스에서 정상 수급 나이로 본 예상연금(현재가치). 조기·연기 감액·가산은 개시 나이에서 자동으로 붙습니다.">국민연금 연 수령액 (정상 나이 기준)</span><input type="number" step="10" id="cfg_npsAmount"></label>
           <label class="f"><span class="t" title="공단 예상연금액은 현재가치로 안내됩니다. 그 숫자를 넣었다면 물가연동을 고르세요.">국민연금 금액 기준</span>
             <select id="cfg_npsReal">
               <option value="1">시작연도 가치 · 물가연동 (권장)</option>
@@ -902,6 +908,8 @@
             </select></label>
           <label class="f"><span class="t">국민연금 개시 나이</span><input type="number" id="cfg_npsAge"></label>
           <label class="f"><span class="t">국민연금 실효세율 %</span><input type="number" step="0.1" id="cfg_npsRate"></label>
+          <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
+            <span class="hint" id="npsInfo" style="margin:0"></span></label>
         </div>
         <details class="grp" style="border:none;margin-top:10px;padding-top:6px">
           <summary>퇴직소득세 실효세율 계산기</summary>
@@ -1371,8 +1379,10 @@ function bucketLabel(a, key) {
    ======================================================================== */
 /* 저장본 스키마 버전.
    1 — schemaVersion 이 없던 최초 형태 (isaMoveYear/isaMoveAmt 시절 포함)
-   2 — 중첩 객체 deep merge + 검증 도입 */
-const SCHEMA_VERSION = 3;
+   2 — 중첩 객체 deep merge + 검증 도입
+   3 — 국민연금 금액이 명목 고정 → 시작연도 가치(물가연동)
+   4 — 국민연금 「연 수령액」이 개시 나이 기준 → 정상 수급 나이 기준 (개시 나이에 따라 감액·가산이 자동으로 붙는다) */
+const SCHEMA_VERSION = 4;
 
 function defaultState() {
   const cfg = {
@@ -1385,6 +1395,7 @@ function defaultState() {
     npsAmount: 0, npsAge: 65, npsRate: 3.0, npsReal: 1,
     transfers: [],
     allowPenalty: 0, planTarget: null,
+    strictSpend: 0,          // 0 = 자산이 바닥나야 실패 · 1 = 생활비를 5% 넘게 못 채운 첫 해 · 2 = 1만원 넘게 못 채운 첫 해
     pensionCap: 1500, wdStrategy: "ratio", showBuckets: 1,
     pensionTotalCap: 1800, fillRules: [], wdRules: [], events: [], spendRules: [],
     gameMean: 6.0, gameVol: 18.0, gameSeed: 20260101, gameSpend: 3600, gameDeathAge: 95,
@@ -1458,16 +1469,52 @@ function pensionRate(age) { return age >= 80 ? 3.3 : age >= 70 ? 4.4 : 5.5; }
     국민연금 공단 예상연금액도 현재가치로 안내되므로 그 숫자를 그대로 넣으면 된다. */
 function npsGrossOf(cfg, age) {
   if (age < cfg.npsAge) return 0;
+  // 설정 금액은 정상 수급 나이 기준이다 — 개시 나이에 따른 감액·가산은 여기서 한 번만 곱한다.
+  // (수령 중에는 그 금액이 물가만큼 오른다. 감액률은 평생 그대로다.)
+  const base = clamp0(cfg.npsAmount) * npsClaimFactor(cfg.birthYear, cfg.npsAge);
   // npsReal 0 = 명목 고정 (v2 이전 저장본의 원래 의미를 보존할 때)
-  if (+cfg.npsReal === 0) return clamp0(cfg.npsAmount);
+  if (+cfg.npsReal === 0) return base;
   const years = Math.max(0, cfg.birthYear + age - cfg.startYear);
-  return clamp0(cfg.npsAmount) * Math.pow(1 + clamp0(cfg.inflation) / 100, years);
+  return base * Math.pow(1 + clamp0(cfg.inflation) / 100, years);
 }
 /** 설정에 적어 둔 국민연금의 그해 세후 수령액.
     applyWithdrawals 가 이 금액을 실수령에 더해 주므로, 현금 계산과 인출 목표는
     반드시 같은 기준으로 이 값을 다뤄야 한다 — 한쪽만 세면 딱 이만큼 어긋난다. */
 function npsNetOf(cfg, age) {
   return npsGrossOf(cfg, age) * (1 - clamp0(cfg.npsRate) / 100);
+}
+
+/* ------------------------------------------------------------------
+   국민연금 조기수령 (조기노령연금) — 받는 나이를 바꾸면 금액도 평생 바뀐다.
+   · 정상 수급 나이는 출생연도별로 60~65세 (1969년생부터 65세)
+   · 정상보다 1년 앞당길 때마다 6%(월 0.5%) 감액, 최대 5년 · 30% — 평생 유지
+   · 늦추면(연기연금) 1년마다 7.2%(월 0.6%) 가산, 최대 5년 · 36%
+   · 조기노령연금은 가입기간 10년 이상이어야 하고, 소득 있는 업무(월소득이 A값 초과)에
+     종사하는 동안은 지급이 정지된다 — 그래서 은퇴 전 나이로는 당겨 받는 것으로 치지 않는다.
+   설정의 「국민연금 연 수령액」은 **정상 수급 나이 기준** 금액이다 (공단 조회에서 지급희망 연령을
+   정상 나이로 두고 본 예상연금). 개시 나이를 바꾸면 npsGrossOf 가 그 비율을 자동으로 곱한다.
+   v3 이전 저장본은 개시 나이 기준 금액이었으므로 불러올 때 환산한다 (migrateV3toV4).
+   ------------------------------------------------------------------ */
+const NPS_EARLY_CUT = 0.06, NPS_LATE_ADD = 0.072, NPS_SHIFT_MAX = 5;
+function npsNormalAge(birthYear) {
+  return birthYear <= 1952 ? 60 : birthYear <= 1956 ? 61 : birthYear <= 1960 ? 62
+       : birthYear <= 1964 ? 63 : birthYear <= 1968 ? 64 : 65;
+}
+/** 정상 수급 나이 대비 이 나이에 받을 때의 연금액 비율 (1 = 정상) */
+function npsClaimFactor(birthYear, age) {
+  const n = npsNormalAge(birthYear);
+  return age < n ? 1 - NPS_EARLY_CUT * Math.min(NPS_SHIFT_MAX, n - age)
+                 : 1 + NPS_LATE_ADD * Math.min(NPS_SHIFT_MAX, age - n);
+}
+/** 지금 설정보다 일찍 받을 수 있는 나이 후보. 이유가 있어 못 받으면 why 를 돌려준다. */
+function npsEarlyAges(cfg) {
+  const n = npsNormalAge(cfg.birthYear), retireAge = cfg.retireYear - cfg.birthYear;
+  const lo = Math.max(n - NPS_SHIFT_MAX, retireAge), hi = Math.min(clamp0(cfg.npsAge) - 1, n - 1);
+  if (clamp0(cfg.npsAmount) <= 0) return { ages: [], why: "none" };
+  if (clamp0(cfg.npsAge) <= n - NPS_SHIFT_MAX) return { ages: [], why: "already" };
+  const ages = [];
+  for (let a = lo; a <= hi; a++) ages.push(a);
+  return { ages, why: ages.length ? "" : "working" };
 }
 
 /* ==================================================================
@@ -1543,6 +1590,38 @@ function cashflowOf(c, rec) {
     housingPension: c.rev,
     requiredSpending: c.requiredSpending,
   });
+}
+
+/** 자산이 안 말랐어도 **어느 한 해든** 그해 필요한 생활비(생활비+지출+대출상환+건보료 합계)의 이만큼을 넘게
+    못 채웠으면 '버텼다'고 하지 않는다. 안전 인출액 역산·100판 돌려보기·엄격 모드 게임이 같은 기준을 쓴다
+    (연금수령한도·55세 요건에 묶여 굶는 경우). 해마다의 비율이라, 첫해 전액 미달이 뒤 수십 년의 충족에
+    희석되지 않고 살짝씩(5% 이내) 모자란 해는 실격시키지 않는다. */
+const STARVE_TOL = 0.05;
+/** 그해 생활비를 못 채웠나. required = 그해 필요한 생활비 총액, miss = 인출까지 다 한 뒤에도 남은 부족액.
+    분모가 '금융자산에서 뽑아야 했던 금액'이 아니라 총 생활비라서, 국민연금·급여가 대부분을 채운 해의
+    작은 미달(예: 필요 1억 중 50만원)이 실패로 잡히지 않는다. 1만원 미만은 계산 오차라 뺀다. */
+function isStarved(required, miss) { return isShort(required, miss) && miss / required > STARVE_TOL; }
+/** 1만원 넘게 못 채웠나 — 계산 오차(1만원 이하)만 뺀 가장 엄격한 기준 (엄격 모드 2단계) */
+function isShort(required, miss) { return required > 0.5 && miss > 1; }
+/** 엄격 모드 단계(cfg.strictSpend)에 맞는 미달 판정: 2 = 1만원 초과, 그 밖에는 필요 생활비의 5% 초과 */
+function starvedFor(cfg, required, miss) { return +cfg.strictSpend === 2 ? isShort(required, miss) : isStarved(required, miss); }
+/** 실패한 해 — 기본은 자산이 바닥난 해. 엄격 모드(cfg.strictSpend)면 생활비를 못 채운 첫 해가 더 이르면 그 해.
+    게임·100판·진단·최적화·안전 인출액 역산이 전부 이 함수 하나로 판정한다. 실패가 없으면 null. */
+function failYearOf(cfg, sum) {
+  const lv = +cfg.strictSpend;
+  const d = sum.depleted || null, st = (lv === 1 && sum.starvedYear) ? sum.starvedYear : (lv === 2 && sum.shortYear) ? sum.shortYear : null;
+  return d && st ? Math.min(d, st) : (d || st || null);
+}
+
+/** 기대수명(만 gameDeathAge 세)까지의 실패인가 — 게임이 기대수명 해의 지출까지 처리하므로 그해를 포함한다.
+    100판·최적 탐색·안전 인출액 역산이 게임과 같은 창을 쓰도록 이 두 함수만 거친다. */
+function failedByLife(cfg, sum) {
+  const f = failYearOf(cfg, sum);
+  return f != null && f - cfg.birthYear <= (clamp0(cfg.gameDeathAge) || 95);
+}
+/** 기대수명 안에 생활비를 못 채운 해가 있었나 (엄격 모드와 무관하게 — '자산은 버텼지만 미달'을 따로 세는 데 쓴다) */
+function starvedByLife(cfg, sum) {
+  return sum.starvedYear != null && sum.starvedYear - cfg.birthYear <= (clamp0(cfg.gameDeathAge) || 95);
 }
 
 /* ------------------------------------------------------------------
@@ -2783,6 +2862,9 @@ function simulate(opts = {}) {
   const shortYears = [];
   let cumIn = 0, cumCredit = 0, cumNet = 0, cumTax = 0, depleted = null;
   let autoNeed = 0, autoMiss = 0;   // auto 모드에서 '필요했던 금액'과 '못 채운 금액'
+  let autoMissMax = 0;              // 그중 가장 나빴던 한 해의 미달 비율 = 미달 ÷ 그해 필요한 생활비 (누적에 희석되지 않게 따로 둔다)
+  let starvedYear = null;           // 생활비를 5% 넘게 못 채운 첫 해 (isStarved) — 엄격 모드 1단계의 실패 연도
+  let shortYear = null;             // 1만원 넘게 못 채운 첫 해 (isShort) — 엄격 모드 2단계의 실패 연도
   let cumWdTax = 0, cumOtherTax = 0;
 
   for (let y = y0; y <= y1; y++) {
@@ -3128,6 +3210,12 @@ function simulate(opts = {}) {
       if (autoCash.spendingShortfall > 0.5) {
         autoNeed += autoCash.spendingShortfall;
         autoMiss += finalCash.spendingShortfall;
+        // 첫해에 전액을 못 뽑아도 뒤에 수십 년을 채우면 누적 비율은 몇 %로 희석된다 — 해마다의 비율로 따로 본다.
+        // 1만원 미만은 계산 오차라 뺀다.
+        if (finalCash.spendingShortfall > 1 && autoCash.requiredSpending > 0.5)
+          autoMissMax = Math.max(autoMissMax, finalCash.spendingShortfall / autoCash.requiredSpending);
+        if (starvedYear === null && isStarved(autoCash.requiredSpending, finalCash.spendingShortfall)) starvedYear = y;
+        if (shortYear === null && isShort(autoCash.requiredSpending, finalCash.spendingShortfall)) shortYear = y;
       }
     }
     cumNet += res.net; cumTax += rec.tax; cumWdTax += rec.wdTax; cumOtherTax += rec.otherTax;
@@ -3153,12 +3241,21 @@ function simulate(opts = {}) {
       + `연 환산 약 ${fmt(tot)}만원입니다. 「목표 생활비」에 이미 포함시켰다면 <strong>같은 돈을 두 번 빼고 있습니다.</strong> `
       + `둘 중 한쪽만 남기세요.`);
   }
+  if (clamp0(cfg.npsAmount) > 0) {
+    const n = npsNormalAge(cfg.birthYear);
+    if (cfg.npsAge < n - NPS_SHIFT_MAX || cfg.npsAge > n + NPS_SHIFT_MAX)
+      warnings.push(`국민연금 개시 나이 만 ${cfg.npsAge}세는 조기·연기 가능 범위(만 ${n - NPS_SHIFT_MAX}~${n + NPS_SHIFT_MAX}세)를 벗어났습니다 — `
+        + `감액·가산은 최대 ${NPS_SHIFT_MAX}년치까지만 반영하지만 수령은 입력한 나이부터 시작합니다. 실제 제도와 다를 수 있습니다.`);
+  }
   // 국민연금을 설정에도 적고 일정에도 적으면 두 번 들어온다.
   // 설정 쪽은 현금 카드에 '🏛️ 국민연금'으로 뜨므로 눈으로도 비교된다.
   if (clamp0(cfg.npsAmount) > 0) {
-    const evt = (cfg.events || []).filter(e => e && e.kind === "salary" && /국민연금|노령연금/.test(e.name || ""));
+    // 설정 칸은 본인 국민연금이다. 배우자·부모 등 다른 사람의 연금 일정은 별개라서 중복으로 보지 않는다.
+    const evt = (cfg.events || []).filter(e => e && e.kind === "salary" && /국민연금|노령연금/.test(e.name || "")
+      && !/배우자|아내|남편|부인|와이프|자녀|부모|어머니|아버지|어머님|아버님|spouse|wife|husband/i.test(e.name || ""));
     if (evt.length) warnings.push(`국민연금을 <strong>설정(연 ${fmt(clamp0(cfg.npsAmount))}만원)</strong>과 `
-      + `<strong>일정(${evt.map(e => escHtml(e.name)).join(", ")})</strong> 양쪽에 적어 두셨습니다 — <strong>두 번 들어옵니다.</strong> 한쪽만 남기세요.`);
+      + `<strong>일정(${evt.map(e => escHtml(e.name)).join(", ")})</strong> 양쪽에 적어 두셨습니다 — 같은 본인 연금이라면 <strong>두 번 들어옵니다.</strong> 한쪽만 남기세요. `
+      + `(배우자 연금처럼 다른 사람 것이면 일정 이름에 「배우자」를 넣어 구분하세요.)`);
   }
   if ((cfg.health || {}).on && dupHits.some(x => x.label === "건강보험료")) {
     warnings.push(`건강보험료를 <strong>자동 계산으로 켜 둔 채</strong> 지출 일정에도 건강보험료가 있습니다 — 두 번 빠지고 있습니다. 지출 일정 쪽을 지우세요.`);
@@ -3181,7 +3278,7 @@ function simulate(opts = {}) {
   return {
     years, warnings, planDraws, captured,
     sum: {
-      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal, autoNeed, autoMiss,
+      cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal, autoNeed, autoMiss, autoMissMax, starvedYear, shortYear,
       atRetire: retireRec ? retireRec.total : 0,
       peak: years.reduce((m, r) => Math.max(m, r.total), 0),
       final: years.length ? years[years.length - 1].total : 0,
@@ -4217,8 +4314,11 @@ function turnStep() {
                   shortfall: cfLog.spendingShortfall });
 
   const bankrupt = rec && rec.total < 1 && y > cfg.startYear;
+  // 엄격 모드: 자산이 남아 있어도 이 해 생활비를 못 채웠으면 여기서 끝낸다 (자산 소진과는 따로 기록)
+  const starved = +cfg.strictSpend >= 1 && starvedFor(cfg, cfLog.requiredSpending, cfLog.spendingShortfall);
   const deathYear = cfg.birthYear + clamp0(cfg.gameDeathAge);
   if (bankrupt) game.over = { why: "bankrupt", year: y };
+  else if (starved) game.over = { why: "starved", year: y };
   else if (y >= Math.min(cfg.endYear, deathYear)) game.over = { why: "end", year: y };
   else game.year = y + 1;
 }
@@ -4241,6 +4341,7 @@ function autoPlay() {
   saveGame(); render(true, true);
 }
 
+
 /* ------------------------------------------------------------------
    파산 원인 진단 — 한 요인씩 꺼 보고 그래도 파산하는지 본다.
    "무엇이 결정적이었나"는 반사실(counterfactual)로만 답할 수 있다.
@@ -4250,7 +4351,7 @@ function diagnose() {
   const bustAge = () => {
     const rp = returnPath(state.cfg);
     const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
-    const d = sim.sum.depleted;
+    const d = failYearOf(state.cfg, sim.sum);
     return d ? d - state.cfg.birthYear : null;
   };
   const test = (label, patch) => {
@@ -4260,17 +4361,53 @@ function diagnose() {
   };
   const now = bustAge();
   const cut = k => c => { c.gameSpend = clamp0(c.gameSpend) * k; (c.spendRules || []).forEach(r => { r.amt = clamp0(r.amt) * k; }); };
+  const rev = state.cfg.reverse || {};
+  const revOn = !!rev.on, revPays = reverseMonthly({ ...state.cfg, reverse: { ...rev, on: 1 } }) > 0;
+  const loanOn = !!(state.cfg.loan || {}).on && clamp0((state.cfg.loan || {}).balance) > 0;
+  // 이미 반영돼 있는 항목은 끄거나 켜 봐야 같은 값이 나온다 — '가입했다면'이라고 물으면 헷갈리니 그대로 알린다
+  const skip = (label, status, note) => ({ label, age: now, status, note });
   const rows = [
     test("생활비를 20% 줄였다면", cut(0.8)),
     test("생활비를 40% 줄였다면", cut(0.6)),
     test("목돈 지출(결혼·학자금 등)이 없었다면", c => { c.events = (c.events || []).filter(e => !(e.kind === "expense" && clamp0(e.amt) >= 3000)); }),
     test("💡 추천 지출을 뺐다면", c => { c.events = (c.events || []).filter(e => !/^💡/.test(e.name || "")); }),
     test("세금이 없었다면", c => { c.pensionCap = 0; c.compRate = 0; c.sevRate = 0; c.taxType = "domestic"; c.divRate = 0; }),
-    test("주담대가 없었다면", c => { c.loan = { ...c.loan, on: 0 }; }),
-    test("주택연금에 가입했다면", c => { c.reverse = { ...c.reverse, on: 1 }; }),
+    loanOn ? test("주담대가 없었다면", c => { c.loan = { ...c.loan, on: 0 }; })
+           : skip("주담대", "na", "해당 없음 (대출 없음)"),
+    revOn && revPays ? skip("🏡 주택연금 기가입", "already", "이미 반영됨")
+      : revOn ? skip("🏡 주택연금", "na", "가입으로 켜져 있으나 주택가격이 0이라 받는 돈이 없습니다")
+      : !revPays ? skip("🏡 주택연금", "na", "주택가격이 없어 계산할 수 없습니다")
+      : test("주택연금에 가입했다면", c => { c.reverse = { ...c.reverse, on: 1 }; }),
   ];
+  // 국민연금 조기수령 — 앞당길수록 금액이 깎이므로 나이마다 따로 돌려 가장 오래 버티는 나이를 고른다
+  let nps = null;
+  const early = npsEarlyAges(state.cfg);
+  if (early.ages.length) {
+    const baseAge = state.cfg.npsAge, by = state.cfg.birthYear;
+    const cands = early.ages.map(a => {
+      const f = npsClaimFactor(by, a) / npsClaimFactor(by, baseAge);
+      const r = test("", c => { c.npsAge = a; });   // 금액은 정상 나이 기준이라 그대로 — 감액은 npsGrossOf 가 붙인다
+      return { a, f, age: r.age, err: !!r.err };
+    }).filter(c => !c.err);      // 계산이 예외로 끝난 나이는 후보가 아니다 — null 을 '끝까지 버팀'으로 읽지 않게
+    // 끝까지 버티는 나이(null)가 가장 좋다. 같으면 감액이 적은(늦은) 나이를 고른다.
+    const val = c => c.age == null ? Infinity : c.age;
+    if (cands.length) {
+      const best = cands.reduce((b, c) => (val(c) > val(b) || (val(c) === val(b) && c.a > b.a)) ? c : b);
+      const n = npsNormalAge(by), cut = 1 - npsClaimFactor(by, best.a);
+      // 지금 설정대로 받을 때와 누적 수령액이 같아지는 나이 (세금·할인 없이, 물가연동이라 실질 기준)
+      //   fE·(t − a) = fB·(t − b)  →  t = (fB·b − fE·a) / (fB − fE)
+      const fE = npsClaimFactor(by, best.a), fB = npsClaimFactor(by, baseAge);
+      const breakeven = fB > fE ? (fB * baseAge - fE * best.a) / (fB - fE) : null;
+      nps = { claimAge: best.a, cut, normal: n, baseAge, breakeven, cands };
+      rows.push({ label: `🏛️ 국민연금을 만 ${best.a}세부터 조기수령했다면 (평생 −${Math.round(cut * 100)}%)`, age: best.age, nps: 1 });
+    } else rows.push({ label: "🏛️ 국민연금 조기수령", age: now, status: "na", note: "계산에 실패해 표시하지 않습니다" });
+  } else {
+    rows.push(early.why === "already" ? skip("🏛️ 국민연금 조기수령", "already", "이미 가장 이른 나이로 반영됨")
+      : early.why === "working" ? skip("🏛️ 국민연금 조기수령", "na", "은퇴 전이라 소득 때문에 지급이 정지되어 제외")
+      : skip("🏛️ 국민연금 조기수령", "na", "국민연금 금액을 넣지 않았습니다"));
+  }
   state.cfg = base;
-  return { now, rows, none: rows.every(r => r.age != null && r.age - (now || 0) < 2) };
+  return { now, rows, nps, none: rows.filter(r => !r.status && !r.err).every(r => r.age != null && r.age - (now || 0) < 2) };
 }
 
 /* 안전 인출액 역산 — 목표 나이까지 버티는 최대 생활비를 이분탐색으로 찾는다. */
@@ -4305,7 +4442,7 @@ function monteCarlo(n, onDone, batch = 0) {
     state.cfg.gameSeed = i === 0 ? keep : keep + i * 7717 + shift;
     const rp = returnPath(state.cfg);
     const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
-    const dep = sim.sum.depleted;
+    const dep = failYearOf(state.cfg, sim.sum);
     // 무엇이 판을 갈랐는지 보려면 '언제 무슨 일이 있었나'를 같이 남겨야 한다
     const cagr = (from, to) => {
       let lg = 0, k = 0;
@@ -4321,11 +4458,13 @@ function monteCarlo(n, onDone, batch = 0) {
     const R = cfg.retireYear;
     const r = {
       seed: state.cfg.gameSeed,
-      bust: !!dep && dep - cfg.birthYear < die,
+      bust: failedByLife(state.cfg, sim.sum),            // 게임은 기대수명 해까지 처리하므로 그해도 포함
       bustAge: dep ? dep - cfg.birthYear : null,
       final: sim.sum.final,
       net: sim.sum.cumNet,
       miss: sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0,
+      // 자산은 버텼어도 (기대수명 안의) 어느 한 해 생활비를 못 채운 판 — 파산과 같은 창(만 die세까지)에서 잰다
+      short: starvedByLife(state.cfg, sim.sum),
       atRetire: sim.sum.atRetire,               // 은퇴 시점 자산 — 출발선이 낮았나
       pre5: cagr(R - 5, R - 1),                 // 은퇴 직전 5년
       post5: cagr(R, R + 4),                    // 은퇴 직후 5년 — 순서위험의 핵심
@@ -4386,6 +4525,7 @@ function monteCarlo(n, onDone, batch = 0) {
     surviveMoe: moe,                  // ±%p (95% 신뢰구간 폭의 절반, Wilson)
     bustAges, finals, nets,
     missAvg: runs.reduce((a, r) => a + r.miss, 0) / runs.length,
+    shortN: alive.filter(r => r.short).length,   // 살아남은 판 중 생활비를 못 채운 판 (파산과 별개 축)
     auto: mine,                       // 내 시장을 자동 배분으로 돌린 결과
     busts: busts.slice().sort((a, b) => a.bustAge - b.bustAge),
     windows: WINDOWS, crashRank,
@@ -4559,13 +4699,12 @@ function safeSpend(onDone) {
       (state.cfg.spendRules || []).forEach((r, i) => { r.amt = clamp0(keep.spendRules[i].amt) * spend / Math.max(1, clamp0(keep.gameSpend)); });
       const rp = returnPath(state.cfg);
       const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
-      const d = sim.sum.depleted;
       // 자산이 안 말랐어도 필요한 돈을 못 채웠으면 '버텼다'고 할 수 없다.
       // 연금수령한도에 묶여 못 뽑는 경우가 여기 걸린다.
       const mr = sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0;
       missSum += mr; missN++;
-      const starved = mr > 0.05;
-      const good = (!d || d - cfg.birthYear >= die) && !starved;
+      const starved = starvedByLife(state.cfg, sim.sum);   // 기대수명 안의 어느 한 해라도
+      const good = !failedByLife(state.cfg, sim.sum) && !starved;
       if (good) ok++;
       if (sd === seeds[0]) ownOk = good;   // 사용자가 실제로 플레이할 시드
     }
@@ -4610,6 +4749,14 @@ const PRIO_SETS = [
   { name: "일반계좌 먼저 (55세 전 대비)", get: () => ({ taxable: 1, isa: 2, irpInv: 3, psDed: 4, psFree: 5, irpSev: 0 }) },
 ];
 
+/** 국민연금 개시 나이 후보 — 지금 설정이 맨 앞(기준)이고, 나머지는 실제로 받을 수 있는 나이다.
+    조기는 은퇴 뒤부터(근로소득이 있으면 지급 정지), 연기는 최대 5년까지. */
+function npsAgeChoices(cfg) {
+  const n = npsNormalAge(cfg.birthYear), retireAge = cfg.retireYear - cfg.birthYear;
+  const out = [cfg.npsAge];
+  for (let a = Math.max(n - NPS_SHIFT_MAX, retireAge); a <= n + NPS_SHIFT_MAX; a++) if (a !== cfg.npsAge) out.push(a);
+  return out;
+}
 function optimize(onDone) {
   const base = JSON.parse(JSON.stringify(state.cfg));
   const die = base.birthYear + (clamp0(base.gameDeathAge) || 95);
@@ -4621,8 +4768,7 @@ function optimize(onDone) {
       state.cfg.gameSeed = sd;
       const rp = returnPath(state.cfg);
       const sim = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } });
-      const d = sim.sum.depleted;
-      if (d && d < die) bust++;
+      if (failedByLife(state.cfg, sim.sum)) bust++;
       miss += sim.sum.autoNeed ? sim.sum.autoMiss / sim.sum.autoNeed : 0;
       net += sim.sum.cumNet; tax += sim.sum.cumTax;
     }
@@ -4653,6 +4799,10 @@ function optimize(onDone) {
     ...(hasHome ? [{ name: "주택연금", vals: [0, 60, 65, 70, 75],
       show: v => v === 0 ? "가입 안 함" : `만 ${v}세 개시`,
       set: v => { state.cfg.reverse = { ...base.reverse, on: v ? 1 : 0, startAge: v || 70 }; } }] : []),
+    ...(clamp0(base.npsAmount) > 0 ? [{ name: "국민연금 개시 나이", vals: npsAgeChoices(base),
+      show: v => { const f = npsClaimFactor(base.birthYear, v), p = Math.round((f - 1) * 100);
+                   return `만 ${v}세${p ? ` (${p > 0 ? "+" : ""}${p}%)` : ""}`; },
+      set: v => { state.cfg.npsAge = v; } }] : []),
     { name: "생활비", vals: [1, .95, .9, .85, .8, .75, .7, .6, .5],
       show: v => v === 1 ? "지금 그대로" : `${Math.round(v * 100)}% (연 ${fmt(Math.round(clamp0(base.gameSpend) * v))})`,
       set: v => { state.cfg.gameSpend = Math.round(clamp0(base.gameSpend) * v);
@@ -4700,20 +4850,36 @@ function renderEnding(box) {
   }).length;
   const pct = post.length ? met / post.length * 100 : 0;
   const last = yrs[yrs.length - 1];
-  const grade = game.over.why === "bankrupt" ? "💸" : pct >= 95 ? "🏆" : pct >= 80 ? "🥈" : pct >= 60 ? "🥉" : "😬";
+  const failed = game.over.why === "bankrupt" || game.over.why === "starved";
+  const grade = game.over.why === "bankrupt" ? "💸" : game.over.why === "starved" ? "🍚" : pct >= 95 ? "🏆" : pct >= 80 ? "🥈" : pct >= 60 ? "🥉" : "😬";
   const title = game.over.why === "bankrupt"
     ? `${game.over.year}년, 만 ${game.over.year - cfg.birthYear}세에 자산이 바닥났습니다`
-    : `${game.over.year}년, 만 ${game.over.year - cfg.birthYear}세까지 완주했습니다`;
+    : game.over.why === "starved"
+    ? `${game.over.year}년, 만 ${game.over.year - cfg.birthYear}세에 생활비를 못 채워 실패했습니다 (자산은 ${fmtBig(last ? last.total : 0)} 남음 · 엄격 모드)`
+    : met < post.length
+      ? `${game.over.year}년, 만 ${game.over.year - cfg.birthYear}세까지 자산은 버텼지만 생활비를 못 채운 해가 ${post.length - met}년 있습니다`
+      : `${game.over.year}년, 만 ${game.over.year - cfg.birthYear}세까지 완주했습니다`;
 
   box.innerHTML = `<div class="ending">
       <div class="grade">${grade}</div>
       <div class="big">${title}</div>
       <p class="hint" style="margin:6px 0 0">은퇴 후 ${post.length}년 중 <strong>${met}년</strong>(${pct.toFixed(0)}%)을 목표 생활비대로 살았습니다.</p>
     </div>
-    ${game.over.why === "bankrupt" ? `<div class="gcard diag"><h4>🔍 무엇이 결정적이었나 — 한 가지씩 꺼 본 결과</h4>
+    ${failed ? `<div class="gcard diag"><h4>🔍 무엇이 결정적이었나 — 한 가지씩 꺼 본 결과</h4>
       ${(() => {
         const d = diagnose();
-        const head = `<div class="gline"><span style="color:var(--muted)">지금 그대로</span><span style="color:var(--muted)">만 ${d.now == null ? "—" : d.now}세 파산 (기준)</span></div>`;
+        const word = cfg.strictSpend ? "실패" : "파산";
+        // 실제 플레이는 그해 수익률을 모른 채(예상 수익률로) 인출을 정하고, 진단·100판의 자동 배분은 그해 수익률을 알고 정한다.
+        // 그래서 같은 시장이어도 실패 나이가 몇 해 다를 수 있다 — 두 값을 나란히 보여 주고, 아래 +N년은 자동 배분끼리의 비교임을 밝힌다.
+        const actualAge = game.over.year - cfg.birthYear;
+        const actualWord = game.over.why === "starved" ? "생활비 미달로 실패" : "자산 소진(파산)";
+        const nowTxt = d.now == null ? `끝까지 버팀 (${word} 없음)` : `만 ${d.now}세 ${word}`;
+        const head = `<div class="gline"><span>이번 판 (실제 플레이)</span><span><strong>만 ${actualAge}세 ${actualWord}</strong></span></div>`
+          + `<div class="gline"><span style="color:var(--muted)">같은 시장 · 자동 배분 <span style="font-size:11px">(아래 비교의 기준)</span></span><span style="color:var(--muted)">${nowTxt}</span></div>`
+          + (d.now !== actualAge
+            ? `<p class="hint" style="margin:6px 0 8px">실제 플레이는 <strong>그해 수익률을 모른 채</strong> 인출을 정하고, 자동 배분은 <strong>그해 수익률을 알고</strong> 정하기 때문에 `
+              + `같은 시장이어도 몇 해 다를 수 있습니다(연금수령한도 근처에서 특히 벌어집니다). 아래 <strong>+N년</strong>은 <strong>자동 배분끼리</strong> 견준 값입니다.</p>`
+            : "");
         const tail = d.none
           ? `<p class="hint" style="margin:8px 0 0;color:var(--critical)">어느 하나를 꺼도 결과가 거의 그대로입니다 —
                <strong>한 가지 원인이 아니라 자산 자체가 부족한 상태</strong>이거나, 연금수령한도에 걸려 인출 속도가
@@ -4721,18 +4887,25 @@ function renderEnding(box) {
                주택연금 같은 외부 재원을 더해야 합니다.</p>`
           : `<p class="hint" style="margin:8px 0 0">'끝까지 버팀'이나 큰 <strong>+N년</strong>이 붙은 항목이 이번 판의 결정적 원인입니다.
                여러 개면 그중 가장 실행하기 쉬운 것부터 손보세요.</p>`;
+        const npsNote = d.nps ? `<p class="hint" style="margin:8px 0 0">🏛️ 조기수령은 <strong>평생 감액</strong>입니다.
+             만 ${d.nps.claimAge}세에 받으면 정상(만 ${d.nps.normal}세) 대비 −${Math.round(d.nps.cut * 100)}%이고,
+             <strong>만 ${Math.round(d.nps.breakeven)}세를 넘겨 사시면</strong> 지금 설정(만 ${d.nps.baseAge}세 수령)보다 누적액이 적어집니다(세금·할인 제외).
+             자산이 바닥나는 시점을 미루는 대신 오래 사는 위험을 떠안는 선택입니다.
+             가입기간 10년 이상이어야 하고, 소득 있는 업무에 종사하는 동안은 지급이 정지됩니다.</p>` : "";
         return head + d.rows.map(r => {
+          if (r.status) return `<div class="gline"><span style="color:var(--muted)">${r.label}</span><span style="color:var(--muted)">${r.note}</span></div>`;
+          if (r.err) return `<div class="gline"><span style="color:var(--muted)">${r.label}</span><span style="color:var(--muted)">계산 실패</span></div>`;
           const fixed = r.age == null;
           const gain = !fixed && d.now != null ? r.age - d.now : 0;
           return `<div class="gline"><span>${r.label}</span><span class="${fixed ? "pos" : gain >= 5 ? "pos" : ""}">${
-            fixed ? "<strong>끝까지 버팀</strong>" : `만 ${r.age}세 파산 ${gain > 0 ? `<span style="color:var(--muted)">(+${gain}년)</span>` : ""}`}</span></div>`;
-        }).join("") + tail;
+            fixed ? "<strong>끝까지 버팀</strong>" : `만 ${r.age}세 ${word} ${gain > 0 ? `<span style="color:var(--muted)">(+${gain}년)</span>` : gain < 0 ? `<span style="color:var(--critical)">(${gain}년 · 오히려 빨라짐)</span>` : ""}`}</span></div>`;
+        }).join("") + npsNote + tail;
       })()}
     </div>` : ""}
     <div class="gcard opt" style="margin-top:14px">
       <h4>🧭 어떻게 했으면 나았을까 — 최적 운영 탐색</h4>
       <p class="hint" style="margin:0 0 10px">
-        생활비 · 생활비 곡선 · 인출 전략 · 납입 순서${clamp0((cfg.reverse||{}).homeValue) > 0 ? " · 주택연금 개시 나이" : ""}를
+        생활비 · 생활비 곡선 · 인출 전략 · 납입 순서${clamp0((cfg.reverse||{}).homeValue) > 0 ? " · 주택연금 개시 나이" : ""}${clamp0(cfg.npsAmount) > 0 ? " · 국민연금 개시 나이" : ""}를
         하나씩 바꿔 보며 <strong>가장 오래 · 가장 굶지 않고 버티는 조합</strong>을 찾습니다.
         시장 가정(수익률 해석 · 위기 횟수)은 넣지 않습니다 — 내가 고르는 게 아니라 주어지는 것이라,
         넣으면 "운이 좋았으면 됐다"는 공허한 답이 나옵니다.
@@ -4857,12 +5030,12 @@ function renderEnding(box) {
           <div style="width:100%;height:${Math.round(c / peak * 44) + 2}px;background:${i === myBin ? "var(--accent)" : "var(--border)"};border-radius:2px"></div>
           <div style="font-size:9px;line-height:1;color:var(--accent)">${i === myBin ? "▲" : "&nbsp;"}</div>
         </div>`).join("");
-      const busted = game.over.why === "bankrupt";
+      const busted = game.over.why === "bankrupt" || game.over.why === "starved";
       const sv = Math.round(r.survive * 100);
       // 100판은 표본이라 다시 뽑으면 이만큼 움직인다 — 확정값처럼 읽히지 않게 같이 적는다
       const moe = Math.round(r.surviveMoe * 100);
       mcOut.innerHTML = `${r.n}판 중 <strong style="color:${sv >= 80 ? "var(--good)" : sv >= 50 ? "var(--accent)" : "var(--critical)"}">`
-        + `${sv}판이 만 ${r.die}세까지 버텼습니다</strong>`
+        + `${sv}판이 만 ${r.die}세까지 자산이 버텼습니다</strong>`
         + (moe > 0 ? ` <span style="color:var(--muted);font-size:12px">± ${moe}%p</span>` : "")
         + (r.batch ? ` <span style="color:var(--muted);font-size:11px">· ${r.batch + 1}번째 표본</span>` : "");
       mcRows.innerHTML = `<div style="margin-top:12px">
@@ -4873,6 +5046,7 @@ function renderEnding(box) {
             ? `<div class="gline"><span>파산한 ${r.bustAges.length}판의 파산 나이</span><span>만 ${Math.round(pctileOf(r.bustAges, .1))} · <strong>${Math.round(pctileOf(r.bustAges, .5))}</strong> · ${Math.round(pctileOf(r.bustAges, .9))}세</span></div>`
             : `<div class="gline"><span>파산</span><span class="pos">한 판도 없었습니다</span></div>`}
           <div class="gline"><span>생활비를 못 채운 몫</span><span>평균 ${(r.missAvg * 100).toFixed(1)}%</span></div>
+          ${r.shortN > 0 ? `<div class="gline"><span>자산은 버텼지만 생활비를 못 채운 판</span><span class="neg">${r.shortN}판 <span style="color:var(--muted);font-size:11px">(어느 한 해 필요액의 ${Math.round(STARVE_TOL * 100)}% 초과)</span></span></div>` : ""}
 
           <div class="gline" style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
             <span style="color:var(--muted)">이번 판(시드 ${r.seed})은 어디쯤이었나</span><span></span></div>
@@ -4901,7 +5075,7 @@ function renderEnding(box) {
 }
 
 /* 최적화가 실제로 건드리는 설정 — 되돌리기는 딱 이만큼만 복원한다 */
-const OPT_KEYS = ["gameSpend", "spendRules", "wdStrategy", "priority", "reverse"];
+const OPT_KEYS = ["gameSpend", "spendRules", "wdStrategy", "priority", "reverse", "npsAge"];
 
 /** 최적화 직전 설정으로 되돌린다. 한 번 적용하면 새 판에도 계속 따라붙어
     "왜 내가 고른 적 없는 배분으로 굴러가지?" 가 되기 때문에 반드시 퇴로가 있어야 한다. */
@@ -4925,7 +5099,7 @@ function renderOptUndo() {
         <span style="color:var(--muted);font-size:12px">${escHtml(u.at)} · ${escHtml(u.what)}</span></span>
       <button type="button" id="btnOptUndo">↩︎ 적용 전 설정으로</button>
     </div>
-    <p class="hint" style="margin:6px 0 0">최적화는 인출 전략·납입 순서·생활비·주택연금을 <strong>실제 설정에 저장</strong>합니다.
+    <p class="hint" style="margin:6px 0 0">최적화는 인출 전략·납입 순서·생활비·주택연금·국민연금 개시 나이를 <strong>실제 설정에 저장</strong>합니다.
       그래서 새 판을 시작해도 계속 따라붙습니다. 되돌리면 적용 직전 값으로 돌아가고 새 판이 열립니다.</p>`;
   document.getElementById("btnOptUndo").onclick = optimizeUndo;
 }
@@ -4943,7 +5117,7 @@ function optimizeApply(r) {
   };
   const at = n => { const i = r.knobsName.indexOf(n); return i < 0 ? null : r.pick[i]; };
   const spendV = at("생활비"), curveV = at("생활비 곡선"), wdV = at("인출 전략"),
-        prioV = at("납입 순서"), revV = at("주택연금");
+        prioV = at("납입 순서"), revV = at("주택연금"), npsV = at("국민연금 개시 나이");
   // 탐색과 같은 순서로 적용해야 같은 결과가 나온다 — 곡선을 먼저 깔고 그 위에 배율.
   if (curveV === "curve") c.spendRules = spendCurve();
   if (spendV != null) {
@@ -4953,6 +5127,7 @@ function optimizeApply(r) {
   if (wdV != null) c.wdStrategy = wdV;
   if (prioV != null) c.priority = PRIO_SETS[prioV].get(base);
   if (r.hasHome && revV != null) c.reverse = { ...base.reverse, on: revV ? 1 : 0, startAge: revV || 70 };
+  if (npsV != null) c.npsAge = npsV;
   gameStart();
   syncCfgInputs(); renderSpendRules(); renderOptUndo(); render(true, true);
 }
@@ -5073,6 +5248,20 @@ function bindRev() {
       syncRev(); render(false);
     });
   });
+}
+/** 국민연금 개시 나이에 따른 실제 수령액 — 입력은 정상 나이 기준이라 눈으로 확인할 자리가 필요하다 */
+function syncNps() {
+  const info = document.getElementById("npsInfo");
+  if (!info) return;
+  const c = state.cfg, amt = clamp0(c.npsAmount);
+  if (amt <= 0) { info.textContent = "금액을 넣으면 개시 나이별 실제 수령액이 여기 나옵니다."; return; }
+  const n = npsNormalAge(c.birthYear), f = npsClaimFactor(c.birthYear, c.npsAge), lo = n - NPS_SHIFT_MAX, hi = n + NPS_SHIFT_MAX;
+  const pct = Math.round((f - 1) * 100);
+  const out = c.npsAge < lo || c.npsAge > hi;
+  info.innerHTML = `정상 수급 나이 <strong>만 ${n}세</strong> 기준 → 만 ${c.npsAge}세 개시: <strong>연 ${fmt(Math.round(amt * f))}만원</strong>`
+    + (pct ? ` <span style="color:${pct < 0 ? "var(--critical)" : "var(--good)"}">(${pct > 0 ? "+" : ""}${pct}% · 평생)</span>` : "")
+    + (out ? ` <span style="color:var(--critical)">(조기·연기는 만 ${lo}~${hi}세까지만 가능 — 계산은 ${Math.min(NPS_SHIFT_MAX, Math.abs(c.npsAge - n))}년치까지만 반영)</span>` : "")
+    + `<br><span style="color:var(--muted)">개시 후에는 이 금액이 물가만큼 오릅니다. 조기수령은 가입기간 10년 이상이어야 하고 소득 있는 업무 종사 중에는 정지됩니다.</span>`;
 }
 function syncRev() {
   const R = state.cfg.reverse || {};
@@ -5389,7 +5578,7 @@ function renderXfers() {
 const CFG_FIELDS = ["birthYear", "startYear", "retireYear", "endYear", "inflation", "salaryTier", "isaType",
   "timing", "realView", "sevRate", "compRate", "npsAmount", "npsReal", "npsAge", "npsRate",
   "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap", "pensionTotalCap",
-  "gameSpend", "gameMean", "gameVol", "gameSeed", "gameDeathAge",
+  "gameSpend", "gameMean", "gameVol", "gameSeed", "gameDeathAge", "strictSpend",
   "preset", "riskFrom", "lateFrom", "crashCount", "crashPick", "retMode",
   "cAccum", "cAccumSd", "cRisk", "cRiskSd", "cLate", "cLateSd"];
 /** 값을 문자열 그대로 보관하는 필드 — 나머지는 숫자로 변환한다 */
@@ -5398,7 +5587,9 @@ const STR_FIELDS = new Set(["salaryTier", "isaType", "timing", "taxType", "wdStr
 function syncCfgInputs() {
   CFG_FIELDS.forEach(k => {
     const n = document.getElementById("cfg_" + k);
-    if (n) n.value = state.cfg[k];
+    // 국민연금 금액은 예전 저장본을 환산하면 소수가 길게 붙는다 — 저장값은 그대로 두고 칸에는 반올림해 보인다
+    // (입력 중인 칸은 건드리지 않는다: 반올림된 글자가 사용자가 친 값을 덮으면 안 된다)
+    if (n) n.value = (k === "npsAmount" && n !== document.activeElement) ? Math.round(clamp0(state.cfg[k]) * 10) / 10 : state.cfg[k];
   });
   // 같은 설정 칸이 플래너·게임 양쪽에 있으므로 전부 채운다 (입력 중인 칸은 건드리지 않는다)
   document.querySelectorAll("[data-cfg]").forEach(n => {
@@ -5415,6 +5606,7 @@ function syncCfgInputs() {
   syncRetMode();
   syncLoan();
   syncRev();
+  syncNps();
   syncHlt();
   syncPrp();
   syncOpening();
@@ -5710,6 +5902,23 @@ function migrateV2toV3(cfg, src) {
   return cfg;
 }
 
+/** v3 → v4. 국민연금 「연 수령액」의 기준이 개시 나이에서 정상 수급 나이로 바뀌었다.
+    실제 수령액이 그대로 남도록 옛 금액을 비율로 나눠 넣는다 (개시 나이가 정상 나이면 그대로).
+    출생연도·개시 나이가 검증된 뒤에 불러야 한다. 값은 **반올림하지 않고** 저장한다 —
+    소수 첫째 자리로 자르면 60세 개시에서 연 0.02만원, 누적 세금·최종 자산이 1만원 안팎 어긋난다.
+    화면에 보이는 값만 반올림한다(입력칸·경고 문구). */
+function migrateV3toV4(cfg) {
+  const amt = clamp0(cfg.npsAmount), f = npsClaimFactor(cfg.birthYear, cfg.npsAge);
+  if (amt > 0 && Math.abs(f - 1) > 1e-9) {
+    cfg.npsAmount = amt / f;
+    MIGRATION_WARNINGS.push(`국민연금: 예전 저장본은 개시 나이(만 ${cfg.npsAge}세)에 받는 금액으로 적혀 있었습니다. `
+      + `이제 「연 수령액」은 정상 수급 나이(만 ${npsNormalAge(cfg.birthYear)}세) 기준이라 연 ${(Math.round(amt * 10) / 10).toLocaleString()}만원을 `
+      + `${(Math.round(cfg.npsAmount * 10) / 10).toLocaleString()}만원으로 환산했습니다 — 실제 수령액은 그대로입니다.`);
+  }
+  cfg.schemaVersion = 4;
+  return cfg;
+}
+
 /** v1 → v2. 구 필드 정리와 중첩 객체 보완. */
 function migrateV1toV2(cfg) {
   migrateTransfers(cfg);              // isaMoveYear/isaMoveAmt → transfers
@@ -5756,6 +5965,7 @@ function migrateState(raw) {
   if (from < 3) cfg = migrateV2toV3(cfg, src);
   cfg.schemaVersion = SCHEMA_VERSION;
   cfg.npsReal = numOf(cfg.npsReal) === 0 ? 0 : 1;
+  { const sv = numOf(cfg.strictSpend); cfg.strictSpend = (sv === 1 || sv === 2) ? sv : 0; }   // 0/1/2 밖의 값은 기본(0)
 
   // 4) 값 검증 — 잘못된 값은 기본값으로 복구하고 경고로 남긴다
   cfg.birthYear  = Math.round(safeNum(cfg.birthYear, def.cfg.birthYear, 1900, 2200, "출생연도"));
@@ -5784,6 +5994,8 @@ function migrateState(raw) {
   cfg.npsAmount   = safeNum(cfg.npsAmount, 0, 0, 1e9, "국민연금 수령액");
   cfg.npsAge      = Math.round(safeNum(cfg.npsAge, def.cfg.npsAge, 1, 130, "국민연금 개시나이"));
   cfg.npsRate     = safeNum(cfg.npsRate, def.cfg.npsRate, 0, 100, "국민연금 세율");
+  // 출생연도·개시 나이·금액이 모두 검증된 뒤에 기준을 옮긴다 (여기서 앞의 순차 마이그레이션이 모두 끝나 있다)
+  if (from < 4) cfg = migrateV3toV4(cfg);
   cfg.sevRate     = safeNum(cfg.sevRate, def.cfg.sevRate, 0, 100, "퇴직소득 실효세율");
   cfg.compRate    = safeNum(cfg.compRate, def.cfg.compRate, 0, 100, "분리과세율");
   cfg.divRate     = safeNum(cfg.divRate, def.cfg.divRate, 0, 100, "배당률");
@@ -7193,6 +7405,417 @@ function runSelfTests() {
     const t60c = taxAt(simulate({ returns: { 2026: 100, 2027: 0 } }), 2026, "psDed");
     ok("60c. 첫 수령 해는 신청일(인출 시점) 평가액 — 한도 240", near(t60c, 200 * .055, 0.01),
        (200 * .055).toFixed(2), t60c.toFixed(2));
+
+    /* --- 61) 국민연금 조기수령 — 나이를 당기면 금액이 평생 깎인다 --- */
+    ok("61. 정상 수급 나이 · 조기 감액 · 연기 가산",
+       npsNormalAge(1952) === 60 && npsNormalAge(1960) === 62 && npsNormalAge(1968) === 64 && npsNormalAge(1969) === 65
+       && near(npsClaimFactor(1969, 60), 0.70, 1e-9) && near(npsClaimFactor(1969, 62), 0.82, 1e-9)
+       && npsClaimFactor(1969, 65) === 1 && near(npsClaimFactor(1969, 70), 1.36, 1e-9)
+       && near(npsClaimFactor(1969, 55), 0.70, 1e-9) && near(npsClaimFactor(1969, 75), 1.36, 1e-9),
+       "0.70/0.82/1/1.36 (5년 상한)",
+       [60, 62, 65, 70, 55, 75].map(a => npsClaimFactor(1969, a).toFixed(3)).join("/"));
+    const bustOf = c => {
+      const keep = state.cfg; state.cfg = c;
+      try { const rp = returnPath(c); const d = simulate({ returns: rp.path, auto: { loan: loanSchedule(c, rp.crash) } }).sum.depleted;
+            return d ? d - c.birthYear : null; } finally { state.cfg = keep; }
+    };
+    // 1969년생(정상 65세) · 41세부터가 아니라 은퇴 직후 인출이 시작되는 설정 — 실제로 바닥나야 진단이 의미 있다
+    const setup61 = () => {
+      reset(); state.cfg.birthYear = 1969; state.cfg.retireYear = 2030; state.cfg.endYear = 2064;
+      state.cfg.gameSpend = 4000; state.cfg.opening.taxable.free = 30000;
+    };
+    const dg = (mod) => {
+      setup61();
+      state.cfg.npsAmount = 2160; state.cfg.npsAge = 65; state.cfg.npsRate = 3;
+      if (mod) mod(state.cfg);
+      return diagnose();
+    };
+    const d61 = dg();
+    const nr61 = d61.rows.find(r => r.nps);
+    // 진단이 고른 나이로 직접 돌린 결과와 같아야 한다 — 금액은 비율로 환산돼야 한다
+    setup61();
+    state.cfg.npsAmount = 2160; state.cfg.npsAge = 65; state.cfg.npsRate = 3;
+    const alt61 = JSON.parse(JSON.stringify(state.cfg));
+    alt61.npsAge = d61.nps ? d61.nps.claimAge : 0;      // 금액은 정상 나이 기준이라 그대로 — 감액은 계산이 붙인다
+    ok("61b. 진단의 조기수령 행 = 그 나이로 직접 돌린 결과",
+       d61.now != null && !!nr61 && d61.nps.claimAge >= 61 && d61.nps.claimAge <= 64 && nr61.age === bustOf(alt61)
+       && nr61.age > d61.now,
+       `만 ${bustOf(alt61)}세 (기준 ${d61.now}세보다 뒤)`, nr61 ? `만 ${nr61.age}세 (${d61.nps.claimAge}세 개시)` : "행 없음");
+    // 감액 없이 나이만 당긴 낙관 값(금액 그대로)보다 나빠야 한다 — 감액을 빠뜨린 구현을 잡는다
+    const naive61 = JSON.parse(JSON.stringify(alt61)); naive61.npsAmount = 2160 / npsClaimFactor(1969, alt61.npsAge);   // 당기고도 65세 금액 그대로 받는 낙관
+    ok("61c. 감액을 반영하면 감액 없이 당긴 값보다 파산이 이르거나 같다",
+       (bustOf(naive61) ?? 999) >= (nr61 && nr61.age != null ? nr61.age : 999), "감액 반영 ≤ 무감액",
+       `무감액 ${bustOf(naive61)} / 감액 ${nr61 && nr61.age}`);
+    ok("61d. 손익분기 나이 = 정상 나이까지 기다린 누적액과 같아지는 나이",
+       !!d61.nps && near(d61.nps.breakeven, (65 - (1 - d61.nps.cut) * d61.nps.claimAge) / d61.nps.cut, 1e-9)
+       && d61.nps.baseAge === 65 && d61.nps.breakeven > 65 && d61.nps.breakeven < 85,
+       "65 < 손익분기 < 85", d61.nps ? d61.nps.breakeven.toFixed(1) : "없음");
+    // 은퇴 전 나이는 후보에서 뺀다 (소득이 있으면 지급 정지)
+    const d61e = dg(c => { c.retireYear = 2032; });      // 1969생 → 63세 은퇴
+    ok("61e. 은퇴 전 나이는 조기수령 후보가 아니다", !!d61e.nps && d61e.nps.claimAge >= 63 && d61e.nps.cands.every(c => c.a >= 63),
+       "후보 ≥ 63세", d61e.nps ? d61e.nps.cands.map(c => c.a).join(",") : "없음");
+    const d61f = dg(c => { c.npsAge = 60; });
+    const d61g = dg(c => { c.npsAmount = 0; });
+    const d61h = dg(c => { c.retireYear = 2040; });      // 71세 은퇴 — 정상 나이 전에는 전부 근로 중
+    ok("61f. 이미 가장 이른 나이면 '이미 반영', 금액이 없으면 '해당 없음', 은퇴 전이면 제외",
+       !d61f.nps && d61f.rows.some(r => /조기수령/.test(r.label) && r.status === "already")
+       && d61g.rows.some(r => /조기수령/.test(r.label) && r.status === "na")
+       && d61h.rows.some(r => /조기수령/.test(r.label) && r.status === "na" && /은퇴 전/.test(r.note)),
+       "already / na / na(은퇴 전)",
+       [d61f, d61g, d61h].map(d => (d.rows.find(r => /조기수령/.test(r.label)) || {}).status).join(" / "));
+    // 정상 나이보다 늦게 받기로 한 설정에서도 환산이 이어진다 (기준 비율이 1이 아니다)
+    const d61i = dg(c => { c.retireYear = 2029; c.npsAge = 68; c.npsAmount = 2160 * 1.216; });
+    // 손익분기는 '지금 설정'과 견준다 — 연기연금으로 잡은 설정이면 정상 나이가 아니라 그 나이가 기준이다
+    const bkT = d61i.nps ? d61i.nps.breakeven : NaN, bn = d61i.nps;
+    ok("61g2. 연기연금 설정의 손익분기 = 그 설정과 누적 수령액이 같아지는 나이",
+       !!bn && near(npsClaimFactor(1969, bn.claimAge) * (bkT - bn.claimAge), npsClaimFactor(1969, 68) * (bkT - 68), 1e-6) && bn.baseAge === 68 && bkT > 68,
+       "fE(t−a) = fB(t−68)", bn ? `t=${bkT.toFixed(2)}` : "없음");
+    ok("61g. 연기연금으로 잡은 설정에서 당기면 정상(65세)값 기준으로 환산",
+       !!d61i.nps && d61i.nps.cands.some(c => c.a === 60 && near(c.f, 0.7 / 1.216, 1e-9)),
+       "60세 후보의 비율 0.7/1.216", d61i.nps ? d61i.nps.cands.map(c => `${c.a}:${c.f.toFixed(3)}`).join(" ") : "없음");
+
+    /* --- 63) 국민연금 「연 수령액」은 정상 나이 기준 — 개시 나이가 금액을 바꾼다 --- */
+    reset(); state.cfg.birthYear = 1985; state.cfg.inflation = 0; state.cfg.npsAmount = 1000;
+    const g63 = a => { state.cfg.npsAge = a; return npsGrossOf(state.cfg, 80); };
+    ok("63. 개시 나이가 금액을 바꾼다 (60세 −30% · 65세 그대로 · 70세 +36%)",
+       near(g63(60), 700, 1e-6) && near(g63(65), 1000, 1e-6) && near(g63(70), 1360, 1e-6) && near(g63(62), 820, 1e-6),
+       "700 / 1000 / 1360 / 820", [60, 65, 70, 62].map(a => g63(a).toFixed(1)).join(" / "));
+    state.cfg.npsAge = 60;
+    ok("63b. 개시 전엔 0, 개시 나이부터 감액 금액", npsGrossOf(state.cfg, 59) === 0 && near(npsGrossOf(state.cfg, 60), 700, 1e-6),
+       "0 / 700", `${npsGrossOf(state.cfg, 59)} / ${npsGrossOf(state.cfg, 60).toFixed(1)}`);
+    state.cfg.npsReal = 0; state.cfg.inflation = 2;
+    ok("63c. 명목 고정에도 같은 비율이 붙는다", near(npsGrossOf(state.cfg, 75), 700, 1e-6), "700", npsGrossOf(state.cfg, 75).toFixed(2));
+    state.cfg.npsReal = 1;
+    const e63 = 1000 * 0.7 * Math.pow(1.02, 1985 + 75 - 2026);
+    ok("63d. 물가연동은 감액된 금액 위에서 오른다", near(npsGrossOf(state.cfg, 75), e63, 0.01), e63.toFixed(1), npsGrossOf(state.cfg, 75).toFixed(1));
+    ok("63e. 조기수령 30%는 5년이 상한 — 55세로 적어도 −30%", near(npsClaimFactor(1985, 55), 0.7, 1e-9) && near(npsClaimFactor(1985, 80), 1.36, 1e-9),
+       "0.7 / 1.36", `${npsClaimFactor(1985, 55)} / ${npsClaimFactor(1985, 80)}`);
+
+    /* --- 64) v3 이하 저장본은 개시 나이 기준 금액이었다 — 실제 수령액이 그대로 남게 환산 --- */
+    const v3 = (age, amt, ver = 3, birth = 1985) => ({ cfg: { schemaVersion: ver, birthYear: birth, npsAmount: amt, npsAge: age, npsReal: 1, inflation: 2, startYear: 2026 }, rows: {} });
+    const m64a = migrateState(v3(60, 1000)), m64b = migrateState(v3(65, 1000)), m64c = migrateState(v3(70, 1360));
+    const pay = m => npsGrossOf(m.cfg, m.cfg.npsAge);
+    const before64 = 1000 * Math.pow(1.02, 1985 + 60 - 2026);
+    ok("64. v3 저장본(60세·1000) → 정상 나이 기준으로 환산하고 실제 수령액은 그대로",
+       near(m64a.cfg.npsAmount, 1000 / 0.7, 1e-9) && near(pay(m64a), before64, before64 * 1e-12) && m64a.cfg.schemaVersion === SCHEMA_VERSION,
+       `${(1000 / 0.7).toFixed(4)} (반올림 없음) / ${before64.toFixed(4)}`, `${m64a.cfg.npsAmount} / ${pay(m64a).toFixed(4)}`);
+    ok("64b. 개시 나이가 정상 나이면 금액도 경고도 그대로", m64b.cfg.npsAmount === 1000 && !m64b.warnings.some(w => /정상 수급 나이/.test(w)),
+       "1000 · 경고 없음", `${m64b.cfg.npsAmount} · ${m64b.warnings.filter(w => /정상 수급 나이/.test(w)).length}건`);
+    const before64c = 1360 * Math.pow(1.02, 1985 + 70 - 2026);
+    ok("64c. 연기(70세·1360) → 1000으로 환산, 수령액 유지", near(m64c.cfg.npsAmount, 1000, 1e-9) && near(pay(m64c), before64c, before64c * 1e-12),
+       `1000 / ${before64c.toFixed(1)}`, `${m64c.cfg.npsAmount} / ${pay(m64c).toFixed(1)}`);
+    ok("64d. 환산했다는 경고가 뜬다(원래 금액·환산 금액 포함)", m64a.warnings.some(w => /정상 수급 나이\(만 65세\)/.test(w) && /1,000/.test(w) && /1,428\.6/.test(w)),
+       "경고 1건", `${m64a.warnings.filter(w => /정상 수급 나이/.test(w)).length}건`);
+    // 이미 v4 인 저장본을 다시 불러도 두 번 환산되지 않는다
+    const again = migrateState({ cfg: JSON.parse(JSON.stringify(m64a.cfg)), rows: {} });
+    ok("64e. v4 저장본은 다시 불러도 금액이 그대로 (이중 환산 없음)", again.cfg.npsAmount === m64a.cfg.npsAmount && !again.warnings.some(w => /정상 수급 나이/.test(w)),
+       String(m64a.cfg.npsAmount), String(again.cfg.npsAmount));
+    // v1·v2 도 v3 을 거쳐 같은 결과 — 옛 저장본은 npsReal 이 없어 명목 고정으로 남는다
+    const m64f = migrateState({ cfg: { schemaVersion: 2, birthYear: 1985, npsAmount: 1000, npsAge: 60, inflation: 2, startYear: 2026 }, rows: {} });
+    ok("64f. v2 저장본도 환산된다 (명목 고정 유지)", near(m64f.cfg.npsAmount, 1000 / 0.7, 1e-9) && m64f.cfg.npsReal === 0 && near(npsGrossOf(m64f.cfg, 70), 1000, 1e-9),
+       "1428.5714 · 명목 · 1000", `${m64f.cfg.npsAmount} · npsReal ${m64f.cfg.npsReal} · ${npsGrossOf(m64f.cfg, 70).toFixed(1)}`);
+    // 출생연도별 정상 나이도 반영 (1960생 → 62세). 60세로 적어 둔 저장본은 −12%
+    const m64g = migrateState(v3(60, 880, 3, 1960));
+    ok("64g. 1960년생(정상 62세) 저장본은 60세 개시를 −12%로 환산", near(m64g.cfg.npsAmount, 1000, 1e-9),
+       "1000", String(m64g.cfg.npsAmount));
+    // 범위 밖 값이 들어 있어도 환산은 검증된 값 위에서 (npsAge 문자열·음수 금액)
+    const m64h = migrateState({ cfg: { schemaVersion: 3, birthYear: 1985, npsAmount: "1,000", npsAge: "60세", npsReal: 1 }, rows: {} });
+    ok("64h. 글자가 섞인 값도 읽은 뒤에 환산 (불러오기 파서와 같은 규칙)", m64h.cfg.npsAge === 60 && near(m64h.cfg.npsAmount, 1000 / 0.7, 1e-9),
+       "60 · 1428.5714", `${m64h.cfg.npsAge} · ${m64h.cfg.npsAmount}`);
+
+    // 환산은 '표시'만 반올림한다 — 저장값이 반올림되면 수령액이 연 0.02만원 어긋나 누적 세금·최종 자산이 달라진다
+    const oldPay = a => a >= 60 ? 1000 * Math.pow(1.02, 1985 + a - 2026) : 0;
+    ok("64i. 환산 후 모든 나이의 수령액이 옛 저장본과 소수점까지 같다 (55~95세)",
+       Array.from({ length: 41 }, (_, i) => 55 + i).every(a => near(npsGrossOf(m64a.cfg, a), oldPay(a), Math.max(1e-9, oldPay(a) * 1e-12))),
+       "전부 일치", "불일치 있음");
+    (() => {
+      const f = (age, amt) => { const m = migrateState(v3(age, amt)); state.cfg = m.cfg; state.rows = {}; state.cfg.startYear = 2026; state.cfg.retireYear = 2040; state.cfg.endYear = 2070;
+        state.cfg.opening.taxable = { free: 30000, ded: 0, sev: 0, gain: 0 }; state.cfg.gameSpend = 3600;
+        const rs = {}; for (let y = 2026; y <= 2070; y++) rs[y] = 6; const sm = simulate({ returns: rs }); return sm.sum; };
+      const a = f(60, 1000), b = (() => { const m = migrateState(v3(60, 1000)); state.cfg = m.cfg; state.rows = {}; state.cfg.startYear = 2026; state.cfg.retireYear = 2040; state.cfg.endYear = 2070;
+        state.cfg.opening.taxable = { free: 30000, ded: 0, sev: 0, gain: 0 }; state.cfg.gameSpend = 3600;
+        state.cfg.npsAge = 60; state.cfg.npsAmount = 1000 / npsClaimFactor(1985, 60);   // 반올림 없는 기준값
+        const rs = {}; for (let y = 2026; y <= 2070; y++) rs[y] = 6; return simulate({ returns: rs }).sum; })();
+      ok("64j. 환산 후 시뮬 결과(최종 자산·누적 세금)가 반올림 없는 기준과 같다", near(a.final, b.final, 1e-6) && near(a.cumTax, b.cumTax, 1e-6),
+         `${b.final.toFixed(4)} / ${b.cumTax.toFixed(4)}`, `${a.final.toFixed(4)} / ${a.cumTax.toFixed(4)}`);
+    })();
+    reset();
+
+    /* --- 67) 배우자 등 다른 사람의 국민연금 일정은 중복 입력이 아니다 --- */
+    const dupWarn = nm => { reset(); state.cfg.npsAmount = 2185;
+      state.cfg.events = [{ name: nm, kind: "salary", amt: 360, year: 2050, until: 2080, every: 1, real: 1 }];
+      return (simulate().warnings || []).filter(w => /양쪽에 적어/.test(w)).length; };
+    ok("67. 「배우자 국민연금」·「부모 노령연금」 일정은 중복 경고가 없다, 「본인 국민연금」·「국민연금」은 있다",
+       dupWarn("배우자 국민연금") === 0 && dupWarn("부모님 노령연금(어머니)") === 0 && dupWarn("본인 국민연금") === 1 && dupWarn("국민연금") === 1,
+       "0 / 0 / 1 / 1", [dupWarn("배우자 국민연금"), dupWarn("부모님 노령연금(어머니)"), dupWarn("본인 국민연금"), dupWarn("국민연금")].join(" / "));
+
+    /* --- 68) 자산이 남아도 생활비를 못 채우면 '완주'라고 하지 않는다 (파산 판정은 그대로) --- */
+    const lockCfg = () => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 5000, gameDeathAge: 45, crashCount: 0 });
+      state.cfg.opening.taxable = { free: 1260, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 667 }; state.cfg.openYears.psDed = 2020; state.cfg.events = []; };
+    lockCfg(); gameStart(); autoPlay();
+    const box68 = { innerHTML: "" }; renderEnding(box68);
+    const over68 = game.over, sf68 = game.log[0] ? game.log[0].shortfall : 0;
+    ok("68. 55세 전 연금이 묶여 생활비를 못 채우면(자산은 남음) 제목이 '완주'가 아니라 미달을 알린다 · 자산 소진 판정은 그대로",
+       over68.why === "end" && sf68 > 3000 && /생활비를 못 채운 해가 1년/.test(box68.innerHTML) && !/완주했습니다/.test(box68.innerHTML),
+       "end · 미달 표시 · '완주' 아님", `${over68.why} · 미달 ${Math.round(sf68)} · ${(box68.innerHTML.match(/\d+년, 만[^<]*/) || [""])[0]}`);
+    reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 500, gameDeathAge: 45, crashCount: 0 });
+    state.cfg.opening.taxable = { free: 20000, ded: 0, sev: 0, gain: 0 }; state.cfg.events = [];
+    gameStart(); autoPlay(); const box68b = { innerHTML: "" }; renderEnding(box68b);
+    ok("68b. 생활비를 다 채우면 종전대로 '완주했습니다'", /완주했습니다/.test(box68b.innerHTML) && !/못 채운 해/.test(box68b.innerHTML), "완주",
+       (box68b.innerHTML.match(/\d+년, 만[^<]*/) || [""])[0]);
+    lockCfg(); state.cfg.gameDeathAge = 50;
+    let mc68; monteCarlo(6, r => { mc68 = r; }, 0);
+    ok("68c. 100판 결과가 '자산은 버텼지만 생활비를 못 채운 판'을 따로 센다 (생존율 정의는 그대로)",
+       mc68.shortN > 0 && mc68.shortN <= Math.round(mc68.survive * 6) && mc68.survive > 0,
+       "미달 판 > 0 · 생존 판 이내", `미달 ${mc68.shortN}판 · 생존 ${Math.round(mc68.survive * 6)}판`);
+    reset();
+
+    // 어느 한 해든 그해 필요액의 5% 이내 미달은 '버텼다'로 본다(안전 인출액 역산과 같은 기준) — 같은 시드에서 생활비만 조금 올려 선을 넘긴다
+    const shortAt = sp => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: sp, gameDeathAge: 60, crashCount: 0 });
+      state.cfg.opening.taxable = { free: 2000, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 667 }; state.cfg.openYears.psDed = 2020; state.cfg.events = [];
+      let out; monteCarlo(1, r => { out = r; }, 0); const rp = returnPath(state.cfg);
+      out.sum = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } }).sum; return out; };
+    const s302 = shortAt(302), s303 = shortAt(303);
+    ok("68d. 그해 필요액의 5% 이내 미달(연 302 → 최악의 해 3.6%)은 '못 채운 판'이 아니고, 넘으면(연 303 → 6.9%) 센다",
+       s302.sum.autoMissMax > 0.02 && s302.sum.autoMissMax < STARVE_TOL && s302.shortN === 0 && s303.sum.autoMissMax > STARVE_TOL && s303.shortN === 1,
+       "3.6% → 0판 · 6.9% → 1판", `${(s302.sum.autoMissMax * 100).toFixed(1)}% → ${s302.shortN}판 · ${(s303.sum.autoMissMax * 100).toFixed(1)}% → ${s303.shortN}판`);
+    // 첫해에 전액을 못 뽑아도 뒤 수십 년을 채우면 누적 비율은 희석된다 — 해마다의 비율로 잡아야 한다
+    reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2060, gameSeed: 1, gameSpend: 1000, gameDeathAge: 75, crashCount: 0, inflation: 0 });
+    state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 50000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    state.cfg.events = [{ name: "목돈", kind: "income", amt: 50000, year: 2031, until: 2031, every: 1, real: 0, jitter: 0 }];
+    let mc68e; monteCarlo(1, r => { mc68e = r; }, 0);
+    const rp68 = returnPath(state.cfg), sum68 = simulate({ returns: rp68.path, auto: { loan: loanSchedule(state.cfg, rp68.crash) } }).sum;
+    ok("68e. 첫해 전액 미달이 뒤 30년의 충족에 희석돼도(누적 5% 미만) '못 채운 판'으로 센다",
+       sum68.autoMiss / sum68.autoNeed < STARVE_TOL && sum68.autoMissMax > 0.9 && mc68e.shortN === 1 && mc68e.survive === 1,
+       "누적 < 5% · 최악의 해 ≈ 100% · 미달 1판 · 생존", `누적 ${(sum68.autoMiss / sum68.autoNeed * 100).toFixed(2)}% · 최악 ${(sum68.autoMissMax * 100).toFixed(0)}% · 미달 ${mc68e.shortN}판 · 생존 ${mc68e.survive}`);
+    reset();
+
+    // 기대수명(만 die세) 뒤의 미달은 세지 않는다 — 파산과 같은 창에서 잰다 (같은 설정, 기대수명만 45세로)
+    const late = shortAt(303); const lateCfgDeath = (() => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 303, gameDeathAge: 46, crashCount: 0 });
+      state.cfg.opening.taxable = { free: 2000, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 667 }; state.cfg.openYears.psDed = 2020; state.cfg.events = [];
+      let o; monteCarlo(1, r => { o = r; }, 0); return o; })();
+    ok("68d2. 기대수명 안의 미달만 센다 — 같은 설정이 수명 60세면 1판, 46세면 0판",
+       late.shortN === 1 && lateCfgDeath.shortN === 0, "1 / 0", `${late.shortN} / ${lateCfgDeath.shortN}`);
+    // 1만원 미만은 계산 오차 — 비율이 100%여도 '못 채운 해'가 아니다
+    reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 0.7, gameDeathAge: 50, crashCount: 0, inflation: 0 });
+    state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2020; state.cfg.events = [];
+    let mc68f; monteCarlo(1, r => { mc68f = r; }, 0);
+    const rp68f = returnPath(state.cfg), sum68f = simulate({ returns: rp68f.path, auto: { loan: loanSchedule(state.cfg, rp68f.crash) } }).sum;
+    ok("68f. 연 0.7만원짜리 미달(비율 100%)은 계산 오차라 '못 채운 판'이 아니다",
+       sum68f.autoNeed > 0 && sum68f.autoMiss / sum68f.autoNeed > 0.9 && mc68f.shortN === 0, "비율 ≈ 100% · 0판",
+       `비율 ${(sum68f.autoMiss / (sum68f.autoNeed || 1) * 100).toFixed(0)}% · ${mc68f.shortN}판`);
+    // 안전 인출액 역산도 같은 기준 — 첫해 전액 미달이 누적에 희석돼 '버텼다'가 되면 안 된다
+    reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2060, gameSeed: 1, gameSpend: 1000, gameDeathAge: 75, crashCount: 0, inflation: 0 });
+    state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 50000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    state.cfg.events = [{ name: "목돈", kind: "income", amt: 50000, year: 2031, until: 2031, every: 1, real: 0, jitter: 0 }];
+    let safe68; safeSpend(r => { safe68 = r; });
+    ok("68g. 안전 인출액 역산: 첫해 전액 미달이 있는 설정은 (누적 5% 미만이어도) 버틴 것으로 치지 않는다",
+       safe68 && safe68.spend < 100, "안전 생활비 < 100", safe68 ? `${safe68.spend}` : "없음");
+    reset();
+
+    /* --- 69) 엄격 모드: 생활비를 못 채운 첫 해를 실패로 (기본은 꺼짐 — 파산은 자산 소진 그대로) --- */
+    ok("69. 미달 판정 경계 — 그해 필요액의 5% 이내 · 1만원 미만은 아님, 넘으면 미달",
+       !isStarved(100, 5) && isStarved(100, 5.5) && !isStarved(0.4, 0.4) && !isStarved(0.8, 0.8) && !isStarved(30, 1.4) && isStarved(20, 1.5) && !isStarved(20, 1),
+       "false·true·false·false·false·true·false",
+       [isStarved(100, 5), isStarved(100, 5.5), isStarved(0.4, 0.4), isStarved(0.8, 0.8), isStarved(30, 1.4), isStarved(20, 1.5), isStarved(20, 1)].join("·"));
+    ok("69b. 실패 연도 — 꺼짐이면 자산 소진만, 켜면 더 이른 쪽",
+       failYearOf({ strictSpend: 0 }, { depleted: 2050, starvedYear: 2040 }) === 2050
+       && failYearOf({ strictSpend: 1 }, { depleted: 2050, starvedYear: 2040 }) === 2040
+       && failYearOf({ strictSpend: 1 }, { depleted: 2035, starvedYear: 2040 }) === 2035
+       && failYearOf({ strictSpend: 1 }, { depleted: null, starvedYear: 2040 }) === 2040
+       && failYearOf({ strictSpend: 0 }, { depleted: null, starvedYear: 2040 }) === null
+       && failYearOf({ strictSpend: 1 }, { depleted: null, starvedYear: null }) === null,
+       "2050 · 2040 · 2035 · 2040 · null · null",
+       [failYearOf({ strictSpend: 0 }, { depleted: 2050, starvedYear: 2040 }), failYearOf({ strictSpend: 1 }, { depleted: 2050, starvedYear: 2040 }),
+        failYearOf({ strictSpend: 1 }, { depleted: 2035, starvedYear: 2040 }), failYearOf({ strictSpend: 1 }, { depleted: null, starvedYear: 2040 }),
+        failYearOf({ strictSpend: 0 }, { depleted: null, starvedYear: 2040 }), failYearOf({ strictSpend: 1 }, {})].join(" · "));
+    // 첫해 전액 미달 → 뒤에 채움 (누적 3% 로 희석되는 설정) — 자산은 계속 남는다
+    const dilCfg = strict => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2060, gameSeed: 1, gameSpend: 1000, gameDeathAge: 75, crashCount: 0, inflation: 0, strictSpend: strict });
+      state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 50000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+      state.cfg.events = [{ name: "목돈", kind: "income", amt: 50000, year: 2031, until: 2031, every: 1, real: 0, jitter: 0 }]; };
+    dilCfg(0); gameStart(); autoPlay(); const off69 = game.over;
+    dilCfg(1); gameStart(); autoPlay(); const on69 = game.over; const box69 = { innerHTML: "" }; renderEnding(box69);
+    ok("69c. 게임: 꺼짐이면 끝까지 진행(end), 켜면 미달 첫 해에 종료(starved) — 자산은 남아 있다",
+       off69.why === "end" && off69.year > 2040 && on69.why === "starved" && on69.year === 2030,
+       "꺼짐 end(2060대) / 켬 starved(2030)", `${off69.why}(${off69.year}) / ${on69.why}(${on69.year})`);
+    ok("69d. 종료 화면이 '생활비를 못 채워 실패'를 알리고 원인 진단 카드를 보인다",
+       /생활비를 못 채워 실패했습니다/.test(box69.innerHTML) && /무엇이 결정적이었나/.test(box69.innerHTML) && /만 \d+세 실패/.test(box69.innerHTML) && !/완주했습니다/.test(box69.innerHTML),
+       "제목 · 진단 카드 · '실패' 표기", (box69.innerHTML.match(/\d+년, 만[^<]*/) || ["제목 없음"])[0]);
+    // 자산이 바닥난 해에 생활비도 못 채웠다면 자산 소진으로 기록한다 (미달이 먼저 잡히지 않는다)
+    reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2031, endYear: 2040, gameSeed: 1, gameSpend: 5000, gameDeathAge: 55, crashCount: 0, inflation: 0, strictSpend: 1 });
+    state.cfg.opening.taxable = { free: 2, ded: 0, sev: 0, gain: 0 };
+    state.cfg.events = [{ name: "월급", kind: "salary", amt: 5000, year: 2030, until: 2030, every: 1, real: 0, jitter: 0 }];
+    gameStart(); autoPlay(); const both69 = game.over;
+    ok("69c2. 자산 소진과 미달이 같은 해면 '자산 소진'(bankrupt)으로 기록", both69.why === "bankrupt" && both69.year === 2031,
+       "bankrupt · 2031", `${both69.why} · ${both69.year}`);
+    dilCfg(0); let mc69a; monteCarlo(1, r => { mc69a = r; }, 0);
+    dilCfg(1); let mc69b; monteCarlo(1, r => { mc69b = r; }, 0);
+    ok("69e. 100판: 꺼짐이면 생존(+미달 1판), 켜면 첫 미달 해가 파산 나이(만 45세)로 잡힌다",
+       mc69a.survive === 1 && mc69a.shortN === 1 && mc69b.survive === 0 && mc69b.bustAges[0] === 45 && mc69b.shortN === 0,
+       "꺼짐 생존1·미달1 / 켬 생존0·만 45세", `꺼짐 생존${mc69a.survive}·미달${mc69a.shortN} / 켬 생존${mc69b.survive}·${mc69b.bustAges[0]}세·미달${mc69b.shortN}`);
+    dilCfg(1); const dg69 = diagnose(); dilCfg(0); const dg69off = diagnose();
+    ok("69f. 진단의 기준 나이도 같은 판정 — 엄격 모드만 실패 나이(45세)가 나온다",
+       dg69.now === 45 && dg69off.now === null, "45 / null", `${dg69.now} / ${dg69off.now}`);
+    const optOf = strict => { dilCfg(strict); Object.assign(state.cfg, { endYear: 2045, gameDeathAge: 60 }); let o; optimize(x => { o = x; }); return o; };
+    const op69on = optOf(1), op69off = optOf(0);
+    ok("69g. 최적 탐색도 같은 판정 — 엄격 모드에서만 파산으로 센다(꺼짐은 0%)",
+       op69off.cur.bust === 0 && op69on.cur.bust > 0, "꺼짐 0 / 켬 > 0", `${op69off.cur.bust} / ${op69on.cur.bust}`);
+    dilCfg(1); let safe69; safeSpend(r => { safe69 = r; });
+    ok("69h. 안전 인출액 역산: 엄격 모드에서도 미달이 있는 설정은 버틴 것으로 치지 않는다", safe69 && safe69.spend < 100, "< 100", safe69 ? String(safe69.spend) : "없음");
+    // 새 설정 값 검증 — 0/1 밖은 기본(0), 문자열 '1'은 1
+    const ms = v => migrateState({ cfg: { strictSpend: v }, rows: {} }).cfg.strictSpend;
+    ok("69i. 저장본의 엄격 모드 값 — 1·2(문자열 포함)는 그대로, 그 밖(3·'abc'·null·없음)은 꺼짐, 기본값은 꺼짐",
+       ms(1) === 1 && ms("1") === 1 && ms(2) === 2 && ms("2") === 2 && ms(3) === 0 && ms("abc") === 0 && ms(null) === 0 && ms(undefined) === 0 && defaultState().cfg.strictSpend === 0,
+       "1·1·2·2·0·0·0·0·0", [ms(1), ms("1"), ms(2), ms("2"), ms(3), ms("abc"), ms(null), ms(undefined), defaultState().cfg.strictSpend].join("·"));
+    reset();
+
+    /* --- 70) 종료 진단: 실제 플레이 결과와 자동 배분 기준을 나란히, 다르면 이유를 밝힌다 --- */
+    const gameCfg70 = seed => { reset(); Object.assign(state.cfg, { birthYear: 1970, startYear: 2026, retireYear: 2035, endYear: 2065, gameSeed: seed, gameSpend: 4200, gameDeathAge: 95, crashCount: 1, npsAmount: 1500, npsAge: 65, strictSpend: 0 });
+      state.cfg.opening.taxable = { free: 15000, ded: 0, sev: 0, gain: 3000 }; state.cfg.opening.psDed = { free: 0, ded: 6000, sev: 0, gain: 1000 }; state.cfg.openYears.psDed = 2010;
+      state.cfg.events = [{ name: "월급", kind: "salary", amt: 7000, year: 2026, until: 2034, every: 1 }]; };
+    gameCfg70(30); gameStart(); autoPlay();
+    const act70 = game.over.year - 1970, box70 = { innerHTML: "" }; renderEnding(box70); const dg70 = diagnose();
+    ok("70. 같은 시드에서 실제 플레이(만 93세)와 진단의 자동 배분(만 90세)이 다르면 둘 다 보이고 이유를 적는다",
+       game.over.why === "bankrupt" && act70 === 93 && dg70.now === 90 && /이번 판 \(실제 플레이\)/.test(box70.innerHTML) && new RegExp(`만 ${act70}세 자산 소진`).test(box70.innerHTML)
+       && /같은 시장 · 자동 배분/.test(box70.innerHTML) && new RegExp(`만 ${dg70.now}세 파산`).test(box70.innerHTML) && /그해 수익률을 모른 채/.test(box70.innerHTML) && /자동 배분끼리/.test(box70.innerHTML),
+       "실제 93 · 자동 배분 90 · 이유 문구", `실제 ${act70} · 진단 ${dg70.now} · 문구 ${/그해 수익률을 모른 채/.test(box70.innerHTML)}`);
+    dilCfg(1); gameStart(); autoPlay(); const box70b = { innerHTML: "" }; renderEnding(box70b);
+    ok("70b. 두 값이 같으면 이유 문구는 붙지 않는다", /이번 판 \(실제 플레이\)/.test(box70b.innerHTML) && /만 45세 생활비 미달로 실패/.test(box70b.innerHTML) && !/그해 수익률을 모른 채/.test(box70b.innerHTML),
+       "두 줄 · 문구 없음", `문구 ${/그해 수익률을 모른 채/.test(box70b.innerHTML)}`);
+
+    /* --- 71) 기대수명 해까지 센다 — 게임은 그해 지출까지 처리한다 --- */
+    const edge71 = (die, strict) => { reset(); Object.assign(state.cfg, { birthYear: 1976, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 5000, gameDeathAge: die, crashCount: 0, strictSpend: strict });
+      state.cfg.opening.taxable = { free: 1260, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 667 }; state.cfg.openYears.psDed = 2020; state.cfg.events = [];
+      gameStart(); autoPlay(); const g = game.over; let o; monteCarlo(1, r => { o = r; }, 0); return { g, o }; };
+    const x54 = edge71(54, 1), x53 = edge71(53, 1);
+    ok("71. 기대수명(만 54세) 해에 생활비를 못 채우면 게임이 실패로 끝나고 100판도 실패로 센다 (수명 전 해는 안 세는 경계 확인)",
+       x54.g.why === "starved" && x54.g.year === 2030 && x54.o.survive === 0 && x54.o.bustAges[0] === 54 && x53.g.why === "starved" && x53.o.survive === 1,
+       "수명 54: 게임 starved · 100판 생존 0(만 54세) / 수명 53: 100판 생존 1", `수명 54: ${x54.g.why}·생존 ${x54.o.survive}·${x54.o.bustAges[0]} / 수명 53: 생존 ${x53.o.survive}`);
+    const dep71 = die => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2031, endYear: 2040, gameSeed: 1, gameSpend: 5000, gameDeathAge: die, crashCount: 0, inflation: 0, strictSpend: 0 });
+      state.cfg.opening.taxable = { free: 2, ded: 0, sev: 0, gain: 0 };
+      state.cfg.events = [{ name: "월급", kind: "salary", amt: 5000, year: 2030, until: 2030, every: 1, real: 0, jitter: 0 }];
+      gameStart(); autoPlay(); const g = game.over; let o; monteCarlo(1, r => { o = r; }, 0); return { g, o }; };
+    const d46 = dep71(46), d45 = dep71(45);
+    ok("71b. 자산이 기대수명 해(만 46세)에 바닥나도 게임과 100판이 같이 파산으로 센다",
+       d46.g.why === "bankrupt" && d46.g.year === 2031 && d46.o.bustAges[0] === 46 && d46.o.survive === 0 && d45.o.survive === 1,
+       "수명 46: 파산 · 100판 파산(만 46세) / 수명 45: 생존", `수명 46: ${d46.g.why}·${d46.o.bustAges[0]}세 / 수명 45: 생존 ${d45.o.survive}`);
+
+    // 기대수명 창 판정 — 100판·최적 탐색·안전 인출액 역산이 같은 두 함수를 쓴다 (경계는 기대수명 '그해'까지 포함)
+    const lifeCfg = (die, strict) => ({ birthYear: 1976, gameDeathAge: die, strictSpend: strict });
+    ok("71c. 기대수명 창: 만 54세 실패는 수명 54세에 포함, 53세에는 제외 (자산 소진·미달 모두, 엄격 모드 무관 여부까지)",
+       failedByLife(lifeCfg(54, 0), { depleted: 2030 }) === true && failedByLife(lifeCfg(53, 0), { depleted: 2030 }) === false
+       && failedByLife(lifeCfg(54, 1), { starvedYear: 2030 }) === true && failedByLife(lifeCfg(54, 0), { starvedYear: 2030 }) === false
+       && starvedByLife(lifeCfg(54, 0), { starvedYear: 2030 }) === true && starvedByLife(lifeCfg(53, 0), { starvedYear: 2030 }) === false
+       && failedByLife(lifeCfg(54, 0), {}) === false && starvedByLife(lifeCfg(54, 0), {}) === false,
+       "true·false·true·false·true·false·false·false",
+       [failedByLife(lifeCfg(54, 0), { depleted: 2030 }), failedByLife(lifeCfg(53, 0), { depleted: 2030 }), failedByLife(lifeCfg(54, 1), { starvedYear: 2030 }),
+        failedByLife(lifeCfg(54, 0), { starvedYear: 2030 }), starvedByLife(lifeCfg(54, 0), { starvedYear: 2030 }), starvedByLife(lifeCfg(53, 0), { starvedYear: 2030 }),
+        failedByLife(lifeCfg(54, 0), {}), starvedByLife(lifeCfg(54, 0), {})].join("·"));
+    const nonStrict54 = edge71(54, 0), nonStrict53 = edge71(53, 0);
+    ok("71d. 엄격 모드가 꺼져 있어도 기대수명 해의 미달은 '자산은 버텼지만 생활비를 못 채운 판'으로 센다 (53세는 0판)",
+       nonStrict54.o.shortN === 1 && nonStrict54.o.survive === 1 && nonStrict53.o.shortN === 0, "54세: 1판 · 53세: 0판", `54세: ${nonStrict54.o.shortN}판 · 53세: ${nonStrict53.o.shortN}판`);
+
+    // 안전 인출액 역산·최적 탐색도 같은 창 — 자산이 기대수명 해(만 46세)에 바닥나는 설정
+    const lifeRun = (die, fn) => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2031, endYear: 2040, gameSeed: 1, gameSpend: 5000, gameDeathAge: die, crashCount: 0, inflation: 0, strictSpend: 0 });
+      state.cfg.opening.taxable = { free: 2, ded: 0, sev: 0, gain: 0 };
+      state.cfg.events = [{ name: "월급", kind: "salary", amt: 5000, year: 2030, until: 2030, every: 1, real: 0, jitter: 0 }]; return fn(); };
+    const sf46 = lifeRun(46, () => { let o; safeSpend(r => { o = r; }); return o; }), sf45 = lifeRun(45, () => { let o; safeSpend(r => { o = r; }); return o; });
+    ok("71e. 안전 인출액 역산: 자산이 기대수명 해에 바닥나면 버틴 것이 아니다 (수명 46세면 생활비를 더 낮춰야 하고, 45세면 그 해가 창 밖)",
+       sf46.spend < sf45.spend - 1000, "46세 안전 생활비 < 45세 − 1000", `46세: ${sf46.spend} · 45세: ${sf45.spend}`);
+
+    /* --- 72) 미달 판정의 분모는 그해 필요한 생활비(총액) — 안내 문구와 같은 기준 --- */
+    ok("72. 필요 1억 중 50만원 미달(0.5%)은 실패가 아니고, 600만원(6%)은 실패", !isStarved(10000, 50) && isStarved(10000, 600) && !isStarved(10000, 500) && isStarved(10000, 501),
+       "false·true·false·true", [isStarved(10000, 50), isStarved(10000, 600), isStarved(10000, 500), isStarved(10000, 501)].join("·"));
+    const tinyMiss = (miss, strict = 1) => { reset(); Object.assign(state.cfg, { birthYear: 1985, startYear: 2030, retireYear: 2030, endYear: 2040, gameSeed: 1, gameSpend: 10000, gameDeathAge: 50, crashCount: 0, inflation: 0, strictSpend: strict });
+      state.cfg.opening.taxable = { free: 0, ded: 0, sev: 0, gain: 0 }; state.cfg.opening.psDed = { free: 0, ded: 8000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2020;
+      state.cfg.events = [{ name: "급여", kind: "salary", amt: 10000 - miss, year: 2030, until: 2040, every: 1, real: 0, jitter: 0 }];
+      gameStart(); autoPlay(); const g = game.over; let o; monteCarlo(1, r => { o = r; }, 0);
+      const rp = returnPath(state.cfg); const sm = simulate({ returns: rp.path, auto: { loan: loanSchedule(state.cfg, rp.crash) } }).sum; return { g, o, sm }; };
+    const tn50 = tinyMiss(50), tn600 = tinyMiss(600);
+    ok("72b. 게임·100판 모두: 급여가 9,950만원인 해(미달 50만원)는 계속, 9,400만원(미달 600만원)은 첫해 실패",
+       tn50.g.why === "end" && tn50.o.survive === 1 && tn50.sm.starvedYear === null && tn600.g.why === "starved" && tn600.g.year === 2030 && tn600.o.survive === 0 && tn600.sm.starvedYear === 2030,
+       "50만: end · 생존 · / 600만: starved 2030 · 실패", `50만: ${tn50.g.why}·생존${tn50.o.survive} / 600만: ${tn600.g.why}(${tn600.g.year})·생존${tn600.o.survive}`);
+    reset();
+
+    /* --- 73) 엄격 모드 2단계 — 1만원 넘게 못 채운 첫 해 (1단계는 5% 초과) --- */
+    const l1 = tinyMiss(50, 1), l2 = tinyMiss(50, 2), l2small = tinyMiss(0.9, 2);
+    ok("73. 미달 50만원(총 생활비의 0.5%): 1단계(5% 초과)는 계속, 2단계(1만원 초과)는 첫해 실패 — 게임·100판·시뮬 모두",
+       l1.g.why === "end" && l1.o.survive === 1 && l1.sm.starvedYear === null && l1.sm.shortYear === 2030
+       && l2.g.why === "starved" && l2.g.year === 2030 && l2.o.survive === 0 && l2.o.bustAges[0] === 45,
+       "1단계: end·생존 / 2단계: starved 2030 · 만 45세 실패", `1단계: ${l1.g.why}·생존${l1.o.survive}·short ${l1.sm.shortYear} / 2단계: ${l2.g.why}(${l2.g.year})·생존${l2.o.survive}·${l2.o.bustAges[0]}세`);
+    ok("73b. 2단계도 1만원 이하 미달(0.9만원)은 계산 오차로 본다", l2small.g.why === "end" && l2small.sm.shortYear === null && l2small.o.survive === 1,
+       "end · shortYear 없음 · 생존", `${l2small.g.why} · ${l2small.sm.shortYear} · 생존${l2small.o.survive}`);
+    ok("73c. 실패 연도 함수: 단계별로 다른 기록을 쓰고, 자산 소진이 더 이르면 그쪽",
+       failYearOf({ strictSpend: 2 }, { starvedYear: 2045, shortYear: 2040 }) === 2040 && failYearOf({ strictSpend: 1 }, { starvedYear: 2045, shortYear: 2040 }) === 2045
+       && failYearOf({ strictSpend: 2 }, { depleted: 2035, shortYear: 2040 }) === 2035 && failYearOf({ strictSpend: 0 }, { starvedYear: 2045, shortYear: 2040 }) === null
+       && failYearOf({ strictSpend: 2 }, { starvedYear: 2045 }) === null,
+       "2040 · 2045 · 2035 · null · null",
+       [failYearOf({ strictSpend: 2 }, { starvedYear: 2045, shortYear: 2040 }), failYearOf({ strictSpend: 1 }, { starvedYear: 2045, shortYear: 2040 }),
+        failYearOf({ strictSpend: 2 }, { depleted: 2035, shortYear: 2040 }), failYearOf({ strictSpend: 0 }, { starvedYear: 2045, shortYear: 2040 }), failYearOf({ strictSpend: 2 }, { starvedYear: 2045 })].join(" · "));
+    ok("73d. 미달 판정 함수: 1단계는 5% 초과, 2단계는 1만원 초과",
+       starvedFor({ strictSpend: 1 }, 10000, 50) === false && starvedFor({ strictSpend: 2 }, 10000, 50) === true
+       && starvedFor({ strictSpend: 2 }, 10000, 1) === false && starvedFor({ strictSpend: 1 }, 10000, 600) === true,
+       "false·true·false·true", [starvedFor({ strictSpend: 1 }, 10000, 50), starvedFor({ strictSpend: 2 }, 10000, 50), starvedFor({ strictSpend: 2 }, 10000, 1), starvedFor({ strictSpend: 1 }, 10000, 600)].join("·"));
+
+    /* --- 65) 개시 나이 안내 · 범위 밖 경고 · 최적화 손잡이 --- */
+    reset(); state.cfg.npsAmount = 2160; state.cfg.npsAge = 55;
+    ok("65. 후보 나이는 지금 설정이 맨 앞, 은퇴 뒤부터 정상+5까지",
+       (() => { reset(); state.cfg.npsAmount = 2000; state.cfg.npsAge = 65; state.cfg.retireYear = 2040;   // 1985생 → 55세 은퇴
+                const v = npsAgeChoices(state.cfg); return v[0] === 65 && v.includes(60) && v.includes(70) && !v.includes(59) && v.filter(a => a === 65).length === 1 && v.length === 11; })(),
+       "[65, 60..64, 66..70]", (() => { reset(); state.cfg.npsAmount = 2000; return npsAgeChoices(state.cfg).join(","); })());
+    reset(); state.cfg.npsAmount = 2000; state.cfg.retireYear = 2047;   // 62세 은퇴 → 조기는 62세부터
+    ok("65b. 은퇴 전 나이는 후보에서 뺀다", npsAgeChoices(state.cfg).every((a, i) => i === 0 || a >= 62) && !npsAgeChoices(state.cfg).includes(61),
+       "62세 이상", npsAgeChoices(state.cfg).join(","));
+    const wOf = (age, amt) => { reset(); state.cfg.npsAmount = amt; state.cfg.npsAge = age; return (simulate().warnings || []).filter(w => /조기·연기 가능 범위/.test(w)).length; };
+    ok("65c. 개시 나이가 조기·연기 가능 범위(60~70세)를 벗어나면 경고, 안이면 없음, 금액 0이면 없음",
+       wOf(55, 2000) === 1 && wOf(75, 2000) === 1 && wOf(60, 2000) === 0 && wOf(70, 2000) === 0 && wOf(55, 0) === 0,
+       "1 / 1 / 0 / 0 / 0", [wOf(55, 2000), wOf(75, 2000), wOf(60, 2000), wOf(70, 2000), wOf(55, 0)].join(" / "));
+
+    /* --- 66) 최적 조합이 국민연금 개시 나이도 찾고, 적용·되돌리기가 그 값을 다룬다 --- */
+    const smallOpt = amt => { reset(); Object.assign(state.cfg, { retireYear: 2036, endYear: 2050, gameSeed: 3, gameSpend: 3000, npsAmount: amt, npsAge: 65, gameDeathAge: 65 });
+      let out; optimize(x => { out = x; }); return out; };
+    const o66a = smallOpt(1500), o66b = smallOpt(0);
+    ok("66. 최적 탐색에 「국민연금 개시 나이」 손잡이가 들어간다 (금액이 있을 때만)",
+       o66a.knobsName.includes("국민연금 개시 나이") && !o66b.knobsName.includes("국민연금 개시 나이"),
+       "있음 / 없음", `${o66a.knobsName.includes("국민연금 개시 나이")} / ${o66b.knobsName.includes("국민연금 개시 나이")}`);
+    reset(); state.cfg.npsAmount = 1500; state.cfg.npsAge = 65; state.optUndo = null;
+    optimizeApply({ changes: [{ name: "국민연금 개시 나이", same: false }], knobsName: ["국민연금 개시 나이"], pick: [62], hasHome: false });
+    const afterApply = state.cfg.npsAge, savedAge = state.optUndo && state.optUndo.cfg.npsAge;
+    optimizeUndo();
+    ok("66b. 적용하면 개시 나이가 바뀌고, 되돌리면 적용 전 나이로 돌아온다",
+       afterApply === 62 && savedAge === 65 && state.cfg.npsAge === 65 && state.optUndo === null,
+       "62 → 되돌림 65", `${afterApply} (저장 ${savedAge}) → ${state.cfg.npsAge}`);
+    // 개시 나이가 없는 예전 되돌리기 정보를 불러와도 현재 개시 나이가 그대로 남는다
+    const old66 = sanitizeUndo({ at: "1/1", what: "x", cfg: { gameSpend: 1000, spendRules: [], wdStrategy: "ratio", priority: {}, reverse: { on: 0 } } }, state.cfg);
+    ok("66c. 개시 나이가 없는 예전 되돌리기 정보는 현재 개시 나이를 유지", !!old66 && old66.cfg.npsAge === state.cfg.npsAge,
+       String(state.cfg.npsAge), old66 ? String(old66.cfg.npsAge) : "null");
+
+    /* --- 62) 이미 켜 둔 항목은 '가입했다면'이라 묻지 않는다 --- */
+    const lab = (d, re) => d.rows.find(r => re.test(r.label)) || {};
+    const d62a = dg(c => { c.reverse = { ...c.reverse, on: 1, homeValue: 60000, startAge: 65 }; c.property = { ...(c.property || {}), on: 0 }; });
+    const d62b = dg(c => { c.reverse = { ...c.reverse, on: 0, homeValue: 60000, startAge: 65 }; c.property = { ...(c.property || {}), on: 0 }; });
+    const d62c = dg(c => { c.reverse = { ...c.reverse, on: 0, homeValue: 0 }; c.property = { ...(c.property || {}), on: 0 }; });
+    const d62d = dg(c => { c.reverse = { ...c.reverse, on: 1, homeValue: 0 }; c.property = { ...(c.property || {}), on: 0 }; });
+    ok("62. 주택연금을 이미 켰으면 '기가입 · 이미 반영됨'", lab(d62a, /주택연금/).status === "already"
+       && /기가입/.test(lab(d62a, /주택연금/).label) && !d62a.rows.some(r => /가입했다면/.test(r.label)),
+       "already · 기가입", `${lab(d62a, /주택연금/).status} · ${lab(d62a, /주택연금/).label}`);
+    ok("62b. 안 켰고 집이 있으면 종전처럼 '가입했다면' 을 돌린다",
+       !lab(d62b, /주택연금/).status && /가입했다면/.test(lab(d62b, /주택연금/).label) && lab(d62b, /주택연금/).age !== d62b.now,
+       "가입했다면 · 파산 나이가 달라짐", `${lab(d62b, /주택연금/).label} · ${lab(d62b, /주택연금/).age} (기준 ${d62b.now})`);
+    ok("62c. 집이 없으면(안 켬) '계산할 수 없음', 켰는데 집값 0이면 '받는 돈 없음'",
+       lab(d62c, /주택연금/).status === "na" && /주택가격이 없어/.test(lab(d62c, /주택연금/).note)
+       && lab(d62d, /주택연금/).status === "na" && /받는 돈이 없/.test(lab(d62d, /주택연금/).note),
+       "na / na", `${lab(d62c, /주택연금/).status} / ${lab(d62d, /주택연금/).status}`);
+    const d62e = dg(c => { c.loan = { ...c.loan, on: 0 }; });
+    const d62f = dg(c => { c.loan = { ...c.loan, on: 1, balance: 8000, rate: 4 }; });
+    ok("62d. 대출이 없으면 '주담대가 없었다면' 대신 해당 없음",
+       lab(d62e, /주담대/).status === "na" && !lab(d62f, /주담대/).status && /없었다면/.test(lab(d62f, /주담대/).label),
+       "na / 없었다면", `${lab(d62e, /주담대/).status} / ${lab(d62f, /주담대/).label}`);
+    // 같은 파산 나이가 나오면 감액이 적은(늦은) 나이를 고른다 — 이른 나이는 평생 더 깎이기만 한다
+    const d61t = dg(c => { c.gameSpend = 4400; });
+    ok("61h. 파산 나이가 같으면 감액이 적은 쪽(늦은 나이)을 고른다",
+       !!d61t.nps && d61t.nps.cands[0].age === d61t.nps.cands[1].age && d61t.nps.claimAge === d61t.nps.cands[1].a,
+       "61·62세 동률 → 62세", d61t.nps ? `${d61t.nps.cands.map(c => c.a + ":" + c.age).join(" ")} → ${d61t.nps.claimAge}세` : "없음");
 
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
