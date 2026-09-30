@@ -645,7 +645,7 @@
         <th class="rowhd">계좌</th>
         <th title="계좌마다 성격이 다릅니다 — 연금계좌는 비과세 원금(인출해도 세금 없음), ISA는 납입원금, 일반계좌는 취득가(단독으로 뺄 수 없음)">원금 <span style="color:var(--muted);font-weight:400">(성격별)</span></th>
         <th title="세액공제를 받은 납입액 — 인출 시 연금소득세">세액공제 원금</th>
-        <th title="퇴직금 재원 — 퇴직소득세(연금수령 시 70%·11년차부터 60%)">퇴직 재원</th>
+        <th title="퇴직금 재원 — 퇴직소득세(실제 연금수령 70%·11년차부터 60%·21년차부터 50%)">퇴직 재원</th>
         <th title="굴려서 불어난 돈">운용수익 · 평가익</th>
         <th>잔액</th>
         <th>인출 시 세금</th>
@@ -894,7 +894,12 @@
         <div class="fgrid">
           <label class="f"><span class="t">퇴직소득세 실효세율 %</span><input type="number" step="0.1" id="cfg_sevRate"></label>
           <label class="f"><span class="t">연금소득 1,500만 초과 시 %</span><input type="number" step="0.1" id="cfg_compRate"></label>
-          <label class="f"><span class="t">국민연금 연 수령액 (시작연도 가치 · 물가연동)</span><input type="number" step="10" id="cfg_npsAmount"></label>
+          <label class="f"><span class="t">국민연금 연 수령액</span><input type="number" step="10" id="cfg_npsAmount"></label>
+          <label class="f"><span class="t" title="공단 예상연금액은 현재가치로 안내됩니다. 그 숫자를 넣었다면 물가연동을 고르세요.">국민연금 금액 기준</span>
+            <select id="cfg_npsReal">
+              <option value="1">시작연도 가치 · 물가연동 (권장)</option>
+              <option value="0">명목 고정</option>
+            </select></label>
           <label class="f"><span class="t">국민연금 개시 나이</span><input type="number" id="cfg_npsAge"></label>
           <label class="f"><span class="t">국민연금 실효세율 %</span><input type="number" step="0.1" id="cfg_npsRate"></label>
         </div>
@@ -907,7 +912,7 @@
               <label class="f"><span class="t">계산 결과</span><input type="text" id="sev_out" readonly></label>
               <label class="f"><span class="t">&nbsp;</span><button type="button" id="btnSevApply">위 세율로 적용</button></label>
             </div>
-            <p class="hint">근속연수공제 → 환산급여공제 → 기본세율(지방소득세 10% 포함) 순으로 계산합니다. 연금으로 수령하면 이 세액의 70%(11년차부터 60%)만 냅니다.</p>
+            <p class="hint">근속연수공제 → 환산급여공제 → 기본세율(지방소득세 10% 포함) 순으로 계산합니다. 연금으로 수령하면 이 세액의 70%만 냅니다(실제 수령 11년차부터 60%, 21년차부터 50%).</p>
           </div>
         </details>
       </div>
@@ -927,7 +932,7 @@
           금액을 <strong>0으로 두면 전액</strong>이고, <strong>주기</strong>를 쓰면 그 간격으로 되풀이됩니다(ISA 3년 만기를 굴리는 풍차돌리기는 주기 3).
         </p>
         <p class="hint">
-          <strong>ISA → 연금계좌</strong>는 전환금액의 10%(최대 300만원)를 추가 세액공제받고, 그 10%만 과세 원금이 됩니다. 나머지는 비과세 원금으로 들어갑니다.
+          <strong>ISA → 연금계좌</strong>는 <strong>가입 3년이 지난 만기 자금</strong>이면 전환금액의 10%(최대 300만원)를 추가 세액공제받고, 그 10%만 과세 원금이 됩니다. 나머지는 비과세 원금으로 들어갑니다. 3년 전에 옮기면 만기 혜택이 없어 순이익에 15.4%가 붙고 추가 세액공제도 없습니다. 전액을 옮기면 그 ISA 계약은 끝나고, 다음 납입부터 새 계약으로 셉니다.
         </p>
         <p class="hint">
           <strong>연금계좌끼리</strong>는 계좌이체로 보아 자금 성격(비과세 원금·세액공제 원금·퇴직 재원·운용수익)이 그대로 따라갑니다 —
@@ -963,7 +968,7 @@
     <ul>
       <li><strong>인출 순서(연금계좌 공통)</strong> — ① 세액공제 안 받은 원금(비과세) → ② 퇴직소득 재원 → ③ 세액공제 받은 원금 + 운용수익. 소득세법상 순서를 그대로 따릅니다.</li>
       <li><strong>연금소득세</strong> — 만 55~69세 5.5%, 70~79세 4.4%, 80세~ 3.3%. 사적연금 과세대상 수령액이 연 1,500만원을 넘으면 전액을 16.5% 분리과세로 계산합니다(설정에서 변경 가능).</li>
-      <li><strong>퇴직소득 재원</strong> — 연금으로 받으면 퇴직소득세의 70%, 연금수령 11년차부터 60%. 연금수령한도를 넘겨 받으면 100%.</li>
+      <li><strong>퇴직소득 재원</strong> — 연금으로 받으면 퇴직소득세의 70%, 실제 수령 11년차부터 60%, 21년차부터 50%. 연금수령한도를 넘겨 받으면 100%.</li>
       <li><strong>연금수령한도</strong> — 연초 평가액 ÷ (11 − 연금수령연차) × 120%. 초과분은 연금외수령으로 보아 기타소득세 16.5%(퇴직 재원은 퇴직소득세 전액)를 적용합니다.</li>
       <li><strong>수령 요건</strong> — 만 55세 이상 + 가입 5년 경과(퇴직금 재원 IRP는 5년 요건 없음). 미충족 인출은 전액 연금외수령으로 처리합니다.</li>
       <li><strong>ISA</strong> — 납입원금까지는 비과세 인출, 원금을 넘는 부분(운용수익)은 비과세 한도(일반 200만·서민형 400만) 차감 후 9.9% 분리과세. 가입 3년 미만 인출은 혜택 없이 15.4%로 계산합니다.</li>
@@ -1314,7 +1319,7 @@ const CRASHES = {
 const BUCKETS = [
   { key: "free", name: "비과세 원금", tip: "인출해도 세금이 없는 돈. 연금계좌에서 가장 먼저 빠져나간다." },
   { key: "ded", name: "세액공제 원금", tip: "세액공제를 받은 납입액. 인출 시 연금소득세 대상." },
-  { key: "sev", name: "퇴직 재원", tip: "퇴직금으로 들어온 돈. 인출 시 퇴직소득세(연금수령 시 70%·11년차부터 60%)." },
+  { key: "sev", name: "퇴직 재원", tip: "퇴직금으로 들어온 돈. 인출 시 퇴직소득세(실제 연금수령 70%·11년차부터 60%·21년차부터 50%)." },
   { key: "gain", name: "운용수익", tip: "굴려서 불어난 돈. 연금계좌에서는 연금소득세 대상." },
 ];
 /** 계좌별로 존재할 수 있는 버킷 */
@@ -1367,7 +1372,7 @@ function bucketLabel(a, key) {
 /* 저장본 스키마 버전.
    1 — schemaVersion 이 없던 최초 형태 (isaMoveYear/isaMoveAmt 시절 포함)
    2 — 중첩 객체 deep merge + 검증 도입 */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 function defaultState() {
   const cfg = {
@@ -1377,7 +1382,7 @@ function defaultState() {
     timing: "end", realView: 0,
     sevRate: 3.0, compRate: 16.5,
     taxType: "domestic", divRate: 2.0,
-    npsAmount: 0, npsAge: 65, npsRate: 3.0,
+    npsAmount: 0, npsAge: 65, npsRate: 3.0, npsReal: 1,
     transfers: [],
     allowPenalty: 0, planTarget: null,
     pensionCap: 1500, wdStrategy: "ratio", showBuckets: 1,
@@ -1453,6 +1458,8 @@ function pensionRate(age) { return age >= 80 ? 3.3 : age >= 70 ? 4.4 : 5.5; }
     국민연금 공단 예상연금액도 현재가치로 안내되므로 그 숫자를 그대로 넣으면 된다. */
 function npsGrossOf(cfg, age) {
   if (age < cfg.npsAge) return 0;
+  // npsReal 0 = 명목 고정 (v2 이전 저장본의 원래 의미를 보존할 때)
+  if (+cfg.npsReal === 0) return clamp0(cfg.npsAmount);
   const years = Math.max(0, cfg.birthYear + age - cfg.startYear);
   return clamp0(cfg.npsAmount) * Math.pow(1 + clamp0(cfg.inflation) / 100, years);
 }
@@ -2456,11 +2463,12 @@ function applyWithdrawals(st, draws, ctx) {
   for (const id of PENSION) {
     const d = det[id]; if (!d || !d.parts) continue;
     const p = d.parts;
-    // 이연퇴직소득 감면(70% → 11년차부터 60%)은 '실제로 연금을 받은' 연차로 판정한다.
+    // 이연퇴직소득 감면(70% → 11년차 60% → 21년차 50%)은 '실제로 연금을 받은' 연차로 판정한다.
     // 연금수령한도에 쓰는 연금수령연차(수령 가능해진 해부터 셈)와는 기준이 다르다.
     // 실제 수령연차를 모르는 호출자(게임 재구성 등)는 한도용 연차로 대신한다.
     const yrs = (ctx.pYearActual || ctx.pYear)[id];
-    const discount = yrs > 10 ? .6 : .7;
+    // 실제 수령 1~10년차 70% · 11~20년차 60% · 21년차~ 50% (소득세법 제129조①5의3, 2026년 시행분)
+    const discount = yrs > 20 ? .5 : yrs > 10 ? .6 : .7;
     const t1 = p.taxIn * pRate;
     const t2 = (p.taxable - p.taxIn) * .165;
     const t3 = p.sevIn * sevRate * discount + (p.sev - p.sevIn) * sevRate;
@@ -2659,7 +2667,9 @@ function greedyDraws(st, ctx, target, strategy, seed) {
     const bal = bTotal(st.bal[a.id]);
     capacity[a.id] = (a.kind !== "pension" || ctx.cfg.allowPenalty)
       ? bal
-      : (ctx.eligible[a.id] ? Math.min(bal, ctx.pLimit[a.id]) : 0);
+      // 한도는 인출순서대로 쓰이므로 비과세 원금이 한도보다 많으면 그 원금까지는 세금 없이 뺄 수 있다.
+      // (요건 미달 계좌는 IRP 중도인출 제한 등이 있어 예전처럼 0으로 둔다)
+      : (ctx.eligible[a.id] ? Math.min(bal, Math.max(ctx.pLimit[a.id], st.bal[a.id].free || 0)) : 0);
   }
   if (AID.reduce((s, id) => s + capacity[id], 0) <= 0.5) return draws;
 
@@ -2755,6 +2765,16 @@ function simulate(opts = {}) {
   const age55 = cfg.birthYear + 55;
   const pYearCount = Object.fromEntries(AID.map(id => [id, 0]));   // 한도용 연금수령연차
   const pActualCount = Object.fromEntries(AID.map(id => [id, 0])); // 실제로 연금을 받은 해의 수
+  // y 해 이전에 이미 지나간 연금수령연차. 1년차는 '최초로 연금수령할 수 있는 해'
+  // (만 55세와 가입 5년 중 늦은 해, 퇴직 재원 IRP는 5년 요건 없음).
+  // 예전에는 시뮬 시작연도를 항상 0년차로 봐서, 이미 수령 가능 기간이 한참 지난 계좌도 한도에 묶였다.
+  // (2013.3.1 이전 가입 계좌의 6년차 기산 특례는 반영하지 않는다)
+  const pastPensionYears = (id, y) => {
+    if (!openYear[id]) return 0;
+    const first = Math.max(age55, openYear[id] + (byId[id].sev ? 0 : 5));
+    return Math.max(0, y - first);
+  };
+  let captured = null;   // opts.captureAt 해의 인출 직전 상태 (게임 자동배분이 같은 문맥을 쓰도록)
   const wdStarted = new Set(); // 연금수령을 개시한 계좌
   const planDraws = {};
   const warnings = [];
@@ -2812,11 +2832,13 @@ function simulate(opts = {}) {
         const base = bTotal(b);
         // 프리셋을 고르면 포트폴리오 하나를 모든 계좌에 적용한다.
         // off 일 때만 계좌별 수익률 차이를 유지한다.
-        const rate = (opts.returns && opts.returns[y] != null)
+        // 계좌 수익률 − 평균 + 그해 시장 수익률을 합치면 −100% 아래로 내려갈 수 있다.
+        // 현물 보유 자산은 원금 이상 잃을 수 없으므로 −100%에서 멈춘다.
+        const rate = Math.max(-100, (opts.returns && opts.returns[y] != null)
           ? (cfg.preset && cfg.preset !== "off"
               ? opts.returns[y]
               : (cfg.rates[a.id] || 0) - clamp0(cfg.gameMean) + opts.returns[y])
-          : (cfg.rates[a.id] || 0);
+          : (cfg.rates[a.id] || 0));
         if (a.kind === "taxable") {
           // 절세계좌와 달리 배당은 인출 여부와 무관하게 매년 원천징수(15.4%)된다.
           // 세후 배당을 재투자하므로 취득가(원금)가 늘고, 나머지는 미실현 평가익으로 쌓인다.
@@ -2900,7 +2922,8 @@ function simulate(opts = {}) {
         if (!openYear[t.to]) openYear[t.to] = y;
         // 전액을 옮기면 그 ISA 계약은 끝난다. 다음 납입은 새 계약이라
         // 비과세 한도와 3년 요건이 처음부터 다시 시작된다 (풍차돌리기).
-        if (bTotal(src) < 0.5) { delete openYear[t.from]; st.isaUsed = 0; }
+        // 반올림 표시용 임계값(0.5)을 계약 생애에 쓰면 0.4가 남은 부분 이전도 해지로 보게 된다.
+        if (move >= avail - 1e-9) { delete openYear[t.from]; st.isaUsed = 0; }
         (rec.transfers ||= []).push(`${label} ${fmt(move)}만원 · `
           + (matured ? `추가 세액공제 대상 ${fmt(extraDed)}만원` : `만기 전 해지 · 정산세 ${fmt(tax)}만원`));
       } else if (from.kind === "taxable") {
@@ -2958,6 +2981,15 @@ function simulate(opts = {}) {
       }
     }
 
+    // 수령 요건과 '이미 지나간 연금수령연차'는 이전이 끝난 뒤에 확정한다.
+    // 시작 전에 흐른 연차(시뮬 첫해)와 이전으로 가입연도를 물려받은 계좌를 한 곳에서 처리한다.
+    // (요건은 이전 전에 판정했으므로, 같은 해 이전받은 계좌가 요건 미달로 16.5%를 무는 일이 있었다)
+    for (const id of PENSION) {
+      const need5 = byId[id].sev ? 0 : 5;
+      eligible[id] = age >= 55 && (openYear[id] ? y - openYear[id] >= need5 : false);
+      pYearCount[id] = Math.max(pYearCount[id], pastPensionYears(id, y));
+    }
+
     // ---- 세액공제 환급
     const creditRate = cfg.salaryTier === "low" ? .165 : .132;
     const credit = (dedPS + dedIRP) * creditRate + extraCredit;
@@ -2966,7 +2998,7 @@ function simulate(opts = {}) {
 
     // ---- 연금수령연차 · 연금수령한도 (이전이 끝난 잔액 기준)
     // 한도용 연금수령연차는 실제로 받기 시작한 해가 아니라 '최초로 연금수령할 수 있는 해'가
-    // 1년차다 (소득세법 시행령 제40조의3). 그래서 개시를 늦추면 그동안에도 연차가 흘러
+    // 1년차다 (소득세법 시행령의 연금수령연차 정의). 그래서 개시를 늦추면 그동안에도 연차가 흘러
     // 한도가 커진다 — 요건 충족 연도부터 세는 것이 의도된 동작이다.
     // 반면 퇴직소득 감면(70→60%)은 실제 수령연차로 판정하므로 따로 센다(pYearActual).
     const pLimit = {}, pYear = {}, pYearActual = {};
@@ -2980,6 +3012,11 @@ function simulate(opts = {}) {
     // 종합과세는 그해 다른 소득까지 합산해 세율이 정해진다 — 일정에 적은 소득을 같이 넘긴다
     const otherComp = eventsOf(cfg, y).reduce((t, e) => t + (e.kind === "salary" ? clamp0(e.amt) : 0), 0);
     const ctx = { year: y, age, eligible, pLimit, pYear, pYearActual, cfg, capDeductLeft, otherComp, openYear };
+    if (opts.captureAt === y) captured = {
+      st: { bal: cloneBal(st.bal), isaUsed: st.isaUsed },
+      ctx: { ...ctx, eligible: { ...eligible }, pLimit: { ...pLimit }, pYear: { ...pYear },
+             pYearActual: { ...pYearActual }, openYear: { ...openYear } },
+    };
 
     // ---- 인출
     let draws;
@@ -3004,10 +3041,12 @@ function simulate(opts = {}) {
       draws = Object.fromEntries(AID.map(id => [id, clamp0(r[id].out)]));
     }
 
+    const isaBefore = bTotal(st.bal.isa);
     const res = applyWithdrawals(st, draws, ctx);
-    for (const id of PENSION) if (eligible[id] && res.det[id].gross > 0.5) pActualCount[id]++;
+    // 금액과 무관하게 연금으로 받은 해는 실제 수령연차에 들어간다 (0.4만원이어도 과세는 했으므로)
+    for (const id of PENSION) if (eligible[id] && res.det[id].gross > 1e-6) pActualCount[id]++;
     // ISA 를 인출로 비우면 그 계약도 끝난다 — 이전과 마찬가지로 다음 납입은 새 계약이다
-    if (res.det.isa && res.det.isa.gross > 0.5 && bTotal(st.bal.isa) < 0.5) { delete openYear.isa; st.isaUsed = 0; }
+    if (isaBefore > 0 && res.det.isa && res.det.isa.gross >= isaBefore - 1e-9) { delete openYear.isa; st.isaUsed = 0; }
 
     // ---- 기록
     let total = 0;
@@ -3128,7 +3167,7 @@ function simulate(opts = {}) {
 
   const retireRec = years.find(r => r.year === cfg.retireYear) || years[years.length - 1];
   return {
-    years, warnings, planDraws,
+    years, warnings, planDraws, captured,
     sum: {
       cumIn, cumCredit, cumNet, cumTax, cumWdTax, cumOtherTax, depleted, openingTotal, autoNeed, autoMiss,
       atRetire: retireRec ? retireRec.total : 0,
@@ -3235,7 +3274,9 @@ function renderWarnings(sim) {
       groups.get(key).years.push(r.year);
     }));
   });
-  const items = [...sim.warnings, ...[...groups.values()].map(g => `${yearRanges(g.years)} · ${g.label}`)];
+  // 저장본을 불러오며 보정한 내용도 여기서 보여 준다 (예전에는 기록만 하고 화면에 안 나왔다)
+  const loadW = (state.loadWarnings || []).map(w => `불러오기 · ${escHtml(w)}`);
+  const items = [...loadW, ...sim.warnings, ...[...groups.values()].map(g => `${yearRanges(g.years)} · ${g.label}`)];
   const box = document.getElementById("warnzone");
   if (!items.length) { box.innerHTML = ""; return; }
   const shown = items.slice(0, 10);
@@ -3445,7 +3486,7 @@ function buildTable() {
   g2.innerHTML = `<th class="stick">연도</th><th>나이</th>` +
     ACC.map(() => `<th class="gsep">납입</th><th>인출</th><th>잔액</th>`).join("") +
     (showB ? `<th class="gsep" title="세액공제를 받지 않은 연금계좌 원금 — 인출해도 세금이 없고 가장 먼저 빠져나갑니다">비과세원금</th>`
-           + `<th title="퇴직금 재원 — 퇴직소득세(연금수령 시 70%·11년차부터 60%)">퇴직재원</th>`
+           + `<th title="퇴직금 재원 — 퇴직소득세(실제 연금수령 70%·11년차부터 60%·21년차부터 50%)">퇴직재원</th>`
            + `<th title="세액공제 원금 + 운용수익 — 연금소득세 대상">과세대상</th>` : "") +
     `<th class="gsep">총자산</th><th>총인출</th><th>세금</th><th>세후수령</th>`;
   thead.append(g1, g2);
@@ -3534,7 +3575,7 @@ function paintTable(sim, syncInputs) {
       };
       put(ref.bFree, p.free); put(ref.bSev, p.sev); put(ref.bTax, taxed);
       ref.bFree.title = "세액공제를 받지 않은 연금계좌 원금 — 인출해도 세금이 없습니다.\nISA 납입원금과 일반계좌 취득가는 규칙이 달라 여기에 넣지 않습니다(각 계좌 잔액 칸 참고).";
-      ref.bSev.title = "퇴직금 재원 잔액 — 연금으로 받으면 퇴직소득세의 70%(11년차부터 60%)";
+      ref.bSev.title = "퇴직금 재원 잔액 — 연금으로 받으면 퇴직소득세의 70%(실제 수령 11년차부터 60%, 21년차부터 50%)";
       ref.bTax.title = "세액공제 원금 + 운용수익 — 연금소득세 대상";
     }
     ref.total.textContent = rec.total >= .5 ? fmt(deflate(rec.total, rec)) : "–";
@@ -3580,7 +3621,7 @@ function renderMatrix(sim) {
   const note = a => {
     if (a.kind === "isa") return "원금까지 비과세 · 초과분은 한도 차감 후 9.9%";
     if (a.kind === "taxable") return "매도 시 취득가·평가익이 비중대로 함께 실현, 평가익만 과세";
-    if (a.sev) return "퇴직소득세(연금수령 시 70%·11년차부터 60%)";
+    if (a.sev) return "퇴직소득세(실제 연금수령 70%·11년차부터 60%·21년차부터 50%)";
     return "비과세 원금 → 퇴직 재원 → 공제원금+수익 순, 마지막 몫만 연금소득세";
   };
   const cell = (a, k, v) => accBuckets(a).includes(k)
@@ -3795,6 +3836,15 @@ function renderStart(box) {
   };
 }
 
+/** 게임 화면의 일정 한 줄. 사용자가 적은 이름이 들어가므로 이스케이프한다 (자체 진단 42번이 검사). */
+function eventRowHtml(e) {
+  const k = EVENT_KINDS[e.kind] || EVENT_KINDS.expense;
+  const tags = [e.real ? "물가연동" : "", e.shift ? `예정보다 ${e.shift > 0 ? e.shift + "년 늦게" : -e.shift + "년 일찍"}` : ""].filter(Boolean);
+  return `<div class="evt"><span class="nm">${k.sign < 0 ? "🔻" : "🔺"} ${escHtml(e.name || k.name)}` +
+    `${tags.length ? ` <span style="font-size:10.5px;color:var(--muted)">${tags.join(" · ")}</span>` : ""}</span>
+    <span class="${k.sign < 0 ? "neg" : "pos"}">${k.sign < 0 ? "−" : "+"}${fmt(clamp0(e.amt))}</span></div>`;
+}
+
 function renderGame() {
   const box = document.getElementById("gameBody");
   const cfg = state.cfg;
@@ -3823,13 +3873,7 @@ function renderGame() {
   const isIn = game.flip != null && game.flip.year === y ? game.flip.isIn : spare >= 0;
 
   const evtRows = c.list.length
-    ? c.list.map(e => {
-        const k = EVENT_KINDS[e.kind] || EVENT_KINDS.expense;
-        const tags = [e.real ? "물가연동" : "", e.shift ? `예정보다 ${e.shift > 0 ? e.shift + "년 늦게" : -e.shift + "년 일찍"}` : ""].filter(Boolean);
-        return `<div class="evt"><span class="nm">${k.sign < 0 ? "🔻" : "🔺"} ${escHtml(e.name || k.name)}` +
-          `${tags.length ? ` <span style="font-size:10.5px;color:var(--muted)">${tags.join(" · ")}</span>` : ""}</span>
-          <span class="${k.sign < 0 ? "neg" : "pos"}">${k.sign < 0 ? "−" : "+"}${fmt(clamp0(e.amt))}</span></div>`;
-      }).join("")
+    ? c.list.map(eventRowHtml).join("")
     : `<p class="hint" style="margin:0">올해는 예정된 일정이 없습니다.</p>`;
 
   box.innerHTML = `
@@ -4025,26 +4069,16 @@ function updateAllocMsg(spare, isIn, y, sevIn = 0) {
     ${pen > tp + 1 ? `<span style="color:var(--muted)"> · 연금계좌 세전 ${fmt(pen)} 중 <strong>${fmt(pen - tp)}</strong>은 비과세 원금·퇴직 재원이라 문턱에 안 잡힙니다</span>` : ""}`;
 }
 
-/** 특정 연도 시작 시점의 잔액·문맥을 시뮬레이션에서 되살린다 (자동 인출 배분용) */
+/** 특정 연도의 인출 직전 잔액·문맥을 시뮬레이션에서 되살린다 (자동 인출 배분용).
+    예전에는 전년도 말 잔액에 수령연차(나이−54)·한도·55세 요건을 따로 흉내 내서,
+    가입 5년 요건·실제 수령연차·ISA 비과세 사용액·그해 납입과 이전이 빠졌다.
+    그 결과 자동배분이 계획한 실수령과 확정 계산의 실수령이 어긋났다.
+    이제 simulate 가 인출 직전에 쓰는 바로 그 상태를 받아 온다.
+    (그해 수익률은 아직 모르므로 설정 수익률로 가정한다 — 플레이어도 모른 채 정하는 것이 게임 규칙이다)
+    sim 인자는 예전 호출과의 호환용이며 쓰지 않는다. */
 function rebuildStateAt(sim, y) {
-  const cfg = state.cfg, prev = sim.years.find(r => r.year === y - 1);
-  // 첫 해는 직전 연도가 없다 — 그때는 기초 잔액이 곧 출발 잔액이다.
-  // 예전에는 null 을 돌려줘서 첫 턴에 「자동 배분」이 아무것도 하지 않았다.
-  if (!prev && y !== cfg.startYear) return null;
-  const st = { bal: Object.fromEntries(AID.map(id => [id, prev
-    ? { ...prev.acc[id].buckets }
-    : Object.fromEntries(BUCKETS.map(bk => [bk.key, clamp0((cfg.opening[id] || {})[bk.key])])) ])), isaUsed: 0 };
-  const age = y - cfg.birthYear;
-  const eligible = {}, pLimit = {}, pYear = {};
-  for (const id of PENSION) {
-    eligible[id] = age >= 55;
-    pYear[id] = Math.max(1, age - 54);
-    pLimit[id] = pYear[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - Math.min(pYear[id], 10)) * 1.2;
-  }
-  const otherComp = eventsOf(cfg, y).reduce((t, e) => t + (e.kind === "salary" ? clamp0(e.amt) : 0), 0);
-  // ISA 3년 요건 판정에 쓴다 — 시뮬 시작연도가 아니라 그 계좌의 가입연도를 봐야 한다
-  const openYear = Object.fromEntries(AID.map(id => [id, clamp0((cfg.openYears || {})[id]) || cfg.startYear]));
-  return { st, ctx: { year: y, age, eligible, pLimit, pYear, cfg, capDeductLeft: 250, otherComp, openYear } };
+  const s = simulate({ returns: game ? game.returns : undefined, captureAt: y });
+  return s.captured || null;
 }
 
 /** 실현 수익률 요약. 산술평균만 보면 변동성 침식이 안 보이므로 CAGR을 나란히 둔다. */
@@ -4876,7 +4910,7 @@ function renderOptUndo() {
   if (!u) { box.innerHTML = ""; return; }
   box.innerHTML = `<div class="gline" style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
       <span><strong>최적 조합이 적용된 상태</strong>
-        <span style="color:var(--muted);font-size:12px">${u.at} · ${u.what}</span></span>
+        <span style="color:var(--muted);font-size:12px">${escHtml(u.at)} · ${escHtml(u.what)}</span></span>
       <button type="button" id="btnOptUndo">↩︎ 적용 전 설정으로</button>
     </div>
     <p class="hint" style="margin:6px 0 0">최적화는 인출 전략·납입 순서·생활비·주택연금을 <strong>실제 설정에 저장</strong>합니다.
@@ -5145,18 +5179,18 @@ function renderFillRules() {
     return;
   }
   const tgt = (sel) => `<option value="priority"${sel === "priority" ? " selected" : ""}>⭐ 우선순위대로 자동 배분</option>`
-    + ACC.map(a => `<option value="${a.id}"${a.id === sel ? " selected" : ""}>${a.name}만</option>`).join("");
+    + ACC.map(a => `<option value="${escHtml(a.id)}"${a.id === sel ? " selected" : ""}>${a.name}만</option>`).join("");
   box.innerHTML = list.map((r, i) => `
     <div class="xrow">
-      <label class="f"><span class="t">시작</span><input type="number" data-r="from" data-i="${i}" value="${r.from}"></label>
-      <label class="f"><span class="t">종료</span><input type="number" data-r="to" data-i="${i}" value="${r.to}"></label>
+      <label class="f"><span class="t">시작</span><input type="number" data-r="from" data-i="${i}" value="${escHtml(r.from)}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-r="to" data-i="${i}" value="${escHtml(r.to)}"></label>
       <label class="f"><span class="t">단위</span>
         <select data-r="unit" data-i="${i}">
           <option value="month"${r.unit === "month" ? " selected" : ""}>월</option>
           <option value="year"${r.unit === "year" ? " selected" : ""}>연</option>
         </select></label>
-      <label class="f"><span class="t">금액</span><input type="number" step="10" data-r="amt" data-i="${i}" value="${r.amt}"></label>
-      <label class="f"><span class="t">매년 증액 %</span><input type="number" step="0.5" data-r="growth" data-i="${i}" value="${r.growth || 0}"></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="10" data-r="amt" data-i="${i}" value="${escHtml(r.amt)}"></label>
+      <label class="f"><span class="t">매년 증액 %</span><input type="number" step="0.5" data-r="growth" data-i="${i}" value="${escHtml(r.growth || 0)}"></label>
       <label class="f" style="grid-column:span 2"><span class="t">넣을 곳</span>
         <select data-r="target" data-i="${i}">${tgt(r.target)}</select></label>
       <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-rdel="${i}">삭제</button></label>
@@ -5182,14 +5216,14 @@ function renderSpendRules() {
   box.innerHTML = list.length ? list.map((r, i) => `
     <div class="xrow">
       <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-s="name" data-i="${i}" value="${escHtml(r.name)}" placeholder="예: 자녀 독립 후"></label>
-      <label class="f"><span class="t">시작</span><input type="number" data-s="from" data-i="${i}" value="${r.from}"></label>
-      <label class="f"><span class="t">종료</span><input type="number" data-s="to" data-i="${i}" value="${r.to}"></label>
+      <label class="f"><span class="t">시작</span><input type="number" data-s="from" data-i="${i}" value="${escHtml(r.from)}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-s="to" data-i="${i}" value="${escHtml(r.to)}"></label>
       <label class="f"><span class="t">단위</span>
         <select data-s="unit" data-i="${i}">
           <option value="month"${r.unit === "month" ? " selected" : ""}>월</option>
           <option value="year"${r.unit === "year" ? " selected" : ""}>연</option>
         </select></label>
-      <label class="f"><span class="t">금액</span><input type="number" step="10" data-s="amt" data-i="${i}" value="${r.amt}"></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="10" data-s="amt" data-i="${i}" value="${escHtml(r.amt)}"></label>
       <label class="f"><span class="t" title="켜면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불립니다">금액 기준</span>
         <select data-s="real" data-i="${i}"><option value="0"${r.real ? "" : " selected"}>명목 고정</option><option value="1"${r.real ? " selected" : ""}>물가 연동</option></select></label>
       <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-sdel="${i}">삭제</button></label>
@@ -5246,15 +5280,15 @@ function renderEvents() {
       <label class="f" style="grid-column:span 2"><span class="t">이름</span><input type="text" data-e="name" data-i="${i}" value="${escHtml(e.name)}"></label>
       <label class="f"><span class="t">종류</span>
         <select data-e="kind" data-i="${i}">
-          ${Object.entries(EVENT_KINDS).map(([k, v]) => `<option value="${k}"${e.kind === k ? " selected" : ""}>${v.name}</option>`).join("")}
+          ${Object.entries(EVENT_KINDS).map(([k, v]) => `<option value="${escHtml(k)}"${e.kind === k ? " selected" : ""}>${v.name}</option>`).join("")}
         </select></label>
-      <label class="f"><span class="t">금액</span><input type="number" step="50" data-e="amt" data-i="${i}" value="${e.amt}"></label>
-      <label class="f"><span class="t">시작</span><input type="number" data-e="year" data-i="${i}" value="${e.year}"></label>
-      <label class="f"><span class="t">종료</span><input type="number" data-e="until" data-i="${i}" value="${e.until || e.year}"></label>
-      <label class="f"><span class="t">주기</span><input type="number" min="1" data-e="every" data-i="${i}" value="${e.every || 1}"></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="50" data-e="amt" data-i="${i}" value="${escHtml(e.amt)}"></label>
+      <label class="f"><span class="t">시작</span><input type="number" data-e="year" data-i="${i}" value="${escHtml(e.year)}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-e="until" data-i="${i}" value="${escHtml(e.until || e.year)}"></label>
+      <label class="f"><span class="t">주기</span><input type="number" min="1" data-e="every" data-i="${i}" value="${escHtml(e.every || 1)}"></label>
       <label class="f"><span class="t" title="켜면 금액을 시작연도 기준 실질로 보고 그해까지 물가만큼 불립니다">금액 기준</span>
         <select data-e="real" data-i="${i}"><option value="0"${e.real ? "" : " selected"}>명목 고정</option><option value="1"${e.real ? " selected" : ""}>물가 연동</option></select></label>
-      <label class="f"><span class="t" title="시드에 따라 실제 연도가 ±이 범위에서 앞뒤로 움직입니다">±공차(년)</span><input type="number" min="0" data-e="jitter" data-i="${i}" value="${e.jitter || 0}"></label>
+      <label class="f"><span class="t" title="시드에 따라 실제 연도가 ±이 범위에서 앞뒤로 움직입니다">±공차(년)</span><input type="number" min="0" data-e="jitter" data-i="${i}" value="${escHtml(e.jitter || 0)}"></label>
       <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-edel="${i}">삭제</button></label>
     </div>`).join("");
   box.querySelectorAll("[data-e]").forEach(n => n.addEventListener("input", () => {
@@ -5276,18 +5310,18 @@ function renderWdRules() {
     return;
   }
   const tgt = sel => `<option value="plan"${sel === "plan" ? " selected" : ""}>⭐ 목표 생활비 — 부족분 자동 배분</option>`
-    + ACC.map(a => `<option value="${a.id}"${a.id === sel ? " selected" : ""}>${a.name}에서만</option>`).join("");
+    + ACC.map(a => `<option value="${escHtml(a.id)}"${a.id === sel ? " selected" : ""}>${a.name}에서만</option>`).join("");
   box.innerHTML = list.map((r, i) => `
     <div class="xrow">
-      <label class="f"><span class="t">시작</span><input type="number" data-w="from" data-i="${i}" value="${r.from}"></label>
-      <label class="f"><span class="t">종료</span><input type="number" data-w="to" data-i="${i}" value="${r.to}"></label>
+      <label class="f"><span class="t">시작</span><input type="number" data-w="from" data-i="${i}" value="${escHtml(r.from)}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-w="to" data-i="${i}" value="${escHtml(r.to)}"></label>
       <label class="f"><span class="t">단위</span>
         <select data-w="unit" data-i="${i}">
           <option value="month"${r.unit === "month" ? " selected" : ""}>월</option>
           <option value="year"${r.unit === "year" ? " selected" : ""}>연</option>
         </select></label>
-      <label class="f"><span class="t">금액</span><input type="number" step="10" data-w="amt" data-i="${i}" value="${r.amt}"></label>
-      <label class="f"><span class="t">매년 증액 %</span><input type="number" step="0.5" data-w="growth" data-i="${i}" value="${r.growth || 0}"></label>
+      <label class="f"><span class="t">금액</span><input type="number" step="10" data-w="amt" data-i="${i}" value="${escHtml(r.amt)}"></label>
+      <label class="f"><span class="t">매년 증액 %</span><input type="number" step="0.5" data-w="growth" data-i="${i}" value="${escHtml(r.growth || 0)}"></label>
       <label class="f" style="grid-column:span 2"><span class="t">뺄 곳</span>
         <select data-w="target" data-i="${i}">${tgt(r.target)}</select></label>
       <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-wdel="${i}">삭제</button></label>
@@ -5317,15 +5351,15 @@ function renderXfers() {
     box.innerHTML = `<p class="hint" style="margin:0">등록된 이전이 없습니다.</p>`;
     return;
   }
-  const opt = (arr, sel) => arr.map(a => `<option value="${a.id}"${a.id === sel ? " selected" : ""}>${a.name}</option>`).join("");
+  const opt = (arr, sel) => arr.map(a => `<option value="${escHtml(a.id)}"${a.id === sel ? " selected" : ""}>${a.name}</option>`).join("");
   box.innerHTML = list.map((t, i) => `
     <div class="xrow">
-      <label class="f"><span class="t">시작</span><input type="number" data-x="year" data-i="${i}" value="${t.year}"></label>
-      <label class="f"><span class="t">종료</span><input type="number" data-x="until" data-i="${i}" value="${t.until || t.year}"></label>
-      <label class="f"><span class="t">주기(년)</span><input type="number" min="1" data-x="every" data-i="${i}" value="${t.every || 1}"></label>
+      <label class="f"><span class="t">시작</span><input type="number" data-x="year" data-i="${i}" value="${escHtml(t.year)}"></label>
+      <label class="f"><span class="t">종료</span><input type="number" data-x="until" data-i="${i}" value="${escHtml(t.until || t.year)}"></label>
+      <label class="f"><span class="t">주기(년)</span><input type="number" min="1" data-x="every" data-i="${i}" value="${escHtml(t.every || 1)}"></label>
       <label class="f"><span class="t">출금 계좌</span><select data-x="from" data-i="${i}">${opt(XFER_FROM, t.from)}</select></label>
       <label class="f"><span class="t">입금 계좌</span><select data-x="to" data-i="${i}">${opt(XFER_TO, t.to)}</select></label>
-      <label class="f"><span class="t">금액 (0=전액)</span><input type="number" step="100" data-x="amt" data-i="${i}" value="${t.amt || 0}"></label>
+      <label class="f"><span class="t">금액 (0=전액)</span><input type="number" step="100" data-x="amt" data-i="${i}" value="${escHtml(t.amt || 0)}"></label>
       <label class="f"><span class="t">&nbsp;</span><button type="button" class="del" data-del="${i}">삭제</button></label>
     </div>`).join("");
 
@@ -5341,7 +5375,7 @@ function renderXfers() {
 }
 
 const CFG_FIELDS = ["birthYear", "startYear", "retireYear", "endYear", "inflation", "salaryTier", "isaType",
-  "timing", "realView", "sevRate", "compRate", "npsAmount", "npsAge", "npsRate",
+  "timing", "realView", "sevRate", "compRate", "npsAmount", "npsReal", "npsAge", "npsRate",
   "allowPenalty", "taxType", "divRate", "wdStrategy", "pensionCap", "pensionTotalCap",
   "gameSpend", "gameMean", "gameVol", "gameSeed", "gameDeathAge",
   "preset", "riskFrom", "lateFrom", "crashCount", "crashPick", "retMode",
@@ -5626,6 +5660,22 @@ function deepMerge(base, over, path) {
   return out;
 }
 
+/** v2 → v3. 설정의 국민연금 금액이 '명목 고정'에서 '시작연도 가치(물가연동)'로 바뀌었다.
+    예전 저장본의 숫자는 명목 기준으로 적었을 수 있으므로 의미를 조용히 바꾸지 않는다 —
+    명목 고정으로 두고, 물가연동으로 바꾸는 방법을 안내한다. 국민연금이 0이면 바꿀 것이 없다. */
+function migrateV2toV3(cfg, src) {
+  if (!("npsReal" in src)) {
+    if (clamp0(cfg.npsAmount) > 0) {
+      cfg.npsReal = 0;
+      MIGRATION_WARNINGS.push(`국민연금: 예전 저장본이라 연 ${Math.round(clamp0(cfg.npsAmount)).toLocaleString()}만원을 `
+        + `「명목 고정」으로 유지했습니다. 공단 예상연금액(현재가치)을 적으셨다면 설정의 `
+        + `「국민연금 금액 기준」을 「물가연동」으로 바꾸세요 — 후반 수령액이 크게 늘어납니다.`);
+    } else cfg.npsReal = 1;
+  }
+  cfg.schemaVersion = 3;
+  return cfg;
+}
+
 /** v1 → v2. 구 필드 정리와 중첩 객체 보완. */
 function migrateV1toV2(cfg) {
   migrateTransfers(cfg);              // isaMoveYear/isaMoveAmt → transfers
@@ -5663,7 +5713,9 @@ function migrateState(raw) {
 
   // 3) 순차 버전 마이그레이션
   if (from < 2) cfg = migrateV1toV2(cfg);
+  if (from < 3) cfg = migrateV2toV3(cfg, src);
   cfg.schemaVersion = SCHEMA_VERSION;
+  cfg.npsReal = +cfg.npsReal === 0 ? 0 : 1;
 
   // 4) 값 검증 — 잘못된 값은 기본값으로 복구하고 경고로 남긴다
   cfg.birthYear  = Math.round(safeNum(cfg.birthYear, def.cfg.birthYear, 1900, 2200, "출생연도"));
@@ -5723,10 +5775,53 @@ function migrateState(raw) {
       if (cfg[k] !== undefined) MIGRATION_WARNINGS.push(`${k}: 목록 형식이 아니어서 비웠습니다`);
       cfg[k] = [];
     }
+    cfg[k] = sanitizeList(k, cfg[k], cfg);
   }
 
   const rows = (raw.rows && typeof raw.rows === "object" && !Array.isArray(raw.rows)) ? raw.rows : {};
-  return { cfg, rows, optUndo: raw.optUndo || null, warnings: MIGRATION_WARNINGS.slice() };
+  return { cfg, rows, optUndo: sanitizeUndo(raw.optUndo), warnings: MIGRATION_WARNINGS.slice() };
+}
+
+/* 불러온 JSON 의 목록 원소 검증 — 남이 준 저장본을 여는 기능이 있으므로 입구에서 형식을 맞춘다.
+   숫자 칸에 문자열이 들어오면 계산이 NaN 으로 번지고, 편집기 속성에 그대로 찍히면 HTML이 주입된다.
+   (편집기도 이스케이프하지만, 계산에 쓰이는 값은 여기서 숫자로 확정해 둔다) */
+const LIST_NUM_KEYS = ["amt", "from", "to", "growth", "every", "jitter", "until", "year"];
+function sanitizeList(kind, list, cfg) {
+  const out = [];
+  list.forEach((e, i) => {
+    if (!e || typeof e !== "object" || Array.isArray(e)) {
+      MIGRATION_WARNINGS.push(`${kind}[${i}]: 항목 형식이 아니어서 뺐습니다`);
+      return;
+    }
+    const o = { ...e };
+    const numDefault = { from: cfg.startYear, year: cfg.startYear, every: 1 };
+    for (const f of LIST_NUM_KEYS) {
+      if (kind === "transfers" && (f === "from" || f === "to")) continue;   // 이전의 from/to 는 계좌 id
+      if (!(f in o)) continue;
+      const n = typeof o[f] === "number" ? o[f] : Number(o[f]);
+      if (Number.isFinite(n)) { o[f] = n; continue; }
+      const fb = f === "to" ? (Number.isFinite(o.from) ? o.from : cfg.startYear)
+               : f === "until" ? (Number.isFinite(o.year) ? o.year : cfg.startYear)
+               : (numDefault[f] ?? 0);
+      MIGRATION_WARNINGS.push(`${kind}[${i}].${f}: 숫자가 아니어서 ${fb} 으로 바꿨습니다`);
+      o[f] = fb;
+    }
+    if ("name" in o) o.name = typeof o.name === "string" ? o.name : "";
+    if ("unit" in o && o.unit !== "month" && o.unit !== "year") o.unit = "year";
+    if ("target" in o) o.target = String(o.target);
+    if (kind === "events" && !(o.kind in EVENT_KINDS)) o.kind = "expense";
+    if (kind === "transfers") {
+      if (!AID.includes(o.from)) o.from = "";
+      if (!AID.includes(o.to)) o.to = "";
+    }
+    out.push(o);
+  });
+  return out;
+}
+/** 최적화 되돌리기 정보 — 화면에 찍는 문자열은 문자열로, 되돌릴 설정은 객체일 때만 받는다 */
+function sanitizeUndo(u) {
+  if (!u || typeof u !== "object" || !u.cfg || typeof u.cfg !== "object") return null;
+  return { at: String(u.at ?? ""), what: String(u.what ?? ""), cfg: u.cfg };
 }
 
 function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
@@ -6670,6 +6765,158 @@ function runSelfTests() {
        && escHtml(`<a href="x" onclick='y'>&</a>`) === "&lt;a href=&quot;x&quot; onclick=&#39;y&#39;&gt;&amp;&lt;/a&gt;",
        "특수문자 5종 치환", typeof escHtml === "function" ? escHtml(`<a href="x" onclick='y'>&</a>`) : "함수 없음");
 
+    /* ==================================================================
+       2차 코드 리뷰(PR #18)에서 나온 회귀 테스트
+       ================================================================== */
+    const INJ = `"><img src=x onerror=alert(1)>`;
+    /* --- 42) 편집기 5곳 + 되돌리기 단추는 저장본 값을 HTML로 해석하지 않는다 ---
+       migrateState 를 거치지 않은 값(렌더 계층 방어)을 일부러 넣는다. 이름뿐 아니라
+       숫자 칸(from·amt·year…)에도 태그를 넣어, 이스케이프를 한 곳이라도 빼먹으면 걸리게 한다. */
+    reset();
+    const savedUndo = state.optUndo;
+    state.cfg.fillRules = [{ name: "<b>n</b>", from: "2026" + INJ, to: "2030" + INJ, amt: "1" + INJ,
+                             growth: "0" + INJ, unit: "year", target: "priority" }];
+    state.cfg.wdRules = [{ from: "2026" + INJ, to: "2030" + INJ, amt: "1" + INJ, growth: "0" + INJ,
+                           unit: "year", target: "plan" }];
+    state.cfg.spendRules = [{ name: "<b>s</b>", from: "2026" + INJ, to: "2030" + INJ, amt: "1" + INJ,
+                              unit: "year", real: 1 }];
+    state.cfg.events = [{ name: "<b>e</b>", kind: "expense", amt: "1" + INJ, year: "2026" + INJ,
+                          until: "2026" + INJ, every: "1" + INJ, jitter: "0" + INJ }];
+    state.cfg.transfers = [{ from: "isa", to: "psFree", year: "2026" + INJ, until: "2026" + INJ,
+                             every: "1" + INJ, amt: "0" + INJ }];
+    state.optUndo = { at: "<img src=x onerror=alert(1)>", what: "<b>w</b>", cfg: {} };
+    const realDom = typeof HTMLElement !== "undefined";
+    const injected = id => {
+      const box = document.getElementById(id);
+      if (!box) return "상자 없음";
+      if (realDom && box instanceof HTMLElement) return box.querySelectorAll("img,b").length ? "태그 생성됨" : "";
+      return /<img|<b>/i.test(String(box.innerHTML)) ? "태그 문자열 그대로" : "";
+    };
+    const boxes = [["fillRows", renderFillRules], ["wdRows", renderWdRules], ["spendRows", renderSpendRules],
+                   ["evtRows", renderEvents], ["xferRows", renderXfers], ["optUndoBox", renderOptUndo]];
+    const leaks = boxes.map(([id, fn]) => { fn(); const why = injected(id); return why ? `${id}: ${why}` : ""; }).filter(Boolean);
+    if (/<img|<b>/i.test(eventRowHtml({ name: "<img src=x onerror=alert(1)><b>e</b>", kind: "expense", amt: 1 })))
+      leaks.push("게임 화면 일정 줄: 태그 문자열 그대로");
+    ok("42. 편집기·되돌리기 단추·게임 일정 줄에 저장본 값이 HTML로 들어가지 않음", leaks.length === 0,
+       "7곳 모두 이스케이프", leaks.join(" / ") || "정상");
+    state.optUndo = savedUndo;
+
+    /* --- 43) 불러온 JSON 의 목록 원소는 형식을 검증한다 (입구 방어) --- */
+    const m43 = migrateState({ cfg: { schemaVersion: 2, startYear: 2026,
+      fillRules: [{ from: "2026" + INJ, to: "abc", amt: "100", name: { x: 1 } }],
+      transfers: [{ from: "isa" + INJ, to: "psFree", year: "2026", amt: 0 }],
+      events: [5, null, { name: "e", kind: "<b>", amt: "1", year: 2026 }] },
+      optUndo: { at: "<img>", what: 7, cfg: {} } });
+    const f43 = m43.cfg.fillRules[0] || {}, t43 = m43.cfg.transfers[0] || {}, e43 = m43.cfg.events;
+    const ok43 = typeof f43.from === "number" && typeof f43.to === "number" && f43.amt === 100
+      && typeof f43.name === "string" && t43.from === "" && t43.year === 2026
+      && e43.length === 1 && e43[0].kind === "expense" && typeof (m43.optUndo || {}).what === "string";
+    ok("43. JSON 목록 원소의 숫자·계좌·종류 검증", ok43, "숫자는 숫자로, 모르는 계좌·종류는 비움",
+       JSON.stringify({ from: f43.from, to: f43.to, amt: f43.amt, xfer: t43.from, ev: e43.length, kind: e43[0] && e43[0].kind }));
+
+    /* --- 44) 예전 저장본의 국민연금은 명목 그대로 둔다 (의미가 조용히 바뀌지 않게) --- */
+    const m44a = migrateState({ cfg: { schemaVersion: 2, npsAmount: 1200 } });
+    const m44b = migrateState({ cfg: { schemaVersion: 2, npsAmount: 0 } });
+    ok("44. 이전 저장본 국민연금 → 명목 유지 + 안내", m44a.cfg.npsReal === 0
+       && m44a.warnings.some(w => /국민연금/.test(w)), "npsReal 0 · 경고 1건",
+       `npsReal ${m44a.cfg.npsReal} · 경고 ${m44a.warnings.filter(w => /국민연금/.test(w)).length}건`);
+    ok("44b. 국민연금 0 인 저장본·새 설정은 물가연동", m44b.cfg.npsReal === 1 && defaultState().cfg.npsReal === 1,
+       "1 / 1", `${m44b.cfg.npsReal} / ${defaultState().cfg.npsReal}`);
+    reset(); state.cfg.npsAmount = 1200; state.cfg.npsAge = 65; state.cfg.inflation = 2; state.cfg.npsReal = 0;
+    ok("44c. 명목 고정을 고르면 물가연동 안 함", near(npsGrossOf(state.cfg, 70), 1200, 1e-9),
+       "1200", String(npsGrossOf(state.cfg, 70)));
+
+    /* 퇴직재원 IRP 한 계좌로 여러 해를 돌리는 공통 설정 */
+    const sevOnly = (birth, open, start, end) => {
+      reset(); noTaxable();
+      Object.assign(state.cfg, { birthYear: birth, startYear: start, endYear: end });
+      state.rows = {}; state.cfg.rates.irpSev = 0;
+      state.cfg.opening.irpSev = { free: 0, ded: 0, sev: 10000, gain: 0 }; state.cfg.openYears.irpSev = open;
+    };
+    const taxAt = (s, y, id) => s.years.find(r => r.year === y).acc[id].tax;
+
+    /* --- 45) 시뮬 시작 전에 이미 흐른 연금수령연차를 센다 ---
+       1960년생·2014년 가입이면 2015년이 1년차 → 2030년은 16년차라 한도가 없다. */
+    sevOnly(1960, 2014, 2030, 2031);
+    row(2030).irpSev.out = 5000;
+    const t45 = taxAt(simulate(), 2030, "irpSev"), e45 = 5000 * state.cfg.sevRate / 100 * .7;
+    ok("45. 시작 전 연금수령연차 반영 (16년차 → 한도 없음)", near(t45, e45, 0.01), e45.toFixed(1), t45.toFixed(1));
+
+    /* --- 46) 소액이라도 받은 해는 실제 수령연차로 센다 --- */
+    sevOnly(1960, 2000, 2026, 2037);
+    for (let y = 2026; y <= 2035; y++) row(y).irpSev.out = 0.4;
+    row(2036).irpSev.out = 100;
+    const t46 = taxAt(simulate(), 2036, "irpSev"), e46 = 100 * state.cfg.sevRate / 100 * .6;
+    ok("46. 0.4씩 10년 받은 뒤 11년차는 감면 60%", near(t46, e46, 0.001), e46.toFixed(2), t46.toFixed(2));
+
+    /* --- 47) 실제 수령 21년차부터 퇴직소득세의 50% --- */
+    sevOnly(1960, 2000, 2026, 2047);
+    for (let y = 2026; y <= 2046; y++) row(y).irpSev.out = 100;
+    const s47 = simulate();
+    const t47a = taxAt(s47, 2045, "irpSev"), t47b = taxAt(s47, 2046, "irpSev");
+    ok("47. 실제 수령 20년차 60% → 21년차 50%",
+       near(t47a, 100 * state.cfg.sevRate / 100 * .6, 0.001) && near(t47b, 100 * state.cfg.sevRate / 100 * .5, 0.001),
+       `${(100 * state.cfg.sevRate / 100 * .6).toFixed(2)} → ${(100 * state.cfg.sevRate / 100 * .5).toFixed(2)}`,
+       `${t47a.toFixed(2)} → ${t47b.toFixed(2)}`);
+
+    /* --- 48) 합성 수익률이 −100% 아래로 내려가도 잔액은 0 미만이 되지 않는다 --- */
+    reset();
+    Object.assign(state.cfg, { preset: "off", gameMean: 6, endYear: 2027 });
+    state.cfg.rates.taxable = -50;
+    state.cfg.opening.taxable = { free: 1000, ded: 0, sev: 0, gain: 0 };
+    state.rows = {};
+    const b48 = simulate({ returns: { 2026: -60 } }).years.find(r => r.year === 2026).acc.taxable.bal;
+    ok("48. 수익률 −116%여도 잔액 ≥ 0", b48 >= -1e-9, "0", b48.toFixed(1));
+
+    /* --- 49) 부분 이전으로 0.4가 남으면 ISA 계약은 이어진다 --- */
+    reset(); noTaxable();
+    Object.assign(state.cfg, { endYear: 2029 });
+    state.rows = {}; state.cfg.rates.isa = 10; state.cfg.rates.psFree = 0;
+    state.cfg.opening.isa = { free: 1000, ded: 0, sev: 0, gain: 300 }; state.cfg.openYears.isa = 2020;
+    row(2027).isa.in = 1000;
+    state.cfg.transfers = [{ from: "isa", to: "psFree", year: 2026, amt: 1429.6 },
+                           { from: "isa", to: "psFree", year: 2028, amt: 0 }];
+    const s49 = simulate();
+    const i27 = s49.years.find(r => r.year === 2027).acc.isa;
+    const g28 = i27.buckets.gain + i27.bal * .1;          // 2028년 이전 직전 순이익
+    const t49 = s49.years.find(r => r.year === 2028).otherTax;
+    // 같은 계약(2020 가입)이라 만기 규칙 9.9%. 비과세 200만은 2026년 이전에서 이미 다 썼다.
+    ok("49. 0.4 남은 부분 이전 → 같은 계약 유지 (9.9%)", near(t49, g28 * .099, 0.01),
+       (g28 * .099).toFixed(2), (t49 || 0).toFixed(2));
+
+    /* --- 50) 연금계좌 이전으로 가입연도를 물려받으면 같은 해부터 수령 요건을 다시 본다 --- */
+    reset(); noTaxable();
+    Object.assign(state.cfg, { birthYear: 1960, endYear: 2027 });
+    state.rows = {}; state.cfg.rates.psDed = 0; state.cfg.rates.psFree = 0;
+    state.cfg.opening.psDed = { free: 0, ded: 1000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    state.cfg.transfers = [{ from: "psDed", to: "psFree", year: 2026, amt: 0 }];
+    row(2026).psFree.out = 1000;
+    const t50 = taxAt(simulate(), 2026, "psFree");
+    ok("50. 이전받은 계좌도 그해 연금수령 (5.5%)", near(t50, 1000 * .055, 0.01), "55", t50.toFixed(1));
+
+    /* --- 51) 게임 자동배분이 계획한 실수령 = 확정 계산의 실수령 ---
+       예전에는 게임이 수령연차·한도·5년 요건을 따로 흉내 내서 둘이 어긋났다. */
+    sevOnly(1960, 2000, 2026, 2027);
+    state.cfg.wdStrategy = "ratio";
+    const rb51 = rebuildStateAt(simulate(), 2026);
+    const d51 = greedyDraws(rb51.st, rb51.ctx, 4900, "ratio");
+    AID.forEach(id => { row(2026)[id].out = Math.round(d51[id] || 0); });
+    const n51 = simulate().years.find(r => r.year === 2026).net;
+    ok("51. 게임 자동배분 계획 = 확정 실수령", near(n51, 4900, 2), "4900 (±2)", n51.toFixed(1));
+
+    /* --- 52) 한도를 넘어도 세금이 없는 비과세 원금은 목표 인출에 쓸 수 있다 --- */
+    reset();
+    const ctx52 = { year: 2050, age: 65, eligible: { psFree: true, psDed: true }, pLimit: { psFree: 100, psDed: 100 },
+                    pYear: { psFree: 1, psDed: 1 }, cfg: state.cfg, capDeductLeft: 250, otherComp: 0, openYear: {} };
+    const st52 = blankSt(); st52.bal.psFree.free = 1000;
+    const sum = d => AID.reduce((t, id) => t + (d[id] || 0), 0);
+    const r52 = ["ratio", "taxmin"].map(s => sum(greedyDraws({ bal: cloneBal(st52.bal), isaUsed: 0 }, ctx52, 500, s)));
+    ok("52. 비과세 원금만 있으면 한도 넘어 목표 500까지 인출", r52.every(v => near(v, 500, 1)),
+       "500 / 500", r52.map(v => v.toFixed(0)).join(" / "));
+    const st52b = blankSt(); st52b.bal.psDed.ded = 1000;
+    const r52b = sum(greedyDraws(st52b, ctx52, 500, "ratio"));
+    ok("52b. 과세분은 여전히 한도(100)에서 멈춤", r52b <= 100.5, "≤ 100", r52b.toFixed(1));
+
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
                    actual: (err && err.message) || String(err) });
@@ -6677,6 +6924,8 @@ function runSelfTests() {
   } finally {
     state.cfg = saved; state.rows = savedRows;
     game = savedGame;
+    // 42번은 실제 편집기 화면에 시험용 값을 그렸다 — 원래 설정으로 다시 그린다
+    try { renderFillRules(); renderWdRules(); renderSpendRules(); renderEvents(); renderXfers(); renderOptUndo(); } catch (e) {}
   }
 
   const failed = results.filter(r => !r.pass);
