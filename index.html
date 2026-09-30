@@ -2872,6 +2872,9 @@ function simulate(opts = {}) {
       }
     };
 
+    // 연금수령한도의 평가액은 '과세기간 개시일(1월 1일)' 기준이다 (시행령 제40조의2③).
+    // 이 모델은 인출을 그해 수익·납입 뒤에 하므로, 한도용 평가액은 수익·납입 전에 따로 잡아 둔다.
+    const limitBase = Object.fromEntries(PENSION.map(id => [id, bTotal(st.bal[id])]));
     AID.forEach(id => { rec.acc[id] = { growth: 0 }; });
     if (cfg.timing === "begin") { contribute(); grow(); }
     else { grow(); contribute(); }
@@ -2965,6 +2968,8 @@ function simulate(opts = {}) {
         for (const key of ["free", "ded", "sev", "gain"]) {
           const v = src[key] * k; src[key] -= v; dst[key] += v;
         }
+        // 연초 평가액도 옮긴 비율만큼 따라간다 — 계좌를 옮겼다고 그해 한도가 사라지거나 두 배가 되지 않게
+        const base0 = limitBase[t.from] * k; limitBase[t.from] -= base0; limitBase[t.to] += base0;
         if (openYear[t.from]) openYear[t.to] = Math.min(openYear[t.to] || Infinity, openYear[t.from]);
         // 실제 수령연차도 따라간다 — 퇴직재원을 10년 받은 IRP를 옮겨도 다음 해는 1년차가 아니라 11년차다
         for (const yy of pActualYears[t.from]) pActualYears[t.to].add(yy);
@@ -3011,7 +3016,10 @@ function simulate(opts = {}) {
       pYear[id] = pYearCount[id];
       pYearActual[id] = pActualYears[id].size + 1; // 올해 받는다면 몇 번째 해인가
       const n = Math.min(pYearCount[id], 10);
-      pLimit[id] = pYearCount[id] > 10 ? Infinity : bTotal(st.bal[id]) / Math.max(1, 11 - n) * 1.2;
+      // 평가액은 1월 1일 기준. 단 연금수령을 처음 신청하는 해는 '신청일' 기준이라, 아직 한 번도
+      // 받지 않은 계좌는 인출 시점(연말) 잔액을 쓴다 — 이 모델에서 첫 수령 해가 곧 신청한 해다.
+      const valuation = pActualYears[id].size === 0 ? bTotal(st.bal[id]) : limitBase[id];
+      pLimit[id] = pYearCount[id] > 10 ? Infinity : valuation / Math.max(1, 11 - n) * 1.2;
     }
     // 종합과세는 그해 다른 소득까지 합산해 세율이 정해진다 — 일정에 적은 소득을 같이 넘긴다
     const otherComp = eventsOf(cfg, y).reduce((t, e) => t + (e.kind === "salary" ? clamp0(e.amt) : 0), 0);
@@ -7152,6 +7160,39 @@ function runSelfTests() {
        && w59.amt === Math.round(3000 * Math.pow(1.02, 14)),
        "모두 같음 · 이전 2030 · 인출 2040~2060 3958",
        `${diff59.join(", ") || "같음"} · 이전 ${t59.year} · 인출 ${w59.from}~${w59.to} ${w59.amt}`);
+
+    /* --- 60) 연금수령한도는 1월 1일 평가액 기준 (그해 수익은 한도를 키우지 않는다) ---
+       2026년이 첫 수령(=신청) 해, 2027년 연초 1,000만원이 그해 +100%로 2,000만원이 된 뒤 200 인출.
+       한도 = 1,000 ÷ (11 − 2) × 1.2 = 133.33 → 5.5% × 133.33 + 16.5% × 66.67 = 18.33 */
+    reset(); noTaxable();
+    Object.assign(state.cfg, { birthYear: 1971, startYear: 2026, endYear: 2028, preset: "off", gameMean: 0 });
+    state.rows = {}; state.cfg.rates.psDed = 0;
+    state.cfg.opening.psDed = { free: 0, ded: 1001, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    row(2026).psDed.out = 1; row(2027).psDed.out = 200;
+    const s60 = simulate({ returns: { 2026: 0, 2027: 100, 2028: 0 } });
+    const t60 = taxAt(s60, 2027, "psDed"), e60 = 1000 / 9 * 1.2 * .055 + (200 - 1000 / 9 * 1.2) * .165;
+    ok("60. 연금수령한도는 연초 평가액 기준 (2년차 +100% 해)", near(t60, e60, 0.01), e60.toFixed(2), t60.toFixed(2));
+    // 연초 평가액은 계좌이체를 따라간다 — 옮겨 받은 계좌의 한도가 0이 되면 안 된다
+    reset(); noTaxable();
+    Object.assign(state.cfg, { birthYear: 1971, startYear: 2026, endYear: 2028, preset: "off", gameMean: 0 });
+    state.rows = {}; state.cfg.rates.psDed = 0; state.cfg.rates.irpInv = 0;
+    state.cfg.opening.psDed = { free: 0, ded: 1001, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    row(2026).psDed.out = 1;
+    state.cfg.transfers = [{ from: "psDed", to: "irpInv", year: 2027, amt: 0 }];
+    row(2027).irpInv.out = 200;
+    const t60b = taxAt(simulate({ returns: { 2026: 0, 2027: 100, 2028: 0 } }), 2027, "irpInv");
+    ok("60b. 계좌이체 뒤에도 연초 평가액 한도 (같은 18.33)", near(t60b, e60, 0.01), e60.toFixed(2), t60b.toFixed(2));
+
+    // 처음 받는 해는 '신청일' 평가액 — 이 모델은 첫 인출 시점(연말)을 신청일로 본다.
+    // 2026년 연초 1,000 → +100% → 2,000에서 200 인출: 한도 2,000 ÷ 10 × 1.2 = 240 → 전액 5.5%
+    reset(); noTaxable();
+    Object.assign(state.cfg, { birthYear: 1971, startYear: 2026, endYear: 2027, preset: "off", gameMean: 0 });
+    state.rows = {}; state.cfg.rates.psDed = 0;
+    state.cfg.opening.psDed = { free: 0, ded: 1000, sev: 0, gain: 0 }; state.cfg.openYears.psDed = 2000;
+    row(2026).psDed.out = 200;
+    const t60c = taxAt(simulate({ returns: { 2026: 100, 2027: 0 } }), 2026, "psDed");
+    ok("60c. 첫 수령 해는 신청일(인출 시점) 평가액 — 한도 240", near(t60c, 200 * .055, 0.01),
+       (200 * .055).toFixed(2), t60c.toFixed(2));
 
   } catch (err) {
     results.push({ name: "예외 발생", pass: false, expect: "예외 없음",
