@@ -894,7 +894,7 @@
         <div class="fgrid">
           <label class="f"><span class="t">퇴직소득세 실효세율 %</span><input type="number" step="0.1" id="cfg_sevRate"></label>
           <label class="f"><span class="t">연금소득 1,500만 초과 시 %</span><input type="number" step="0.1" id="cfg_compRate"></label>
-          <label class="f"><span class="t">국민연금 연 수령액</span><input type="number" step="10" id="cfg_npsAmount"></label>
+          <label class="f"><span class="t" title="공단 노후준비서비스에서 정상 수급 나이로 본 예상연금(현재가치). 조기·연기 감액·가산은 개시 나이에서 자동으로 붙습니다.">국민연금 연 수령액 (정상 나이 기준)</span><input type="number" step="10" id="cfg_npsAmount"></label>
           <label class="f"><span class="t" title="공단 예상연금액은 현재가치로 안내됩니다. 그 숫자를 넣었다면 물가연동을 고르세요.">국민연금 금액 기준</span>
             <select id="cfg_npsReal">
               <option value="1">시작연도 가치 · 물가연동 (권장)</option>
@@ -902,6 +902,8 @@
             </select></label>
           <label class="f"><span class="t">국민연금 개시 나이</span><input type="number" id="cfg_npsAge"></label>
           <label class="f"><span class="t">국민연금 실효세율 %</span><input type="number" step="0.1" id="cfg_npsRate"></label>
+          <label class="f" style="grid-column:span 2"><span class="t">&nbsp;</span>
+            <span class="hint" id="npsInfo" style="margin:0"></span></label>
         </div>
         <details class="grp" style="border:none;margin-top:10px;padding-top:6px">
           <summary>퇴직소득세 실효세율 계산기</summary>
@@ -1371,8 +1373,10 @@ function bucketLabel(a, key) {
    ======================================================================== */
 /* 저장본 스키마 버전.
    1 — schemaVersion 이 없던 최초 형태 (isaMoveYear/isaMoveAmt 시절 포함)
-   2 — 중첩 객체 deep merge + 검증 도입 */
-const SCHEMA_VERSION = 3;
+   2 — 중첩 객체 deep merge + 검증 도입
+   3 — 국민연금 금액이 명목 고정 → 시작연도 가치(물가연동)
+   4 — 국민연금 「연 수령액」이 개시 나이 기준 → 정상 수급 나이 기준 (개시 나이에 따라 감액·가산이 자동으로 붙는다) */
+const SCHEMA_VERSION = 4;
 
 function defaultState() {
   const cfg = {
@@ -1458,10 +1462,13 @@ function pensionRate(age) { return age >= 80 ? 3.3 : age >= 70 ? 4.4 : 5.5; }
     국민연금 공단 예상연금액도 현재가치로 안내되므로 그 숫자를 그대로 넣으면 된다. */
 function npsGrossOf(cfg, age) {
   if (age < cfg.npsAge) return 0;
+  // 설정 금액은 정상 수급 나이 기준이다 — 개시 나이에 따른 감액·가산은 여기서 한 번만 곱한다.
+  // (수령 중에는 그 금액이 물가만큼 오른다. 감액률은 평생 그대로다.)
+  const base = clamp0(cfg.npsAmount) * npsClaimFactor(cfg.birthYear, cfg.npsAge);
   // npsReal 0 = 명목 고정 (v2 이전 저장본의 원래 의미를 보존할 때)
-  if (+cfg.npsReal === 0) return clamp0(cfg.npsAmount);
+  if (+cfg.npsReal === 0) return base;
   const years = Math.max(0, cfg.birthYear + age - cfg.startYear);
-  return clamp0(cfg.npsAmount) * Math.pow(1 + clamp0(cfg.inflation) / 100, years);
+  return base * Math.pow(1 + clamp0(cfg.inflation) / 100, years);
 }
 /** 설정에 적어 둔 국민연금의 그해 세후 수령액.
     applyWithdrawals 가 이 금액을 실수령에 더해 주므로, 현금 계산과 인출 목표는
@@ -1477,9 +1484,9 @@ function npsNetOf(cfg, age) {
    · 늦추면(연기연금) 1년마다 7.2%(월 0.6%) 가산, 최대 5년 · 36%
    · 조기노령연금은 가입기간 10년 이상이어야 하고, 소득 있는 업무(월소득이 A값 초과)에
      종사하는 동안은 지급이 정지된다 — 그래서 은퇴 전 나이로는 당겨 받는 것으로 치지 않는다.
-   설정의 「국민연금 연 수령액」은 「개시 나이」에 받는 금액이다 (공단 조회에서 지급희망 연령을
-   고른 결과와 같은 뜻). 나이만 바꿔 넣으면 금액은 그대로이므로, 나이를 바꿔 견줄 때는
-   npsClaimFactor 의 비로 환산해야 한다.
+   설정의 「국민연금 연 수령액」은 **정상 수급 나이 기준** 금액이다 (공단 조회에서 지급희망 연령을
+   정상 나이로 두고 본 예상연금). 개시 나이를 바꾸면 npsGrossOf 가 그 비율을 자동으로 곱한다.
+   v3 이전 저장본은 개시 나이 기준 금액이었으므로 불러올 때 환산한다 (migrateV3toV4).
    ------------------------------------------------------------------ */
 const NPS_EARLY_CUT = 0.06, NPS_LATE_ADD = 0.072, NPS_SHIFT_MAX = 5;
 function npsNormalAge(birthYear) {
@@ -3186,6 +3193,12 @@ function simulate(opts = {}) {
       + `연 환산 약 ${fmt(tot)}만원입니다. 「목표 생활비」에 이미 포함시켰다면 <strong>같은 돈을 두 번 빼고 있습니다.</strong> `
       + `둘 중 한쪽만 남기세요.`);
   }
+  if (clamp0(cfg.npsAmount) > 0) {
+    const n = npsNormalAge(cfg.birthYear);
+    if (cfg.npsAge < n - NPS_SHIFT_MAX || cfg.npsAge > n + NPS_SHIFT_MAX)
+      warnings.push(`국민연금 개시 나이 만 ${cfg.npsAge}세는 조기·연기 가능 범위(만 ${n - NPS_SHIFT_MAX}~${n + NPS_SHIFT_MAX}세)를 벗어났습니다 — `
+        + `감액·가산은 최대 ${NPS_SHIFT_MAX}년치까지만 반영하지만 수령은 입력한 나이부터 시작합니다. 실제 제도와 다를 수 있습니다.`);
+  }
   // 국민연금을 설정에도 적고 일정에도 적으면 두 번 들어온다.
   // 설정 쪽은 현금 카드에 '🏛️ 국민연금'으로 뜨므로 눈으로도 비교된다.
   if (clamp0(cfg.npsAmount) > 0) {
@@ -4315,10 +4328,10 @@ function diagnose() {
   let nps = null;
   const early = npsEarlyAges(state.cfg);
   if (early.ages.length) {
-    const baseAge = state.cfg.npsAge, baseAmt = clamp0(state.cfg.npsAmount), by = state.cfg.birthYear;
+    const baseAge = state.cfg.npsAge, by = state.cfg.birthYear;
     const cands = early.ages.map(a => {
       const f = npsClaimFactor(by, a) / npsClaimFactor(by, baseAge);
-      const r = test("", c => { c.npsAge = a; c.npsAmount = baseAmt * f; });
+      const r = test("", c => { c.npsAge = a; });   // 금액은 정상 나이 기준이라 그대로 — 감액은 npsGrossOf 가 붙인다
       return { a, f, age: r.age, err: !!r.err };
     }).filter(c => !c.err);      // 계산이 예외로 끝난 나이는 후보가 아니다 — null 을 '끝까지 버팀'으로 읽지 않게
     // 끝까지 버티는 나이(null)가 가장 좋다. 같으면 감액이 적은(늦은) 나이를 고른다.
@@ -4679,6 +4692,14 @@ const PRIO_SETS = [
   { name: "일반계좌 먼저 (55세 전 대비)", get: () => ({ taxable: 1, isa: 2, irpInv: 3, psDed: 4, psFree: 5, irpSev: 0 }) },
 ];
 
+/** 국민연금 개시 나이 후보 — 지금 설정이 맨 앞(기준)이고, 나머지는 실제로 받을 수 있는 나이다.
+    조기는 은퇴 뒤부터(근로소득이 있으면 지급 정지), 연기는 최대 5년까지. */
+function npsAgeChoices(cfg) {
+  const n = npsNormalAge(cfg.birthYear), retireAge = cfg.retireYear - cfg.birthYear;
+  const out = [cfg.npsAge];
+  for (let a = Math.max(n - NPS_SHIFT_MAX, retireAge); a <= n + NPS_SHIFT_MAX; a++) if (a !== cfg.npsAge) out.push(a);
+  return out;
+}
 function optimize(onDone) {
   const base = JSON.parse(JSON.stringify(state.cfg));
   const die = base.birthYear + (clamp0(base.gameDeathAge) || 95);
@@ -4722,6 +4743,10 @@ function optimize(onDone) {
     ...(hasHome ? [{ name: "주택연금", vals: [0, 60, 65, 70, 75],
       show: v => v === 0 ? "가입 안 함" : `만 ${v}세 개시`,
       set: v => { state.cfg.reverse = { ...base.reverse, on: v ? 1 : 0, startAge: v || 70 }; } }] : []),
+    ...(clamp0(base.npsAmount) > 0 ? [{ name: "국민연금 개시 나이", vals: npsAgeChoices(base),
+      show: v => { const f = npsClaimFactor(base.birthYear, v), p = Math.round((f - 1) * 100);
+                   return `만 ${v}세${p ? ` (${p > 0 ? "+" : ""}${p}%)` : ""}`; },
+      set: v => { state.cfg.npsAge = v; } }] : []),
     { name: "생활비", vals: [1, .95, .9, .85, .8, .75, .7, .6, .5],
       show: v => v === 1 ? "지금 그대로" : `${Math.round(v * 100)}% (연 ${fmt(Math.round(clamp0(base.gameSpend) * v))})`,
       set: v => { state.cfg.gameSpend = Math.round(clamp0(base.gameSpend) * v);
@@ -4808,7 +4833,7 @@ function renderEnding(box) {
     <div class="gcard opt" style="margin-top:14px">
       <h4>🧭 어떻게 했으면 나았을까 — 최적 운영 탐색</h4>
       <p class="hint" style="margin:0 0 10px">
-        생활비 · 생활비 곡선 · 인출 전략 · 납입 순서${clamp0((cfg.reverse||{}).homeValue) > 0 ? " · 주택연금 개시 나이" : ""}를
+        생활비 · 생활비 곡선 · 인출 전략 · 납입 순서${clamp0((cfg.reverse||{}).homeValue) > 0 ? " · 주택연금 개시 나이" : ""}${clamp0(cfg.npsAmount) > 0 ? " · 국민연금 개시 나이" : ""}를
         하나씩 바꿔 보며 <strong>가장 오래 · 가장 굶지 않고 버티는 조합</strong>을 찾습니다.
         시장 가정(수익률 해석 · 위기 횟수)은 넣지 않습니다 — 내가 고르는 게 아니라 주어지는 것이라,
         넣으면 "운이 좋았으면 됐다"는 공허한 답이 나옵니다.
@@ -4977,7 +5002,7 @@ function renderEnding(box) {
 }
 
 /* 최적화가 실제로 건드리는 설정 — 되돌리기는 딱 이만큼만 복원한다 */
-const OPT_KEYS = ["gameSpend", "spendRules", "wdStrategy", "priority", "reverse"];
+const OPT_KEYS = ["gameSpend", "spendRules", "wdStrategy", "priority", "reverse", "npsAge"];
 
 /** 최적화 직전 설정으로 되돌린다. 한 번 적용하면 새 판에도 계속 따라붙어
     "왜 내가 고른 적 없는 배분으로 굴러가지?" 가 되기 때문에 반드시 퇴로가 있어야 한다. */
@@ -5001,7 +5026,7 @@ function renderOptUndo() {
         <span style="color:var(--muted);font-size:12px">${escHtml(u.at)} · ${escHtml(u.what)}</span></span>
       <button type="button" id="btnOptUndo">↩︎ 적용 전 설정으로</button>
     </div>
-    <p class="hint" style="margin:6px 0 0">최적화는 인출 전략·납입 순서·생활비·주택연금을 <strong>실제 설정에 저장</strong>합니다.
+    <p class="hint" style="margin:6px 0 0">최적화는 인출 전략·납입 순서·생활비·주택연금·국민연금 개시 나이를 <strong>실제 설정에 저장</strong>합니다.
       그래서 새 판을 시작해도 계속 따라붙습니다. 되돌리면 적용 직전 값으로 돌아가고 새 판이 열립니다.</p>`;
   document.getElementById("btnOptUndo").onclick = optimizeUndo;
 }
@@ -5019,7 +5044,7 @@ function optimizeApply(r) {
   };
   const at = n => { const i = r.knobsName.indexOf(n); return i < 0 ? null : r.pick[i]; };
   const spendV = at("생활비"), curveV = at("생활비 곡선"), wdV = at("인출 전략"),
-        prioV = at("납입 순서"), revV = at("주택연금");
+        prioV = at("납입 순서"), revV = at("주택연금"), npsV = at("국민연금 개시 나이");
   // 탐색과 같은 순서로 적용해야 같은 결과가 나온다 — 곡선을 먼저 깔고 그 위에 배율.
   if (curveV === "curve") c.spendRules = spendCurve();
   if (spendV != null) {
@@ -5029,6 +5054,7 @@ function optimizeApply(r) {
   if (wdV != null) c.wdStrategy = wdV;
   if (prioV != null) c.priority = PRIO_SETS[prioV].get(base);
   if (r.hasHome && revV != null) c.reverse = { ...base.reverse, on: revV ? 1 : 0, startAge: revV || 70 };
+  if (npsV != null) c.npsAge = npsV;
   gameStart();
   syncCfgInputs(); renderSpendRules(); renderOptUndo(); render(true, true);
 }
@@ -5149,6 +5175,20 @@ function bindRev() {
       syncRev(); render(false);
     });
   });
+}
+/** 국민연금 개시 나이에 따른 실제 수령액 — 입력은 정상 나이 기준이라 눈으로 확인할 자리가 필요하다 */
+function syncNps() {
+  const info = document.getElementById("npsInfo");
+  if (!info) return;
+  const c = state.cfg, amt = clamp0(c.npsAmount);
+  if (amt <= 0) { info.textContent = "금액을 넣으면 개시 나이별 실제 수령액이 여기 나옵니다."; return; }
+  const n = npsNormalAge(c.birthYear), f = npsClaimFactor(c.birthYear, c.npsAge), lo = n - NPS_SHIFT_MAX, hi = n + NPS_SHIFT_MAX;
+  const pct = Math.round((f - 1) * 100);
+  const out = c.npsAge < lo || c.npsAge > hi;
+  info.innerHTML = `정상 수급 나이 <strong>만 ${n}세</strong> 기준 → 만 ${c.npsAge}세 개시: <strong>연 ${fmt(Math.round(amt * f))}만원</strong>`
+    + (pct ? ` <span style="color:${pct < 0 ? "var(--critical)" : "var(--good)"}">(${pct > 0 ? "+" : ""}${pct}% · 평생)</span>` : "")
+    + (out ? ` <span style="color:var(--critical)">(조기·연기는 만 ${lo}~${hi}세까지만 가능 — 계산은 ${Math.min(NPS_SHIFT_MAX, Math.abs(c.npsAge - n))}년치까지만 반영)</span>` : "")
+    + `<br><span style="color:var(--muted)">개시 후에는 이 금액이 물가만큼 오릅니다. 조기수령은 가입기간 10년 이상이어야 하고 소득 있는 업무 종사 중에는 정지됩니다.</span>`;
 }
 function syncRev() {
   const R = state.cfg.reverse || {};
@@ -5491,6 +5531,7 @@ function syncCfgInputs() {
   syncRetMode();
   syncLoan();
   syncRev();
+  syncNps();
   syncHlt();
   syncPrp();
   syncOpening();
@@ -5786,6 +5827,21 @@ function migrateV2toV3(cfg, src) {
   return cfg;
 }
 
+/** v3 → v4. 국민연금 「연 수령액」의 기준이 개시 나이에서 정상 수급 나이로 바뀌었다.
+    실제 수령액이 그대로 남도록 옛 금액을 비율로 나눠 넣는다 (개시 나이가 정상 나이면 그대로).
+    출생연도·개시 나이가 검증된 뒤에 불러야 한다. 금액은 소수 첫째 자리까지만 남긴다. */
+function migrateV3toV4(cfg) {
+  const amt = clamp0(cfg.npsAmount), f = npsClaimFactor(cfg.birthYear, cfg.npsAge);
+  if (amt > 0 && Math.abs(f - 1) > 1e-9) {
+    cfg.npsAmount = Math.round(amt / f * 10) / 10;
+    MIGRATION_WARNINGS.push(`국민연금: 예전 저장본은 개시 나이(만 ${cfg.npsAge}세)에 받는 금액으로 적혀 있었습니다. `
+      + `이제 「연 수령액」은 정상 수급 나이(만 ${npsNormalAge(cfg.birthYear)}세) 기준이라 연 ${Math.round(amt).toLocaleString()}만원을 `
+      + `${cfg.npsAmount.toLocaleString()}만원으로 환산했습니다 — 실제 수령액은 그대로입니다.`);
+  }
+  cfg.schemaVersion = 4;
+  return cfg;
+}
+
 /** v1 → v2. 구 필드 정리와 중첩 객체 보완. */
 function migrateV1toV2(cfg) {
   migrateTransfers(cfg);              // isaMoveYear/isaMoveAmt → transfers
@@ -5860,6 +5916,8 @@ function migrateState(raw) {
   cfg.npsAmount   = safeNum(cfg.npsAmount, 0, 0, 1e9, "국민연금 수령액");
   cfg.npsAge      = Math.round(safeNum(cfg.npsAge, def.cfg.npsAge, 1, 130, "국민연금 개시나이"));
   cfg.npsRate     = safeNum(cfg.npsRate, def.cfg.npsRate, 0, 100, "국민연금 세율");
+  // 출생연도·개시 나이·금액이 모두 검증된 뒤에 기준을 옮긴다 (여기서 앞의 순차 마이그레이션이 모두 끝나 있다)
+  if (from < 4) cfg = migrateV3toV4(cfg);
   cfg.sevRate     = safeNum(cfg.sevRate, def.cfg.sevRate, 0, 100, "퇴직소득 실효세율");
   cfg.compRate    = safeNum(cfg.compRate, def.cfg.compRate, 0, 100, "분리과세율");
   cfg.divRate     = safeNum(cfg.divRate, def.cfg.divRate, 0, 100, "배당률");
@@ -7300,13 +7358,13 @@ function runSelfTests() {
     setup61();
     state.cfg.npsAmount = 2160; state.cfg.npsAge = 65; state.cfg.npsRate = 3;
     const alt61 = JSON.parse(JSON.stringify(state.cfg));
-    alt61.npsAge = d61.nps ? d61.nps.claimAge : 0; alt61.npsAmount = 2160 * npsClaimFactor(1969, alt61.npsAge);
-    ok("61b. 진단의 조기수령 행 = 그 나이·환산 금액으로 직접 돌린 결과",
+    alt61.npsAge = d61.nps ? d61.nps.claimAge : 0;      // 금액은 정상 나이 기준이라 그대로 — 감액은 계산이 붙인다
+    ok("61b. 진단의 조기수령 행 = 그 나이로 직접 돌린 결과",
        d61.now != null && !!nr61 && d61.nps.claimAge >= 61 && d61.nps.claimAge <= 64 && nr61.age === bustOf(alt61)
        && nr61.age > d61.now,
        `만 ${bustOf(alt61)}세 (기준 ${d61.now}세보다 뒤)`, nr61 ? `만 ${nr61.age}세 (${d61.nps.claimAge}세 개시)` : "행 없음");
     // 감액 없이 나이만 당긴 낙관 값(금액 그대로)보다 나빠야 한다 — 감액을 빠뜨린 구현을 잡는다
-    const naive61 = JSON.parse(JSON.stringify(alt61)); naive61.npsAmount = 2160;
+    const naive61 = JSON.parse(JSON.stringify(alt61)); naive61.npsAmount = 2160 / npsClaimFactor(1969, alt61.npsAge);   // 당기고도 65세 금액 그대로 받는 낙관
     ok("61c. 감액을 반영하면 감액 없이 당긴 값보다 파산이 이르거나 같다",
        (bustOf(naive61) ?? 999) >= (nr61 && nr61.age != null ? nr61.age : 999), "감액 반영 ≤ 무감액",
        `무감액 ${bustOf(naive61)} / 감액 ${nr61 && nr61.age}`);
@@ -7337,6 +7395,88 @@ function runSelfTests() {
     ok("61g. 연기연금으로 잡은 설정에서 당기면 정상(65세)값 기준으로 환산",
        !!d61i.nps && d61i.nps.cands.some(c => c.a === 60 && near(c.f, 0.7 / 1.216, 1e-9)),
        "60세 후보의 비율 0.7/1.216", d61i.nps ? d61i.nps.cands.map(c => `${c.a}:${c.f.toFixed(3)}`).join(" ") : "없음");
+
+    /* --- 63) 국민연금 「연 수령액」은 정상 나이 기준 — 개시 나이가 금액을 바꾼다 --- */
+    reset(); state.cfg.birthYear = 1985; state.cfg.inflation = 0; state.cfg.npsAmount = 1000;
+    const g63 = a => { state.cfg.npsAge = a; return npsGrossOf(state.cfg, 80); };
+    ok("63. 개시 나이가 금액을 바꾼다 (60세 −30% · 65세 그대로 · 70세 +36%)",
+       near(g63(60), 700, 1e-6) && near(g63(65), 1000, 1e-6) && near(g63(70), 1360, 1e-6) && near(g63(62), 820, 1e-6),
+       "700 / 1000 / 1360 / 820", [60, 65, 70, 62].map(a => g63(a).toFixed(1)).join(" / "));
+    state.cfg.npsAge = 60;
+    ok("63b. 개시 전엔 0, 개시 나이부터 감액 금액", npsGrossOf(state.cfg, 59) === 0 && near(npsGrossOf(state.cfg, 60), 700, 1e-6),
+       "0 / 700", `${npsGrossOf(state.cfg, 59)} / ${npsGrossOf(state.cfg, 60).toFixed(1)}`);
+    state.cfg.npsReal = 0; state.cfg.inflation = 2;
+    ok("63c. 명목 고정에도 같은 비율이 붙는다", near(npsGrossOf(state.cfg, 75), 700, 1e-6), "700", npsGrossOf(state.cfg, 75).toFixed(2));
+    state.cfg.npsReal = 1;
+    const e63 = 1000 * 0.7 * Math.pow(1.02, 1985 + 75 - 2026);
+    ok("63d. 물가연동은 감액된 금액 위에서 오른다", near(npsGrossOf(state.cfg, 75), e63, 0.01), e63.toFixed(1), npsGrossOf(state.cfg, 75).toFixed(1));
+    ok("63e. 조기수령 30%는 5년이 상한 — 55세로 적어도 −30%", near(npsClaimFactor(1985, 55), 0.7, 1e-9) && near(npsClaimFactor(1985, 80), 1.36, 1e-9),
+       "0.7 / 1.36", `${npsClaimFactor(1985, 55)} / ${npsClaimFactor(1985, 80)}`);
+
+    /* --- 64) v3 이하 저장본은 개시 나이 기준 금액이었다 — 실제 수령액이 그대로 남게 환산 --- */
+    const v3 = (age, amt, ver = 3, birth = 1985) => ({ cfg: { schemaVersion: ver, birthYear: birth, npsAmount: amt, npsAge: age, npsReal: 1, inflation: 2, startYear: 2026 }, rows: {} });
+    const m64a = migrateState(v3(60, 1000)), m64b = migrateState(v3(65, 1000)), m64c = migrateState(v3(70, 1360));
+    const pay = m => npsGrossOf(m.cfg, m.cfg.npsAge);
+    const before64 = 1000 * Math.pow(1.02, 1985 + 60 - 2026);
+    ok("64. v3 저장본(60세·1000) → 정상 나이 기준으로 환산하고 실제 수령액은 그대로",
+       near(m64a.cfg.npsAmount, 1428.6, 0.001) && near(pay(m64a), before64, before64 * 0.0002) && m64a.cfg.schemaVersion === SCHEMA_VERSION,
+       `1428.6 / ${before64.toFixed(1)}`, `${m64a.cfg.npsAmount} / ${pay(m64a).toFixed(1)}`);
+    ok("64b. 개시 나이가 정상 나이면 금액도 경고도 그대로", m64b.cfg.npsAmount === 1000 && !m64b.warnings.some(w => /정상 수급 나이/.test(w)),
+       "1000 · 경고 없음", `${m64b.cfg.npsAmount} · ${m64b.warnings.filter(w => /정상 수급 나이/.test(w)).length}건`);
+    const before64c = 1360 * Math.pow(1.02, 1985 + 70 - 2026);
+    ok("64c. 연기(70세·1360) → 1000으로 환산, 수령액 유지", near(m64c.cfg.npsAmount, 1000, 0.001) && near(pay(m64c), before64c, before64c * 0.0002),
+       `1000 / ${before64c.toFixed(1)}`, `${m64c.cfg.npsAmount} / ${pay(m64c).toFixed(1)}`);
+    ok("64d. 환산했다는 경고가 뜬다(원래 금액·환산 금액 포함)", m64a.warnings.some(w => /정상 수급 나이\(만 65세\)/.test(w) && /1,000/.test(w) && /1,428\.6/.test(w)),
+       "경고 1건", `${m64a.warnings.filter(w => /정상 수급 나이/.test(w)).length}건`);
+    // 이미 v4 인 저장본을 다시 불러도 두 번 환산되지 않는다
+    const again = migrateState({ cfg: JSON.parse(JSON.stringify(m64a.cfg)), rows: {} });
+    ok("64e. v4 저장본은 다시 불러도 금액이 그대로 (이중 환산 없음)", again.cfg.npsAmount === m64a.cfg.npsAmount && !again.warnings.some(w => /정상 수급 나이/.test(w)),
+       String(m64a.cfg.npsAmount), String(again.cfg.npsAmount));
+    // v1·v2 도 v3 을 거쳐 같은 결과 — 옛 저장본은 npsReal 이 없어 명목 고정으로 남는다
+    const m64f = migrateState({ cfg: { schemaVersion: 2, birthYear: 1985, npsAmount: 1000, npsAge: 60, inflation: 2, startYear: 2026 }, rows: {} });
+    ok("64f. v2 저장본도 환산된다 (명목 고정 유지)", near(m64f.cfg.npsAmount, 1428.6, 0.001) && m64f.cfg.npsReal === 0 && near(npsGrossOf(m64f.cfg, 70), 1000, 0.2),
+       "1428.6 · 명목 · 1000", `${m64f.cfg.npsAmount} · npsReal ${m64f.cfg.npsReal} · ${npsGrossOf(m64f.cfg, 70).toFixed(1)}`);
+    // 출생연도별 정상 나이도 반영 (1960생 → 62세). 60세로 적어 둔 저장본은 −12%
+    const m64g = migrateState(v3(60, 880, 3, 1960));
+    ok("64g. 1960년생(정상 62세) 저장본은 60세 개시를 −12%로 환산", near(m64g.cfg.npsAmount, 1000, 0.001),
+       "1000", String(m64g.cfg.npsAmount));
+    // 범위 밖 값이 들어 있어도 환산은 검증된 값 위에서 (npsAge 문자열·음수 금액)
+    const m64h = migrateState({ cfg: { schemaVersion: 3, birthYear: 1985, npsAmount: "1,000", npsAge: "60세", npsReal: 1 }, rows: {} });
+    ok("64h. 글자가 섞인 값도 읽은 뒤에 환산 (불러오기 파서와 같은 규칙)", m64h.cfg.npsAge === 60 && near(m64h.cfg.npsAmount, 1428.6, 0.001),
+       "60 · 1428.6", `${m64h.cfg.npsAge} · ${m64h.cfg.npsAmount}`);
+
+    /* --- 65) 개시 나이 안내 · 범위 밖 경고 · 최적화 손잡이 --- */
+    reset(); state.cfg.npsAmount = 2160; state.cfg.npsAge = 55;
+    ok("65. 후보 나이는 지금 설정이 맨 앞, 은퇴 뒤부터 정상+5까지",
+       (() => { reset(); state.cfg.npsAmount = 2000; state.cfg.npsAge = 65; state.cfg.retireYear = 2040;   // 1985생 → 55세 은퇴
+                const v = npsAgeChoices(state.cfg); return v[0] === 65 && v.includes(60) && v.includes(70) && !v.includes(59) && v.filter(a => a === 65).length === 1 && v.length === 11; })(),
+       "[65, 60..64, 66..70]", (() => { reset(); state.cfg.npsAmount = 2000; return npsAgeChoices(state.cfg).join(","); })());
+    reset(); state.cfg.npsAmount = 2000; state.cfg.retireYear = 2047;   // 62세 은퇴 → 조기는 62세부터
+    ok("65b. 은퇴 전 나이는 후보에서 뺀다", npsAgeChoices(state.cfg).every((a, i) => i === 0 || a >= 62) && !npsAgeChoices(state.cfg).includes(61),
+       "62세 이상", npsAgeChoices(state.cfg).join(","));
+    const wOf = (age, amt) => { reset(); state.cfg.npsAmount = amt; state.cfg.npsAge = age; return (simulate().warnings || []).filter(w => /조기·연기 가능 범위/.test(w)).length; };
+    ok("65c. 개시 나이가 조기·연기 가능 범위(60~70세)를 벗어나면 경고, 안이면 없음, 금액 0이면 없음",
+       wOf(55, 2000) === 1 && wOf(75, 2000) === 1 && wOf(60, 2000) === 0 && wOf(70, 2000) === 0 && wOf(55, 0) === 0,
+       "1 / 1 / 0 / 0 / 0", [wOf(55, 2000), wOf(75, 2000), wOf(60, 2000), wOf(70, 2000), wOf(55, 0)].join(" / "));
+
+    /* --- 66) 최적 조합이 국민연금 개시 나이도 찾고, 적용·되돌리기가 그 값을 다룬다 --- */
+    const smallOpt = amt => { reset(); Object.assign(state.cfg, { retireYear: 2036, endYear: 2050, gameSeed: 3, gameSpend: 3000, npsAmount: amt, npsAge: 65, gameDeathAge: 65 });
+      let out; optimize(x => { out = x; }); return out; };
+    const o66a = smallOpt(1500), o66b = smallOpt(0);
+    ok("66. 최적 탐색에 「국민연금 개시 나이」 손잡이가 들어간다 (금액이 있을 때만)",
+       o66a.knobsName.includes("국민연금 개시 나이") && !o66b.knobsName.includes("국민연금 개시 나이"),
+       "있음 / 없음", `${o66a.knobsName.includes("국민연금 개시 나이")} / ${o66b.knobsName.includes("국민연금 개시 나이")}`);
+    reset(); state.cfg.npsAmount = 1500; state.cfg.npsAge = 65; state.optUndo = null;
+    optimizeApply({ changes: [{ name: "국민연금 개시 나이", same: false }], knobsName: ["국민연금 개시 나이"], pick: [62], hasHome: false });
+    const afterApply = state.cfg.npsAge, savedAge = state.optUndo && state.optUndo.cfg.npsAge;
+    optimizeUndo();
+    ok("66b. 적용하면 개시 나이가 바뀌고, 되돌리면 적용 전 나이로 돌아온다",
+       afterApply === 62 && savedAge === 65 && state.cfg.npsAge === 65 && state.optUndo === null,
+       "62 → 되돌림 65", `${afterApply} (저장 ${savedAge}) → ${state.cfg.npsAge}`);
+    // 개시 나이가 없는 예전 되돌리기 정보를 불러와도 현재 개시 나이가 그대로 남는다
+    const old66 = sanitizeUndo({ at: "1/1", what: "x", cfg: { gameSpend: 1000, spendRules: [], wdStrategy: "ratio", priority: {}, reverse: { on: 0 } } }, state.cfg);
+    ok("66c. 개시 나이가 없는 예전 되돌리기 정보는 현재 개시 나이를 유지", !!old66 && old66.cfg.npsAge === state.cfg.npsAge,
+       String(state.cfg.npsAge), old66 ? String(old66.cfg.npsAge) : "null");
 
     /* --- 62) 이미 켜 둔 항목은 '가입했다면'이라 묻지 않는다 --- */
     const lab = (d, re) => d.rows.find(r => re.test(r.label)) || {};
