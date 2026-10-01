@@ -2725,9 +2725,19 @@ function ratioDraws(st, ctx, target, capacity, floor) {
     if (back.length) advance(back);
   }
 
+  finishDraws(draws, capacity, evalDraws, target, cap);
+  return draws;
+}
+
+/**
+ * 반올림 → 마지막 1만원 채우기. 문턱(cap) 안에서 끝내 목표를 못 채우면 그때서야(최후 수단) 문턱을 넘어 채운다.
+ * 예전에는 탐색이 최후 수단까지 갔다가도 반올림이 문턱 바로 아래(1,500)로 되돌려 놓고, topUp 은 1,500→1,501 을
+ * 건너뛰지 못해 잔액이 충분한데도 목표에 못 미쳤다. 0.5만원 이하 부족은 계산 오차로 보고 문턱을 넘지 않는다.
+ */
+function finishDraws(draws, capacity, evalDraws, target, cap) {
   roundDraws(draws, evalDraws, cap);
   topUp(draws, capacity, evalDraws, target, cap);
-  return draws;
+  if (cap !== Infinity && evalDraws(draws).net < target - 0.5) topUp(draws, capacity, evalDraws, target, Infinity);
 }
 
 /**
@@ -2837,6 +2847,14 @@ function greedyDraws(st, ctx, target, strategy, seed) {
         if (room <= 0.5) continue;
         best = consider(best, id, Math.min(step, room));
       }
+      if (!best.id) { // 청크(step)가 문턱·세율 계단에 걸렸다 — 문턱 아래 남은 1~4만원을 먼저 잘게 시험한다.
+        // 건너뛰고 곧장 큰 청크로 가면 문턱 바로 아래에서 목표를 채울 수 있는데도 문턱을 넘어 훨씬 많이 뽑게 된다.
+        for (const id of ph.ids) {
+          const room = capacity[id] - draws[id];
+          if (room <= 0.5) continue;
+          for (let c = Math.min(step - 1, Math.floor(room)); c >= 1; c = c > 1 ? Math.floor(c / 2) : 0) best = consider(best, id, c);
+        }
+      }
       if (!best.id && ph.jump) { // 계단에 걸렸다 — 청크를 키워 넘어본다
         for (const id of ph.ids) {
           const room = capacity[id] - draws[id];
@@ -2871,8 +2889,7 @@ function greedyDraws(st, ctx, target, strategy, seed) {
       if (evalDraws(trial).net >= target - 0.5) draws[id] = hi;
     }
   }
-  roundDraws(draws, evalDraws, strategy === "taxmin" ? Infinity : cap);
-  topUp(draws, capacity, evalDraws, target, strategy === "taxmin" ? Infinity : cap);
+  finishDraws(draws, capacity, evalDraws, target, strategy === "taxmin" ? Infinity : cap);
   return draws;
 }
 
@@ -4813,13 +4830,31 @@ function npsAgeChoices(cfg) {
   return out;
 }
 /** 탐색 점수 비교 — 사전식: 살아남는 게 먼저, 그다음 굶지 않는 것, 그다음 많이 쓰는 것.
-    마지막 항목은 0.5% 넘게 나아져야 인정한다. 시드 5개로 도는 탐색이라 그보다 작은 차이는 표본 잡음이라,
-    그걸로 손잡이를 바꾸면 "별 차이 없는데 바꾸라"는 추천이 된다(국민연금 개시 나이가 그랬다). 같으면 지금 설정을 유지한다. */
+    betterScore(a, b)는 "a가 기준 b보다 의미 있게 나은가"만 답한다. 마지막 항목은 0.5% 넘게 나아져야 인정한다.
+    시드 5개로 도는 탐색이라 그보다 작은 차이는 표본 잡음이라, 그걸로 손잡이를 바꾸면 "별 차이 없는데 바꾸라"는
+    추천이 된다(국민연금 개시 나이가 그랬다). 같으면 지금 설정을 유지한다.
+    ⚠️ 허용오차 비교는 순환할 수 있어(A>B, B>C, C>A) 후보끼리의 순위에는 쓰지 않는다 — 기준(지금 설정)과만 비교하고,
+    통과한 후보끼리는 scoreCmp(허용오차 없는 전순서)로 고른다. */
 function betterScore(a, b) {
   if (!b) return true;
   if (Math.abs(a.bust - b.bust) > 1e-9) return a.bust < b.bust;
   if (Math.abs(a.miss - b.miss) > 0.01) return a.miss < b.miss;
   return a.net > b.net * 1.005 + 1;
+}
+/** 허용오차 없는 전순서 — 음수면 a가 더 좋다. 파산 → 미달 → 세후 수령액 순. */
+function scoreCmp(a, b) {
+  if (Math.abs(a.bust - b.bust) > 1e-9) return a.bust - b.bust;
+  if (Math.abs(a.miss - b.miss) > 1e-9) return a.miss - b.miss;
+  return b.net - a.net;
+}
+/** 기준 점수보다 의미 있게 나은 후보 중 가장 좋은 것의 인덱스(없으면 -1). 후보 순서와 무관하다. */
+function chooseCandidate(baseline, cands) {
+  let best = -1;
+  cands.forEach((c, i) => {
+    if (!betterScore(c, baseline)) return;
+    if (best < 0 || scoreCmp(c, cands[best]) < 0) best = i;
+  });
+  return best;
 }
 function optimize(onDone) {
   const base = JSON.parse(JSON.stringify(state.cfg));
@@ -4840,7 +4875,6 @@ function optimize(onDone) {
     state.cfg.gameSeed = base.gameSeed;
     return { bust: bust / n, miss: miss / n, net: net / n, tax: tax / n };
   };
-  const better = betterScore;
 
   const hasHome = clamp0((base.reverse || {}).homeValue) > 0;
   // 손잡이 순서 = 아프지 않은 것부터. 좌표하강법은 앞에서 목표를 달성하면
@@ -4884,15 +4918,16 @@ function optimize(onDone) {
   let cur = score(), runs = 1;
   for (let pass = 0; pass < 2; pass++) {
     for (let i = 0; i < knobs.length; i++) {
-      let bestV = pick[i], bestS = cur;
+      const cands = [], vs = [], save = pick[i];
       for (const v of knobs[i].vals) {
-        if (v === pick[i]) continue;
-        const save = pick[i]; pick[i] = v; applyAll();
-        const sc = score(); runs++;
-        if (better(sc, bestS)) { bestS = sc; bestV = v; } else pick[i] = save;
-        pick[i] = save;
+        if (v === save) continue;
+        pick[i] = v; applyAll();
+        cands.push(score()); vs.push(v); runs++;
       }
-      pick[i] = bestV; cur = bestS; applyAll();
+      pick[i] = save;
+      const bi = chooseCandidate(cur, cands);
+      if (bi >= 0) { pick[i] = vs[bi]; cur = cands[bi]; }
+      applyAll();
     }
   }
   const changes = knobs.map((k, i) => ({ name: k.name, from: k.show(k.vals[0]), to: k.show(pick[i]), same: pick[i] === k.vals[0] }));
@@ -7885,6 +7920,42 @@ function runSelfTests() {
        && !betterScore(sc76(0, 0, 100300), sc76(0, 0, 100000)) && !betterScore(sc76(0, 0, 100000), sc76(0, 0, 100000)) && betterScore(sc76(0, 0, 1), null),
        "true·true·true·false·false·true", [betterScore(sc76(0, 0, 100000), sc76(0.2, 0, 90000)), betterScore(sc76(0, 0.01, 100000), sc76(0, 0.05, 100000)), betterScore(sc76(0, 0, 100600), sc76(0, 0, 100000)),
         betterScore(sc76(0, 0, 100300), sc76(0, 0, 100000)), betterScore(sc76(0, 0, 100000), sc76(0, 0, 100000)), betterScore(sc76(0, 0, 1), null)].join("·"));
+
+    /* --- 77) 문턱 아래에서 채울 수 있으면 채운다 / 정말 못 채울 때만 문턱을 넘어 목표를 맞춘다 --- */
+    reset(); state.cfg.pensionCap = 1500; state.cfg.compRate = 16.5; state.cfg.npsAmount = 0;
+    const run77 = (st, ctx, target, strat, seed) => { const dr = greedyDraws({ bal: cloneBal(st.bal), isaUsed: 0 }, ctx, target, strat, seed || {});
+      return { dr, r: applyWithdrawals({ bal: cloneBal(st.bal), isaUsed: 0 }, dr, ctx) }; };
+    // 이미 지정한 인출 1,498에 1~4만원만 더 얹으면 문턱 안에서 끝나는데, 최소 청크(5만원)에 걸려 1,697을 뽑던 경우
+    const st77a = blankSt(); st77a.bal.psDed.ded = 2000;
+    const ctx77a = { ...ctx75, otherComp: 50000 };
+    const a77 = ["pensionFirst", "ratio", "taxmin"].map(sg => run77(st77a, ctx77a, 1416.5, sg, { psDed: 1498 }));
+    ok("77. 문턱 안(1,499)에서 목표를 채울 수 있으면 5만원 청크에 걸려 1,697을 뽑지 않는다 — 세 전략 모두",
+       a77.every(x => x.dr.psDed === 1499 && x.r.net >= 1416.5 - 1e-6 && x.r.taxablePension <= 1500 + 1e-6),
+       "세 전략 모두 인출 1,499 · 실수령 ≥ 1,416.5 · 과세대상 ≤ 1,500", a77.map(x => `${x.dr.psDed}/${x.r.net.toFixed(2)}`).join(" · "));
+    // 연금저축 1,000 + IRP 9,000, 목표 1,419 — 문턱(1,500) 안에서는 최대 1,417.5라 못 채운다. 반올림이 1,500으로 되돌린 뒤 못 넘던 경우
+    const st77b = blankSt(); st77b.bal.psDed.ded = 1000; st77b.bal.irpInv.ded = 9000;
+    const b77 = ["ratio", "pensionFirst"].map(sg => run77(st77b, ctx75, 1419, sg));
+    ok("77b. 문턱 안에서는 목표를 못 채우면(잔액은 충분) 최후 수단으로 문턱을 넘어 목표를 채운다 — 1.5만원 미달로 끝나지 않는다",
+       b77.every(x => x.r.net >= 1419 - 1e-6 && x.r.taxablePension >= 1500 && x.r.taxablePension <= 1503),
+       "두 전략 모두 실수령 ≥ 1,419 · 과세대상 1,500~1,503", b77.map(x => `${x.r.net.toFixed(2)}/${x.r.taxablePension.toFixed(0)}`).join(" · "));
+    // 부족이 0.5만원 이하(계산 오차 수준)면 그 때문에 문턱을 넘지는 않는다
+    const c77 = run77(st77b, ctx75, 1417.8, "ratio");
+    ok("77c. 부족이 0.3만원(계산 오차 수준)이면 문턱을 넘지 않는다", c77.r.taxablePension <= 1500 + 1e-6 && c77.r.net >= 1417.8 - 0.5,
+       "과세대상 ≤ 1,500 · 실수령 ≥ 1,417.3", `과세대상 ${c77.r.taxablePension.toFixed(1)} · 실수령 ${c77.r.net.toFixed(2)}`);
+
+    /* --- 77d) 최적 탐색의 후보 선택은 순서에 따라 달라지지 않는다 (허용오차 비교는 순환할 수 있다) --- */
+    const sA = sc76(0, 0, 100000), sB = sc76(0, 0.011, 102000), sC = sc76(0, 0.006, 101000);
+    const perms77 = [[sA, sB, sC], [sA, sC, sB], [sB, sA, sC], [sB, sC, sA], [sC, sA, sB], [sC, sB, sA]];
+    const w77 = perms77.map(c => c[chooseCandidate(sc76(0.2, 0, 90000), c)]);
+    ok("77d. 후보 A(미달 0)·B(0.011)·C(0.006)는 허용오차 비교로는 A>B·B>C·C>A 순환이지만, 어떤 순서로 넣어도 같은 후보(A)를 고른다",
+       w77.every(w => w === sA) && betterScore(sA, sB) && betterScore(sB, sC) && betterScore(sC, sA),
+       "6가지 순서 모두 A · 순환 확인", w77.map(w => w === sA ? "A" : w === sB ? "B" : "C").join(""));
+    // 기준보다 의미 있게 낫지 않은 후보는 순위가 가장 높아도 뽑지 않고, 의미 있는 후보 중에서 고른다
+    const base77 = sc76(0, 0.005, 100000), tiny77 = sc76(0, 0.004, 90000), real77 = sc76(0, 0.005, 110000);
+    ok("77e. 기준 대비 의미 있게 나은 후보만 대상이다 — 순위가 더 높아도 기준과 별 차이 없으면 건너뛰고, 아무도 없으면 바꾸지 않는다(-1)",
+       chooseCandidate(base77, [tiny77, real77]) === 1 && chooseCandidate(base77, [tiny77, sc76(0, 0.005, 100300)]) === -1,
+       "1 · -1", `${chooseCandidate(base77, [tiny77, real77])} · ${chooseCandidate(base77, [tiny77, sc76(0, 0.005, 100300)])}`);
+    reset();
 
     /* --- 65) 개시 나이 안내 · 범위 밖 경고 · 최적화 손잡이 --- */
     reset(); state.cfg.npsAmount = 2160; state.cfg.npsAge = 55;
