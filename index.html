@@ -6502,6 +6502,22 @@ document.getElementById("btnClearIn").onclick = () => clearField("in");
 document.getElementById("btnSave").onclick = () => { save(); const b = document.getElementById("btnSave"); b.textContent = "저장됨 ✓"; setTimeout(() => b.textContent = "저장", 1200); };
 document.getElementById("btnCsv").onclick = () => exportCsv(lastSim || simulate());
 document.getElementById("btnExport").onclick = () => download("절세계좌_시뮬레이션.json", JSON.stringify(state, null, 2), "application/json");
+/** 설정이 통째로 바뀐 뒤(불러오기·초기화) 편집기 목록을 전부 다시 그린다.
+    하나라도 빠지면 화면에는 옛 값이 남고 실제 설정은 새 값이라, 보이는 것과 계산이 어긋난다
+    (예전에는 불러온 뒤 「생활비 구간」 표와 되돌리기 단추가 그대로였다). */
+function rerenderEditors() {
+  builtRange = "";
+  renderFillRules(); renderWdRules(); renderSpendRules(); renderXfers(); renderEvents(); renderOptUndo();
+}
+/** 저장본(JSON 객체) 하나를 현재 설정으로 올리고 화면을 갱신한다. 보정한 값이 있으면 경고 목록을 돌려준다. */
+function applyImported(s) {
+  if (!s || !s.cfg) throw new Error("형식 오류");
+  const m = migrateState(s);
+  state = { cfg: m.cfg, rows: m.rows, optUndo: m.optUndo };
+  rerenderEditors();
+  render(true, true);
+  return m;
+}
 document.getElementById("btnImport").onclick = () => {
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = ".json,application/json";
@@ -6510,11 +6526,7 @@ document.getElementById("btnImport").onclick = () => {
     const rd = new FileReader();
     rd.onload = () => {
       try {
-        const s = JSON.parse(rd.result);
-        if (!s.cfg) throw new Error("형식 오류");
-        const m = migrateState(s);
-        state = { cfg: m.cfg, rows: m.rows, optUndo: m.optUndo };
-        builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); renderEvents(); render(true, true);
+        const m = applyImported(JSON.parse(rd.result));
         if (m.warnings.length) {
           alert("불러왔습니다. 다만 아래 값은 보정했습니다:\n\n· " + m.warnings.slice(0, 10).join("\n· ")
             + (m.warnings.length > 10 ? `\n… 외 ${m.warnings.length - 10}건` : ""));
@@ -6529,7 +6541,7 @@ document.getElementById("btnReset").onclick = () => {
   if (!confirm("모든 입력을 초기화할까요?")) return;
   localStorage.removeItem(LS_KEY);
   state = defaultState(); seedExample();
-  builtRange = ""; renderFillRules(); renderWdRules(); renderXfers(); renderEvents(); render(true, true);
+  rerenderEditors(); render(true, true);
 };
 document.getElementById("btnTheme").onclick = () => {
   const cur = document.documentElement.getAttribute("data-theme");
@@ -7857,6 +7869,25 @@ function runSelfTests() {
        && starvedFor({ strictSpend: 2 }, 10000, 1) === false && starvedFor({ strictSpend: 1 }, 10000, 600) === true,
        "false·true·false·true", [starvedFor({ strictSpend: 1 }, 10000, 50), starvedFor({ strictSpend: 2 }, 10000, 50), starvedFor({ strictSpend: 2 }, 10000, 1), starvedFor({ strictSpend: 1 }, 10000, 600)].join("·"));
 
+    /* --- 74) 불러오기·초기화 뒤 편집기 목록이 새 값으로 다시 그려진다 --- */
+    reset();
+    state.cfg.spendRules = [{ name: "옛구간", from: 2026, to: 2080, amt: 1000, real: 1, unit: "year" }];
+    renderSpendRules();
+    const imp74 = JSON.parse(JSON.stringify({ cfg: { ...state.cfg, spendRules: [
+      { name: "새구간A", from: 2026, to: 2039, amt: 8200, real: 1, unit: "year" },
+      { name: "새구간B", from: 2040, to: 2080, amt: 6970, real: 1, unit: "year" }] },
+      rows: {}, optUndo: { at: "1/1", what: "테스트", cfg: { gameSpend: 7000, spendRules: [], wdStrategy: "ratio", priority: {}, reverse: { on: 0 }, npsAge: 65 } } }));
+    const m74 = applyImported(imp74);
+    const rowsHtml74 = document.getElementById("spendRows").innerHTML || "", prevHtml74 = document.getElementById("spendPreview").innerHTML || "", undoHtml74 = document.getElementById("optUndoBox").innerHTML || "";
+    ok("74. 불러오기 직후 「생활비 구간」 표·미리보기·되돌리기 단추가 새 값으로 갱신된다 (옛 구간이 남지 않는다)",
+       state.cfg.spendRules.length === 2 && /새구간A/.test(rowsHtml74) && /새구간B/.test(rowsHtml74) && !/옛구간/.test(rowsHtml74)
+       && /새구간B|8,?200|6,?970/.test(prevHtml74) && /적용 전 설정으로/.test(undoHtml74) && m74.warnings.length >= 0,
+       "구간 2개 · 표에 새구간A/B · 되돌리기 단추", `설정 ${state.cfg.spendRules.length}개 · 표: ${/새구간A/.test(rowsHtml74) ? "새 값" : /옛구간/.test(rowsHtml74) ? "옛 값 그대로" : "비어 있음"} · 단추 ${/적용 전 설정으로/.test(undoHtml74)}`);
+    ok("74b. 편집기 전체 갱신 함수가 목록 여섯 개를 모두 부른다 (일정·인출·납입 규칙·이전·생활비 구간·되돌리기)",
+       /renderFillRules\(\);[\s\S]*renderWdRules\(\);[\s\S]*renderSpendRules\(\);[\s\S]*renderXfers\(\);[\s\S]*renderEvents\(\);[\s\S]*renderOptUndo\(\)/.test(rerenderEditors.toString()),
+       "6개 호출", rerenderEditors.toString().match(/render\w+\(\)/g).join(","));
+    reset();
+
     /* --- 75) 자동 인출은 사적연금 과세대상이 문턱(1,500만)을 넘기지 않는다 (넘기면 전액 16.5%·종합과세) --- */
     reset(); state.cfg.pensionCap = 1500; state.cfg.compRate = 16.5; state.cfg.npsAmount = 0;
     const ctx75 = { year: 2046, age: 66, eligible: { psFree: true, psDed: true, irpInv: true, irpSev: true }, pLimit: { psFree: 1e9, psDed: 1e9, irpInv: 1e9, irpSev: 1e9 },
@@ -8025,7 +8056,7 @@ function runSelfTests() {
     state.cfg = saved; state.rows = savedRows;
     game = savedGame;
     // 42번은 실제 편집기 화면에 시험용 값을 그렸다 — 원래 설정으로 다시 그린다
-    try { renderFillRules(); renderWdRules(); renderSpendRules(); renderEvents(); renderXfers(); renderOptUndo(); } catch (e) {}
+    try { rerenderEditors(); } catch (e) {}
   }
 
   const failed = results.filter(r => !r.pass);
