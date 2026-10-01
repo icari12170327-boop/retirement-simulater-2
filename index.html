@@ -2690,21 +2690,68 @@ function ratioDraws(st, ctx, target, capacity, floor) {
     advance(ded, limit);
   }
 
-  // 2순위 — 나머지 계좌를 잔액 비례로 동시에 헐어낸다
+  // 2순위 — 나머지 계좌를 잔액 비례로 동시에 헐어낸다.
+  // 나머지에도 연금저축(안세공)·퇴직 IRP 같은 연금계좌가 끼어 있어, 거기서 뽑은 과세분(수익·공제 원금)이
+  // 1순위가 채운 문턱 위로 얹히면 전액 16.5%(또는 종합과세)가 붙는다. 그래서 같은 문턱 안쪽까지만 비례로 헐고,
+  // 그래도 모자라면 과세대상이 늘지 않는 ISA·일반계좌를 먼저 쓴다.
   if (netOf(draws) < target - 0.5) {
     const rest = AID.filter(id => !DEDIDS.includes(id) && room(id) > 0.5);
-    if (rest.length) advance(rest);
+    if (rest.length) {
+      let limit = 1;
+      if (cap !== Infinity) {
+        const total = rest.reduce((s, id) => s + room(id), 0);
+        const over = s => {
+          const add = spread(rest, total * s), d = { ...draws };
+          for (const id of rest) d[id] += add[id];
+          return evalDraws(d).taxablePension > cap + 1e-6;
+        };
+        if (over(1)) {
+          let lo = 0, hi = 1;
+          for (let i = 0; i < 22; i++) { const mid = (lo + hi) / 2; if (over(mid)) hi = mid; else lo = mid; }
+          limit = lo;
+        }
+      }
+      advance(rest, limit);
+    }
+    if (netOf(draws) < target - 0.5) {
+      const free = AID.filter(id => !PENSION.includes(id) && room(id) > 0.5);
+      if (free.length) advance(free);
+    }
   }
 
   // 3순위 — 최후 수단. 여기까지 오면 문턱을 넘어 16.5%가 붙는다.
   if (netOf(draws) < target - 0.5) {
-    const back = DEDIDS.filter(id => room(id) > 0.5);
+    const back = AID.filter(id => room(id) > 0.5);
     if (back.length) advance(back);
   }
 
-  AID.forEach(id => { draws[id] = Math.round(draws[id]); });
-  topUp(draws, capacity, evalDraws, target);
+  roundDraws(draws, evalDraws, cap);
+  topUp(draws, capacity, evalDraws, target, cap);
   return draws;
+}
+
+/**
+ * 계좌별 인출액을 만원 단위로 반올림한다.
+ * 문턱(기본 1,500만) 안쪽이던 과세대상 연금이 반올림 때문에 1만원 넘으면 그것만으로 전액 16.5%(또는 종합과세)가
+ * 붙으므로, 반올림 전에 문턱 안이었다면 과세대상이 가장 낮아지는 연금계좌에서 1만원씩 되돌린다.
+ * 모자라게 된 1~2만원은 이어지는 topUp 이 문턱을 넘지 않는 계좌에서 채운다.
+ */
+function roundDraws(draws, evalDraws, cap) {
+  const inside = cap === Infinity || evalDraws(draws).taxablePension <= cap + 1e-6;
+  AID.forEach(id => { draws[id] = Math.round(draws[id]); });
+  if (!inside) return;
+  for (let g = 0; g < 20 && evalDraws(draws).taxablePension > cap + 1e-6; g++) {
+    let best = null;
+    for (const id of PENSION) {
+      if (draws[id] < 1) continue;
+      draws[id] -= 1;
+      const tp = evalDraws(draws).taxablePension;
+      draws[id] += 1;
+      if (!best || tp < best.tp - 1e-9) best = { id, tp };
+    }
+    if (!best) break;
+    draws[best.id] -= 1;
+  }
 }
 
 /**
@@ -2713,16 +2760,21 @@ function ratioDraws(st, ctx, target, capacity, floor) {
  * 거의 매 턴 "1만원 더 빼야 합니다"가 떠서 사용자가 손으로 보태야 했다.
  * 여기서 1만원 단위로 실수령이 가장 큰 계좌에 얹어 목표를 실제로 넘긴다.
  */
-function topUp(draws, capacity, evalDraws, target) {
+function topUp(draws, capacity, evalDraws, target, cap = Infinity) {
   for (let guard = 0; guard < 60; guard++) {
-    const now = evalDraws(draws).net;
+    const cur = evalDraws(draws), now = cur.net;
     if (now >= target - 1e-6) return;
     let best = null;
     for (const id of AID) {
       const room = Math.floor(clamp0(capacity[id]) - draws[id]);
       if (room < 1) continue;
       const trial = { ...draws }; trial[id] += 1;
-      const gain = evalDraws(trial).net - now;
+      const res = evalDraws(trial);
+      // 문턱(기본 1,500만) 안이던 과세대상 연금을 1만원 얹어 넘기지 않는다. 소득이 적은 해는 문턱을 넘어
+      // 종합과세로 가는 쪽이 세금이 더 적게 나올 수 있어 net 만 보면 일부러 넘기게 되는데, 저율구간을 지키려는
+      // 전략이라 그건 의도가 아니다 (건강보험료 등 모델 밖 영향도 있다).
+      if (cap !== Infinity && cur.taxablePension <= cap + 1e-6 && res.taxablePension > cap + 1e-6) continue;
+      const gain = res.net - now;
       if (gain > 0 && (!best || gain > best.gain)) best = { id, gain };
     }
     if (!best) return;              // 더 뺄 곳이 없다 — 부족분은 정직하게 남긴다
@@ -2761,6 +2813,9 @@ function greedyDraws(st, ctx, target, strategy, seed) {
   const phases = strategy === "taxmin"
     ? [{ ids: AID, maxTaxable: Infinity, jump: true }]
     : [{ ids: PENSION, maxTaxable: cap, jump: false },
+       // 나머지 계좌를 채울 때도 연금계좌 몫이 과세대상을 문턱 위로 얹지 않게 같은 선으로 묶는다.
+       // (예전에는 여기서 연금저축 과세분이 더해져 문턱을 1~2만원 넘기곤 했다.) 그래도 모자랄 때만 풀어 준다.
+       { ids: AID, maxTaxable: cap, jump: true },
        { ids: AID, maxTaxable: Infinity, jump: true }];
 
   for (const ph of phases) {
@@ -2816,8 +2871,8 @@ function greedyDraws(st, ctx, target, strategy, seed) {
       if (evalDraws(trial).net >= target - 0.5) draws[id] = hi;
     }
   }
-  AID.forEach(id => { draws[id] = Math.round(draws[id]); });
-  topUp(draws, capacity, evalDraws, target);
+  roundDraws(draws, evalDraws, strategy === "taxmin" ? Infinity : cap);
+  topUp(draws, capacity, evalDraws, target, strategy === "taxmin" ? Infinity : cap);
   return draws;
 }
 
@@ -4757,6 +4812,15 @@ function npsAgeChoices(cfg) {
   for (let a = Math.max(n - NPS_SHIFT_MAX, retireAge); a <= n + NPS_SHIFT_MAX; a++) if (a !== cfg.npsAge) out.push(a);
   return out;
 }
+/** 탐색 점수 비교 — 사전식: 살아남는 게 먼저, 그다음 굶지 않는 것, 그다음 많이 쓰는 것.
+    마지막 항목은 0.5% 넘게 나아져야 인정한다. 시드 5개로 도는 탐색이라 그보다 작은 차이는 표본 잡음이라,
+    그걸로 손잡이를 바꾸면 "별 차이 없는데 바꾸라"는 추천이 된다(국민연금 개시 나이가 그랬다). 같으면 지금 설정을 유지한다. */
+function betterScore(a, b) {
+  if (!b) return true;
+  if (Math.abs(a.bust - b.bust) > 1e-9) return a.bust < b.bust;
+  if (Math.abs(a.miss - b.miss) > 0.01) return a.miss < b.miss;
+  return a.net > b.net * 1.005 + 1;
+}
 function optimize(onDone) {
   const base = JSON.parse(JSON.stringify(state.cfg));
   const die = base.birthYear + (clamp0(base.gameDeathAge) || 95);
@@ -4776,18 +4840,16 @@ function optimize(onDone) {
     state.cfg.gameSeed = base.gameSeed;
     return { bust: bust / n, miss: miss / n, net: net / n, tax: tax / n };
   };
-  // 사전식 비교 — 살아남는 게 먼저, 그다음 굶지 않는 것, 그다음 많이 쓰는 것
-  const better = (a, b) => !b ? true
-    : Math.abs(a.bust - b.bust) > 1e-9 ? a.bust < b.bust
-    : Math.abs(a.miss - b.miss) > 0.01 ? a.miss < b.miss
-    : a.net > b.net + 1;
+  const better = betterScore;
 
   const hasHome = clamp0((base.reverse || {}).homeValue) > 0;
   // 손잡이 순서 = 아프지 않은 것부터. 좌표하강법은 앞에서 목표를 달성하면
   // 뒤를 안 보므로, 생활비 삭감(가장 아픈 수단)을 마지막에 둬야
   // "공짜 손잡이부터 다 써 보고 그래도 안 되면 줄여라"가 된다.
   const knobs = [
-    { name: "인출 전략", vals: ["ratio", "pensionFirst", "taxmin"],
+    // 맨 앞 값이 '지금 설정'이다 — 탐색은 맨 앞 값에서 출발해 "바꿔야 했던 것"을 비교한다.
+    // 예전에는 주택연금이 늘 '가입 안 함'에서 출발해, 이미 가입해 둔 사람에게도 "가입 안 함 → 만 N세 개시"가 떴다.
+    { name: "인출 전략", vals: [base.wdStrategy, ...["ratio", "pensionFirst", "taxmin"].filter(v => v !== base.wdStrategy)],
       show: v => ({ ratio: "저율구간 + 잔액 비례", pensionFirst: "연금 저율구간 우선", taxmin: "그해 세금 최소" })[v],
       set: v => { state.cfg.wdStrategy = v; } },
     { name: "납입 순서", vals: PRIO_SETS.map((_, i) => i),
@@ -4796,9 +4858,12 @@ function optimize(onDone) {
     { name: "생활비 곡선", vals: ["keep", "curve"],
       show: v => v === "keep" ? "지금 그대로" : "표준 U자 곡선",
       set: v => { if (v === "curve") state.cfg.spendRules = spendCurve(); } },
-    ...(hasHome ? [{ name: "주택연금", vals: [0, 60, 65, 70, 75],
+    ...(hasHome ? [{ name: "주택연금", vals: (() => {
+        const now = (base.reverse || {}).on ? Math.round(clamp0(base.reverse.startAge)) : 0;
+        return [now, ...[0, 60, 65, 70, 75].filter(v => v !== now)];
+      })(),
       show: v => v === 0 ? "가입 안 함" : `만 ${v}세 개시`,
-      set: v => { state.cfg.reverse = { ...base.reverse, on: v ? 1 : 0, startAge: v || 70 }; } }] : []),
+      set: v => { state.cfg.reverse = { ...base.reverse, on: v ? 1 : 0, startAge: v || clamp0(base.reverse.startAge) || 70 }; } }] : []),
     ...(clamp0(base.npsAmount) > 0 ? [{ name: "국민연금 개시 나이", vals: npsAgeChoices(base),
       show: v => { const f = npsClaimFactor(base.birthYear, v), p = Math.round((f - 1) * 100);
                    return `만 ${v}세${p ? ` (${p > 0 ? "+" : ""}${p}%)` : ""}`; },
@@ -7756,6 +7821,70 @@ function runSelfTests() {
        starvedFor({ strictSpend: 1 }, 10000, 50) === false && starvedFor({ strictSpend: 2 }, 10000, 50) === true
        && starvedFor({ strictSpend: 2 }, 10000, 1) === false && starvedFor({ strictSpend: 1 }, 10000, 600) === true,
        "false·true·false·true", [starvedFor({ strictSpend: 1 }, 10000, 50), starvedFor({ strictSpend: 2 }, 10000, 50), starvedFor({ strictSpend: 2 }, 10000, 1), starvedFor({ strictSpend: 1 }, 10000, 600)].join("·"));
+
+    /* --- 75) 자동 인출은 사적연금 과세대상이 문턱(1,500만)을 넘기지 않는다 (넘기면 전액 16.5%·종합과세) --- */
+    reset(); state.cfg.pensionCap = 1500; state.cfg.compRate = 16.5; state.cfg.npsAmount = 0;
+    const ctx75 = { year: 2046, age: 66, eligible: { psFree: true, psDed: true, irpInv: true, irpSev: true }, pLimit: { psFree: 1e9, psDed: 1e9, irpInv: 1e9, irpSev: 1e9 },
+                    pYear: { psFree: 1, psDed: 1, irpInv: 1, irpSev: 1 }, pYearActual: { psFree: 1, psDed: 1, irpInv: 1, irpSev: 1 }, cfg: state.cfg, capDeductLeft: 250, otherComp: 0, openYear: { isa: 2000 } };
+    const run75 = (st, target, strat = "ratio") => { const dr = greedyDraws({ bal: cloneBal(st.bal), isaUsed: 0 }, ctx75, target, strat);
+      const r = applyWithdrawals({ bal: cloneBal(st.bal), isaUsed: 0 }, dr, ctx75); return { dr, r }; };
+    let st75 = blankSt(); st75.bal.psDed.ded = 20000; st75.bal.psFree.free = 100; st75.bal.psFree.gain = 5000; st75.bal.isa.free = 5000; st75.bal.taxable.free = 3000;
+    const a75 = run75(st75, 4000);
+    ok("75. 안세공 연금저축에 과세분이 있어도, ISA·일반계좌에 여유가 있으면 과세대상이 1,500을 넘지 않는다",
+       a75.r.taxablePension <= 1500 + 1e-6 && a75.r.net >= 4000 - 1 && a75.dr.isa > 0 && a75.dr.taxable > 0,
+       "과세대상 ≤ 1,500 · 실수령 ≥ 3,999 · ISA·일반 사용", `과세대상 ${a75.r.taxablePension.toFixed(1)} · 실수령 ${a75.r.net.toFixed(1)} · ISA ${a75.dr.isa} 일반 ${a75.dr.taxable}`);
+    let st75b = blankSt(); st75b.bal.psDed.ded = 20000;
+    const b75 = run75(st75b, 3000);
+    ok("75b. 연금계좌밖에 돈이 없으면 목표를 채우려 문턱을 넘는다 (최후 수단)", b75.r.taxablePension > 1500 && b75.r.net >= 3000 - 1,
+       "과세대상 > 1,500 · 실수령 ≥ 2,999", `과세대상 ${b75.r.taxablePension.toFixed(1)} · 실수령 ${b75.r.net.toFixed(1)}`);
+    // 반올림이 1,500을 1,501로 만들던 경우 (두 연금계좌가 문턱 안을 나눠 가질 때)
+    let st75c = blankSt(); st75c.bal.psDed.ded = 6396; st75c.bal.irpInv.ded = 2129; st75c.bal.taxable.free = 20000;
+    const c75 = run75(st75c, 3765);
+    ok("75c. 반올림·마지막 1만원 채우기가 문턱을 넘기지 않는다 (예전에는 1,501 → 종합과세)",
+       c75.r.taxablePension <= 1500 + 1e-6 && c75.r.net >= 3765 - 1, "과세대상 ≤ 1,500 · 실수령 ≥ 3,764", `과세대상 ${c75.r.taxablePension.toFixed(1)} · 실수령 ${c75.r.net.toFixed(1)}`);
+    // 무작위 잔액에서도 (연금저축 안세공·퇴직 IRP 과세분 포함, ISA·일반 여유 있음)
+    let seed75 = 20261001; const rnd75 = () => (seed75 = (seed75 * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    let bad75 = 0, short75 = 0;
+    for (let i = 0; i < 24; i++) {
+      const st = blankSt();
+      st.bal.psDed.ded = Math.round(500 + rnd75() * 9000); st.bal.irpInv.ded = Math.round(300 + rnd75() * 6000);
+      st.bal.psFree.free = Math.round(rnd75() * 800); st.bal.psFree.gain = Math.round(rnd75() * 4000); st.bal.irpSev.gain = Math.round(rnd75() * 3000);
+      st.bal.isa.free = 8000; st.bal.taxable.free = 20000;
+      const t = 2500 + Math.round(rnd75() * 2500), x = run75(st, t, i % 2 ? "pensionFirst" : "ratio");
+      if (x.r.taxablePension > 1500 + 1e-6) bad75++;
+      if (x.r.net < t - 1.5) short75++;
+    }
+    ok("75d. 무작위 24판(저율구간 + 잔액 비례 · 연금 저율구간 우선): 문턱을 넘은 판 0 · 목표를 못 채운 판 0", bad75 === 0 && short75 === 0,
+       "0 / 0", `${bad75} / ${short75}`);
+    // 반올림 함수 단독: 반올림 전엔 문턱(1,500) 안(합계 1,500.0)인데 계좌별로 반올림하면 1,501이 되는 경우
+    let st75e = blankSt(); st75e.bal.psDed.ded = 20000; st75e.bal.irpInv.ded = 20000;
+    const ev75e = d => applyWithdrawals({ bal: cloneBal(st75e.bal), isaUsed: 0 }, d, ctx75);
+    const d75e = { ...Object.fromEntries(AID.map(id => [id, 0])), psDed: 750.5, irpInv: 749.5 };
+    const pre75e = ev75e(d75e).taxablePension;
+    roundDraws(d75e, ev75e, 1500);
+    const post75e = ev75e(d75e).taxablePension;
+    const d75f = { ...Object.fromEntries(AID.map(id => [id, 0])), psDed: 1600.4, irpInv: 200.4 };
+    roundDraws(d75f, ev75e, 1500);
+    ok("75e. 반올림 함수: 반올림 전 문턱 안이면 반올림 후에도 문턱 안 · 처음부터 문턱 밖이면 그냥 반올림만",
+       Math.abs(pre75e - 1500) < 1e-6 && post75e <= 1500 + 1e-6 && d75f.psDed === 1600 && d75f.irpInv === 200,
+       "반올림 전 1,500 · 후 ≤ 1,500 · 밖이면 1,600·200", `전 ${pre75e.toFixed(1)} · 후 ${post75e.toFixed(1)} · ${d75f.psDed}·${d75f.irpInv}`);
+    reset();
+
+    /* --- 76) 최적 탐색은 '지금 설정'에서 출발한다 / 미미한 개선은 바꾸지 않는다 --- */
+    const optBase = (mod) => { reset(); Object.assign(state.cfg, { retireYear: 2036, endYear: 2050, gameSeed: 3, gameSpend: 3000, npsAmount: 1500, npsAge: 65, gameDeathAge: 65 });
+      state.cfg.reverse = { ...state.cfg.reverse, on: 1, homeValue: 60000, startAge: 60 }; state.cfg.property = { ...(state.cfg.property || {}), on: 0 }; mod(state.cfg);
+      let o; optimize(x => { o = x; }); return o; };
+    const o76a = optBase(c => {}), o76b = optBase(c => { c.reverse.on = 0; }), o76c = optBase(c => { c.wdStrategy = "taxmin"; });
+    const revRow76 = o => o.changes.find(x => x.name === "주택연금"), wdRow76 = o => o.changes.find(x => x.name === "인출 전략");
+    ok("76. 이미 만 60세에 가입해 둔 주택연금은 '가입 안 함'이 아니라 '만 60세 개시'에서 출발한다 (꺼 둔 경우는 '가입 안 함')",
+       revRow76(o76a).from === "만 60세 개시" && revRow76(o76b).from === "가입 안 함" && wdRow76(o76c).from === "그해 세금 최소",
+       "만 60세 개시 · 가입 안 함 · 그해 세금 최소", `${revRow76(o76a).from} · ${revRow76(o76b).from} · ${wdRow76(o76c).from}`);
+    const sc76 = (bust, miss, net) => ({ bust, miss, net, tax: 0 });
+    ok("76b. 점수 비교 — 파산이 줄면 채택, 같으면 미달, 같으면 수령액이 0.5% 넘게 늘어야 채택 (그보다 작은 차이는 잡음)",
+       betterScore(sc76(0, 0, 100000), sc76(0.2, 0, 90000)) && betterScore(sc76(0, 0.01, 100000), sc76(0, 0.05, 100000)) && betterScore(sc76(0, 0, 100600), sc76(0, 0, 100000))
+       && !betterScore(sc76(0, 0, 100300), sc76(0, 0, 100000)) && !betterScore(sc76(0, 0, 100000), sc76(0, 0, 100000)) && betterScore(sc76(0, 0, 1), null),
+       "true·true·true·false·false·true", [betterScore(sc76(0, 0, 100000), sc76(0.2, 0, 90000)), betterScore(sc76(0, 0.01, 100000), sc76(0, 0.05, 100000)), betterScore(sc76(0, 0, 100600), sc76(0, 0, 100000)),
+        betterScore(sc76(0, 0, 100300), sc76(0, 0, 100000)), betterScore(sc76(0, 0, 100000), sc76(0, 0, 100000)), betterScore(sc76(0, 0, 1), null)].join("·"));
 
     /* --- 65) 개시 나이 안내 · 범위 밖 경고 · 최적화 손잡이 --- */
     reset(); state.cfg.npsAmount = 2160; state.cfg.npsAge = 55;
